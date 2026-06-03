@@ -94,3 +94,22 @@ Thumbs.db
 # ── dev-only scripts (kept under test_*.py, this excludes the
 #    diagnostic one-off dumps) ───────────────────────────────
 p10.json
+
+# ── debug JSON dumps (backend-root probes / API snapshots) ───
+# Catch-all for ad-hoc curl-output / sqlite3 dumps. The 真实 source
+# JSON files (if any) live under backend/app/, frontend/, etc.
+backend/t*.json
+backend/task*_*.json
+backend/task*.json
+backend/ch*.json
+backend/ws*.json
+backend/openapi.json
+backend/worker_status.json
+backend/all_tasks.json
+backend/tasks.json
+backend/*_events.json
+backend/*_versions.json
+backend/*_now.json
+backend/*_final.json
+backend/probe*.json
+backend/dump*.json
