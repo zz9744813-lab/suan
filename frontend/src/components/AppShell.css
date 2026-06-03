@@ -3,9 +3,10 @@
    --------------------------------------------------------------------------
    Widths are CSS variables so a single class change
    (.projectnav-compact | .projectnav-hidden | .chief-compact |
-   .chief-hidden) reflows the entire grid. The default (.shell) leaves
+   .chief-hidden) reflows the entire grid. The default app shell leaves
    the spec'd widths in place.
    ========================================================================== */
+.app-shell,
 .shell {
   --rail-width: var(--size-rail, 56px);
   --projectnav-width: 260px;
@@ -13,6 +14,8 @@
   --statusbar-height: var(--size-statusbar, 28px);
 
   display: grid;
+  position: fixed;
+  inset: 0;
   grid-template-columns:
     var(--rail-width)
     var(--projectnav-width)
@@ -27,25 +30,30 @@
   grid-template-areas:
     "rail projectnav main chief"
     "statusbar statusbar statusbar statusbar";
+  width: 100vw;
   height: 100vh;
-  width: 100%;
   min-height: 100vh;
+  overflow: hidden;
   background: var(--bg-base);
   transition: grid-template-columns 0.18s ease;
 }
 
 /* projectnav modes */
+.app-shell.projectnav-compact,
 .shell.projectnav-compact {
   --projectnav-width: 64px;
 }
+.app-shell.projectnav-hidden,
 .shell.projectnav-hidden {
   --projectnav-width: 0px;
 }
 
 /* chief panel modes */
+.app-shell.chief-compact,
 .shell.chief-compact {
   --chief-width: 64px;
 }
+.app-shell.chief-hidden,
 .shell.chief-hidden {
   --chief-width: 0px;
 }
@@ -363,6 +371,7 @@
 }
 
 @media (max-width: 1100px) {
+  .app-shell,
   .shell {
     grid-template-columns: var(--rail-width) 1fr;
     grid-template-areas: "rail main" "statusbar statusbar";

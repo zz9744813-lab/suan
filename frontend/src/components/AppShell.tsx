@@ -56,6 +56,7 @@ export function AppShell({ children }: Props) {
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
   const shellClass = [
+    "app-shell",
     "shell",
     `projectnav-${projectNavMode}`,
     `chief-${chiefMode}`,
