@@ -29,9 +29,6 @@ from app.schemas.task import PIPELINE_STEP_ORDER, STEP_LABELS
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
-
-
 @router.get("", response_model=APIResponse[list[AgentTaskRead]])
 async def list_tasks(
     project_id: int | None = None,
@@ -424,6 +421,22 @@ async def task_diagnosis(
             saw_failure = True
             rail.append(TaskDiagnosisStep(
                 step_name=name, label=label, status="failed",
+                agent_name=s.agent_name,
+                started_at=s.started_at, finished_at=s.finished_at,
+                duration_ms=s.duration_ms, cost_usd=s.cost_usd,
+                error_message=s.error_message,
+            ))
+        elif s.status == "reused":
+            # P15 / P0-RETRY-1: the pipeline kept this step's output
+            # from a previous run (the user clicked "重试" with
+            # from_failed_step / continue_with_fallback). Render it as
+            # a separate "reused" status so the rail shows the truth:
+            # no LLM call was made on this attempt. We still record
+            # ``agent_name`` and timing so the user can click through
+            # to inspect the original output.
+            saw_success_before_failure = True or saw_success_before_failure
+            rail.append(TaskDiagnosisStep(
+                step_name=name, label=label, status="reused",
                 agent_name=s.agent_name,
                 started_at=s.started_at, finished_at=s.finished_at,
                 duration_ms=s.duration_ms, cost_usd=s.cost_usd,

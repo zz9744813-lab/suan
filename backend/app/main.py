@@ -18,6 +18,7 @@ from app.routers import (
     chief_agent,
     discussion,
     events,
+    graph,
     memory,
     models,
     projects,
@@ -96,6 +97,6 @@ async def health() -> dict:
 PREFIX = settings.api_prefix
 for r in (projects.router, chapters.router, tasks.router, prompts.router,
           models.router, worker.router, chief_agent.router, memory.router,
-          events.router, study.router, behavior.router, discussion.router,
-          search.router):
+          events.router, study.router, behavior.router, graph.router,
+          discussion.router, search.router):
     app.include_router(r, prefix=PREFIX)

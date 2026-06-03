@@ -202,6 +202,15 @@ export type ModelProvider = {
   last_health_latency_ms: number | null;
   last_health_model: string | null;
   last_health_at: string | null;
+  // P15 / P0-HEALTH-1: per-test detail + role recommendations.
+  // Single JSON blob so the role matrix can colour-code bindings
+  // without re-running the probe on every page load.
+  last_health_full: {
+    results: ModelHealthCheckItem[];
+    score: number;
+    recommended_roles: Record<string, string>;
+    checked_at: string;
+  } | null;
   extra: Record<string, any> | null;
   created_at: string;
   updated_at: string;
@@ -217,6 +226,28 @@ export type ModelHealthStatus =
   | "auth_failed"
   | "model_missing"
   | "unknown_error";
+
+export type ModelHealthItemName =
+  | "short_chat"
+  | "json_output"
+  | "critic_schema"
+  | "long_text";
+
+export type ModelHealthItemStatus =
+  | "passed"
+  | "failed"
+  | "warning"
+  | "skipped";
+
+// P15 / P0-HEALTH-1: per-test health item.
+export type ModelHealthCheckItem = {
+  name: ModelHealthItemName;
+  status: ModelHealthItemStatus;
+  latency_ms: number;
+  message: string;
+  suggestion?: string | null;
+  raw_preview?: string | null;
+};
 
 export type ModelRoleAssignment = {
   id: number;
@@ -237,15 +268,33 @@ export type ModelProviderTestResult = {
   latency_ms: number;
 };
 
-// P0-MODEL-3: lightweight per-model health probe result.
+// P0-MODEL-7: stateless model-list preview, used by the new/edit
+// Provider form to populate the ``default_model`` dropdown without
+// having to save the row first. Shape mirrors
+// ``ProviderPreviewModelsResponse`` on the backend.
+export type ModelPreviewResult = {
+  ok: boolean;
+  models: string[];
+  message: string;
+  suggestion?: string | null;
+  latency_ms?: number | null;
+};
+
+// P0-MODEL-3 + P15 / P0-HEALTH-1: lightweight per-model health probe
+// result. The top-level fields stay backward-compatible with the
+// R11 ping-only probe; the per-test breakdown lives in ``results``.
 export type ModelHealthCheckResult = {
   ok: boolean;
   status: ModelHealthStatus;
   message: string;
-  suggestion?: string;
+  suggestion?: string | null;
   model: string;
   latency_ms: number;
   checked_at: string;
+  results: ModelHealthCheckItem[];
+  score: number;
+  // role -> "suitable" | "risky (slow: ...)" | "unsuitable (failed: ...)" | "unknown"
+  recommended_roles: Record<string, string>;
 };
 
 export type ChiefAgentMessage = {
@@ -289,7 +338,12 @@ export type AgentEvent = {
 export type TaskDiagnosisStep = {
   step_name: string;
   label: string;
-  status: string;          // succeeded / failed / pending / skipped
+  // P15 / P0-RETRY-1: ``reused`` joins the four existing terminal
+  // states — it means "this step's output was carried over from a
+  // previous run" (the user clicked "重试" with from_failed_step /
+  // continue_with_fallback). The rail renders it as a calm blue
+  // "↺ 复用" stop so the user can tell "ran" from "skipped but kept".
+  status: string;          // succeeded / failed / pending / skipped / reused
   agent_name: string | null;
   started_at: string | null;
   finished_at: string | null;
@@ -389,6 +443,45 @@ export type BehaviorPattern = {
   recommended_plot_followup: string[];
   confidence: number;
   evidence: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+// ----- Round E: Graph (人物关系图谱) -----
+// Nodes and edges are deliberately lightweight — the canvas in the
+// Graph page is fully client-side, so the backend only persists the
+// raw adjacency. Node/edge colours / layout / size are derived on
+// the fly from ``node_kind`` and ``weight``.
+
+export type GraphNodeKind =
+  | "study_character"
+  | "project_character"
+  | "faction"
+  | "location"
+  | "other";
+
+export type GraphNode = {
+  id: number;
+  project_id: number | null;
+  source_material_id: number | null;
+  node_kind: GraphNodeKind;
+  name: string;
+  ref_study_character_id: number | null;
+  ref_character_id: number | null;
+  extra: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GraphEdge = {
+  id: number;
+  project_id: number | null;
+  source_node_id: number;
+  target_node_id: number;
+  relation: string;
+  weight: number;
+  evidence: string | null;
+  extra: Record<string, any> | null;
   created_at: string;
   updated_at: string;
 };

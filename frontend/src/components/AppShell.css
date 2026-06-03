@@ -220,6 +220,17 @@
 }
 .projectnav-group {
   margin-bottom: 4px;
+  /* P15 / Round F: the group container is now a droppable too, so
+   * the user can drop onto an empty group's empty space and have
+   * the project land there. Add a dashed top border that lights up
+   * when something is hovering over us. */
+  border-top: 1px solid transparent;
+  transition: border-color 0.12s, background 0.12s;
+  border-radius: 3px;
+}
+.projectnav-group.drag-over {
+  border-top-color: var(--accent-gold);
+  background: rgba(214, 166, 78, 0.05);
 }
 .projectnav-group-head {
   display: flex;
@@ -356,10 +367,21 @@
   z-index: 50;
 }
 
-/* Page content (the {children} of <main>) takes row 2. */
+/* Page content (the {children} of <main>) takes row 2. The grid
+   ``1fr`` row gives the child a definite height; we then make the
+   child ITSELF the scroll container with overflow-y:auto so the
+   mouse wheel works. ``overflow-x: hidden`` keeps wide tables from
+   causing horizontal jiggle. R15 / P0-SCROLL-1 fix: this used to
+   be ``overflow: hidden`` which silently killed page scrolling
+   because the child had no other way to reach the mouse wheel. */
 .main > *:not(.main-topbar) {
   min-height: 0;
-  overflow: hidden;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Smooth out 1-frame jitter from images / async content
+     reflowing inside the scrollable region. */
+  overscroll-behavior: contain;
 }
 
 /* === StatusBar === */
@@ -464,6 +486,26 @@
   cursor: pointer;
 }
 .chief-cycle-btn:hover { background: rgba(255, 255, 255, 0.06); color: #ffffff; }
+
+/* R12.2 / P0-UI-7b: explicit "完全隐藏" button. Lives next to the
+   existing "▶ 折叠为窄栏" cycle button in the chief header. Distinct
+   hover color (red) so users don't confuse the two — one is reversible
+   (compact), the other pushes the user to the recovery FAB. */
+.chief-hide-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--nav-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+.chief-hide-btn:hover {
+  background: rgba(248, 113, 113, 0.18);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
 
 .chief-messages {
   flex: 1; overflow: auto; padding: 16px;
@@ -611,6 +653,41 @@
 .app-shell.chief-hidden > .chief-panel,
 .shell.chief-hidden > .chief-panel {
   display: none !important;
+}
+
+/* R12.2 / P0-UI-7b: floating recovery FAB. Pinned to the right edge
+   above the status bar so the user always has a way back from the
+   "fully hidden" state (previously they'd lose the panel with no
+   affordance to restore). Sits in front of the main content (z=150)
+   but below the status bar (z=140) and rail (z=120). Hover glows
+   gold so it reads as the same 总 avatar from the compact mode. */
+.chief-recover-fab {
+  position: fixed !important;
+  right: 16px !important;
+  bottom: calc(var(--statusbar-height) + 16px) !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 50% !important;
+  background: var(--grad-primary) !important;
+  color: #ffffff !important;
+  font-family: var(--font-serif) !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+  cursor: pointer !important;
+  z-index: 95 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  transform: none !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+.chief-recover-fab:hover {
+  transform: scale(1.08) !important;
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.45) !important;
 }
 
 .app-shell > .statusbar,

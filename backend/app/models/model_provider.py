@@ -35,6 +35,12 @@ class ModelProvider(Base):
     last_health_latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     last_health_model: Mapped[str | None] = mapped_column(String(120), default=None)
     last_health_at: Mapped[datetime | None] = mapped_column(default=None)
+    # P15 / P0-HEALTH-1: per-test detail + role recommendations.
+    # Stored as a single JSON blob so we don't have to migrate the
+    # schema every time we add a new test. The role-binding matrix
+    # reads ``last_health_recommended_roles`` to colour-code risky
+    # bindings (e.g. Critic bound to a model that failed critic_schema).
+    last_health_full: Mapped[dict | None] = mapped_column(JSON, default=None)
     extra: Mapped[dict | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)

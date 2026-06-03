@@ -33,6 +33,8 @@ const LEARN_ITEMS: Item[] = [
   { to: "/prompts",    label: "Prompt",   icon: "✎" },
   { to: "/models",     label: "模型",     icon: "◈" },
   { to: "/study",      label: "拆书",     icon: "☷" },
+  { to: "/behavior",   label: "行为模式", icon: "✺" },
+  { to: "/graph",      label: "图谱",     icon: "◉" },
   { to: "/discussion", label: "讨论室",   icon: "☕" },
   { to: "/memory",     label: "知识库",   icon: "❖" },
 ];

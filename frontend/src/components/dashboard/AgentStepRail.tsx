@@ -31,6 +31,14 @@ const GLYPHS: Record<string, string> = {
   learning: "✧",
 };
 
+// P15 / P0-RETRY-1: ``reused`` is a 4th terminal status written by
+// ``PipelineResumeService.record_reused_step`` for any pipeline step
+// the retry-mode logic decided to skip. We render it with a small
+// "↺" glyph and the "复用" label so the user can distinguish "this
+// step ran" (succeeded) from "this step's output was carried over
+// from a previous run" (reused).
+const REUSED_GLYPH = "↺";
+
 export function AgentStepRail({ steps, compact, onStepClick }: Props) {
   return (
     <ol className={`agent-rail ${compact ? "agent-rail-compact" : ""}`}>
@@ -47,7 +55,9 @@ export function AgentStepRail({ steps, compact, onStepClick }: Props) {
           ].filter(Boolean).join(" · ")}
         >
           <span className="agent-rail-dot">
-            <span className="agent-rail-glyph">{GLYPHS[s.step_name] ?? "•"}</span>
+            <span className="agent-rail-glyph">
+              {s.status === "reused" ? REUSED_GLYPH : (GLYPHS[s.step_name] ?? "•")}
+            </span>
           </span>
           <span className="agent-rail-text">
             <span className="agent-rail-label">{s.label}</span>
@@ -55,6 +65,7 @@ export function AgentStepRail({ steps, compact, onStepClick }: Props) {
               {s.status === "succeeded" && s.score != null ? `${s.score}分` : statusText(s.status)}
               {s.status === "succeeded" && s.cost_usd > 0 ? ` · $${s.cost_usd.toFixed(3)}` : ""}
               {s.status === "failed" && s.error_message ? ` · 失败` : ""}
+              {s.status === "reused" ? " · 上次结果" : ""}
             </span>
           </span>
           {idx < steps.length - 1 && <span className="agent-rail-connector" />}
@@ -70,6 +81,7 @@ function statusText(s: string): string {
     case "failed": return "失败";
     case "running": return "运行中";
     case "skipped": return "跳过";
+    case "reused": return "复用";
     case "pending": return "等待";
     default: return s;
   }

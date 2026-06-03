@@ -1,31 +1,36 @@
 /**
- * ProjectNav — Round 2 sidebar (P0-UI-2 + P0-UI-3).
+ * ProjectNav — Round 2 sidebar (P0-UI-2 + P0-UI-3) + Round F fix
+ * (P1-2 cross-group drag).
  *
  * Features:
  *   - Groups: 置顶 (pinned) and one bucket per category (defaults to
  *     genre for projects without an explicit category).
  *   - Search: filters projects in-place; the grouping still wraps
  *     around the matches.
- *   - Drag-and-drop: reorders items within and across buckets via
+ *   - Drag-and-drop: reorders items within AND across buckets via
  *     @dnd-kit. A drop sends a single batched PATCH to
  *     /api/projects/reorder.
+ *   - Cross-group drag (Round F): DnD ids are namespaced as
+ *     ``project:{id}`` and ``group:{key}`` so a drop onto a GROUP
+ *     (e.g. an empty group, or a group's header) is distinguishable
+ *     from a drop onto another project. Groups are themselves
+ *     ``useDroppable`` so empty groups are still valid drop targets.
+ *     ``onDragEnd`` re-derives each item's bucket based on its
+ *     final position, not its original position.
  *   - Persisted UI state: collapsed-group set lives in localStorage
  *     so refreshes keep the user's view.
- *   - Compact mode: this component renders only the avatar-strip
- *     variant when ``mode === "compact"``. The expanded list lives
- *     in a sibling component consumed by AppShell.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   DndContext, KeyboardSensor, PointerSensor,
   closestCenter, useSensor, useSensors,
+  useDroppable,
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext, sortableKeyboardCoordinates,
   useSortable, verticalListSortingStrategy,
-  arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useProjectStore } from "../../stores/projectStore";
@@ -41,13 +46,12 @@ type Group = {
   items: Project[];
 };
 
-/**
- * Bucket projects into a flat ordered list of groups. Pinned
- * projects are isolated into their own bucket (always first);
- * non-pinned projects group by category (falling back to genre).
- * Within a bucket, sort_order is the user-controlled order; id
- * is the tiebreaker for items that haven't been touched.
- */
+const PROJECT_ID_PREFIX = "project:";
+const GROUP_ID_PREFIX = "group:";
+
+/** Bucket projects into a flat ordered list of groups. Pinned
+ *  projects are isolated into their own bucket (always first);
+ *  non-pinned projects group by category (falling back to genre). */
 function groupProjects(projects: Project[]): Group[] {
   const pinned: Project[] = [];
   const byCategory = new Map<string, Project[]>();
@@ -64,9 +68,9 @@ function groupProjects(projects: Project[]): Group[] {
   if (pinned.length > 0) {
     groups.push({ key: "pinned", label: "置顶", items: pinned });
   }
-  // Sort categories by their first item's id so the bucket order is
-  // stable until the user reorders. (A future enhancement could
-  // surface a per-bucket sort_order; for now we just alphabetise.)
+  // Alphabetical category order keeps the bucket order stable until
+  // the user reorders. A future enhancement could surface a per-bucket
+  // sort_order; for now we just alphabetise.
   const keys = Array.from(byCategory.keys()).sort((a, b) => a.localeCompare(b, "zh"));
   for (const key of keys) {
     groups.push({ key, label: key, items: byCategory.get(key)! });
@@ -74,7 +78,6 @@ function groupProjects(projects: Project[]): Group[] {
   return groups;
 }
 
-/** Apply a search filter across the flat project list. */
 function filterProjects(projects: Project[], query: string): Project[] {
   if (!query.trim()) return projects;
   const q = query.trim().toLowerCase();
@@ -83,6 +86,21 @@ function filterProjects(projects: Project[], query: string): Project[] {
     (p.genre ?? "").toLowerCase().includes(q) ||
     (p.category ?? "").toLowerCase().includes(q)
   );
+}
+
+/** Parse a DnD id back into its kind + raw key. Returns null on
+ *  unknown format. */
+function parseId(id: string | number): { kind: "project" | "group"; key: number | string } | null {
+  const s = String(id);
+  if (s.startsWith(PROJECT_ID_PREFIX)) {
+    const n = Number(s.slice(PROJECT_ID_PREFIX.length));
+    if (Number.isFinite(n)) return { kind: "project", key: n };
+    return null;
+  }
+  if (s.startsWith(GROUP_ID_PREFIX)) {
+    return { kind: "group", key: s.slice(GROUP_ID_PREFIX.length) };
+  }
+  return null;
 }
 
 export function ProjectNav() {
@@ -111,50 +129,122 @@ export function ProjectNav() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  // P15 / Round F: cross-group drag handler. The previous
+  // implementation used ``arrayMove(flat, ...)`` which moves order
+  // but leaves each item's ``bucket`` field set to the SOURCE bucket.
+  // That meant dropping a project from group A into group B was
+  // persisted as "moved within A" because the rebuilt layout
+  // recomputed each item's bucket from the unchanged source field.
+  // The fix: extract source/target groups + indices, splice the
+  // project from source to target, then derive each item's new
+  // bucket from the resulting layout (NOT from the original
+  // source). This way dropping onto an empty group's drop zone
+  // (id = ``group:{key}``) is also handled — we just append.
   const onDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    // Build a flat list of items in their current visual order so we
-    // can locate the source and target. Items carry ``bucket`` as a
-    // non-DB hint so a drop across buckets also updates ``category``
-    // (and ``pinned`` for the pinned bucket).
-    const flat: Array<{ id: number; bucket: string; pinned: boolean }> = [];
-    for (const g of groups) {
-      for (const p of g.items) flat.push({ id: p.id, bucket: g.key, pinned: g.key === "pinned" });
+    if (!over) return;
+    const activeParsed = parseId(active.id);
+    const overParsed = parseId(over.id);
+    if (!activeParsed || activeParsed.kind !== "project") return;
+    if (!overParsed) return;
+    const sourceId = activeParsed.key as number;
+    // Same-project no-op
+    if (overParsed.kind === "project" && overParsed.key === sourceId) return;
+
+    // 1. Find the source group and the index within it.
+    const sourceGroupIdx = groups.findIndex((g) =>
+      g.items.some((p) => p.id === sourceId),
+    );
+    if (sourceGroupIdx < 0) return;
+    const sourceGroup = groups[sourceGroupIdx];
+    const sourceItem = sourceGroup.items.find((p) => p.id === sourceId)!;
+
+    // 2. Find the target group + index. Three cases:
+    //    a) drop on another project → use that project's group + position
+    //    b) drop on a group drop zone → use that group's end position
+    //    c) drop outside any known target → no-op
+    let targetGroupIdx: number;
+    let targetWithinIdx: number; // 0-based index WITHIN the target group's items
+    if (overParsed.kind === "group") {
+      const groupKey = overParsed.key as string;
+      // The "pinned" group key is a special value. We need to find
+      // the group with matching key OR, if the source was already in
+      // the pinned group, find the pinned group in the rebuilt list.
+      const idx = groups.findIndex((g) => g.key === groupKey);
+      if (idx < 0) return;
+      targetGroupIdx = idx;
+      // Drop at the END of the target group (the user can fine-tune
+      // by dropping on a specific item in the same group).
+      targetWithinIdx = groups[idx].items.length;
+    } else {
+      // over is a project. Find its group.
+      const tgt = overParsed.key as number;
+      const idx = groups.findIndex((g) =>
+        g.items.some((p) => p.id === tgt),
+      );
+      if (idx < 0) return;
+      targetGroupIdx = idx;
+      const withinIdx = groups[idx].items.findIndex((p) => p.id === tgt);
+      targetWithinIdx = withinIdx < 0 ? groups[idx].items.length : withinIdx;
     }
-    const oldIndex = flat.findIndex((f) => f.id === active.id);
-    const newIndex = flat.findIndex((f) => f.id === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const moved = arrayMove(flat, oldIndex, newIndex);
-    // Re-derive sort_order = index*10 (leaves room for inserts).
-    // Pinned bucket → pinned=true, others → pinned=false; for the
-    // pinned bucket we set category to "" so it sorts under "其他"
-    // if the user unpins. Easier: just preserve each project's
-    // original category unless they were dropped INTO the pinned
-    // bucket, in which case we mark pinned=true but keep category.
+
+    // 3. Build the new layout. We deep-clone ``groups`` to avoid
+    //    mutating the memoised array, then splice the moved item.
+    const next: Group[] = groups.map((g) => ({ ...g, items: [...g.items] }));
+    next[sourceGroupIdx].items = next[sourceGroupIdx].items.filter(
+      (p) => p.id !== sourceId,
+    );
+    // If the source and target are the same group, the removal above
+    // shifted the target index left by one. Re-resolve.
+    if (sourceGroupIdx === targetGroupIdx) {
+      if (targetWithinIdx > next[targetGroupIdx].items.length) {
+        targetWithinIdx = next[targetGroupIdx].items.length;
+      }
+    } else {
+      // Different groups: clamp to the target group's current length.
+      if (targetWithinIdx > next[targetGroupIdx].items.length) {
+        targetWithinIdx = next[targetGroupIdx].items.length;
+      }
+    }
+    next[targetGroupIdx].items.splice(targetWithinIdx, 0, sourceItem);
+
+    // 4. Flatten and build the reorder payload. For each project,
+    //    its bucket = the group key it now lives in, NOT the
+    //    original. Pinned bucket → pinned=true, others → pinned=false.
+    //    Category for the pinned bucket is preserved from the
+    //    project (so unpinning puts it back in the right place).
     const byId = new Map(projects.map((p) => [p.id, p]));
-    const items: ProjectReorderItem[] = moved.map((m, idx) => {
-      const orig = byId.get(m.id);
-      // When dragging into the pinned bucket, keep the project's
-      // existing category so unpinning puts it back in the right
-      // group. When dragging OUT of pinned, the bucket becomes the
-      // project's category (fallback to genre).
-      const category = m.bucket === "pinned"
-        ? (orig?.category ?? orig?.genre ?? null)
-        : (m.bucket === orig?.category ? orig?.category : m.bucket);
-      return {
-        project_id: m.id,
-        sort_order: (idx + 1) * 10,
-        category: category ?? null,
-        pinned: m.bucket === "pinned",
-      };
-    });
+    const items: ProjectReorderItem[] = [];
+    let globalIdx = 0;
+    for (const g of next) {
+      for (const p of g.items) {
+        const orig = byId.get(p.id);
+        let category: string | null;
+        let pinned: boolean;
+        if (g.key === "pinned") {
+          pinned = true;
+          // Keep the project's existing category so unpinning
+          // drops it back into the right group.
+          category = orig?.category ?? orig?.genre ?? null;
+        } else {
+          pinned = false;
+          // The new group key IS the new category (or null if the
+          // group key is "" / "__none__"). For now any non-pinned
+          // group key is a real category string.
+          category = g.key;
+        }
+        items.push({
+          project_id: p.id,
+          sort_order: (++globalIdx) * 10,
+          category,
+          pinned,
+        });
+      }
+    }
     try {
       await reorderProjects(items);
-      // Optimistic local re-fetch — the store's refresh is cheap.
       await useProjectStore.getState().refresh();
     } catch (e: any) {
-      // Surface a useful error; the user can retry the drag.
       alert(`排序失败：${e?.message ?? String(e)}`);
     }
   };
@@ -195,31 +285,14 @@ export function ProjectNav() {
         ) : (
           <div className="projectnav-groups">
             {groups.map((g) => (
-              <div key={g.key} className="projectnav-group">
-                <button
-                  className="projectnav-group-head"
-                  onClick={() => toggleGroup(g.key)}
-                  aria-expanded={!collapsed.has(g.key)}
-                >
-                  <span className="projectnav-group-caret">{collapsed.has(g.key) ? "▶" : "▼"}</span>
-                  <span className="projectnav-group-label">{g.label}</span>
-                  <span className="projectnav-group-count">{g.items.length}</span>
-                </button>
-                {!collapsed.has(g.key) && (
-                  <SortableContext items={g.items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-                    <div className="projectnav-list">
-                      {g.items.map((p) => (
-                        <SortableProjectItem
-                          key={p.id}
-                          project={p}
-                          active={p.id === currentProjectId}
-                          onSelect={() => selectProject(p.id)}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                )}
-              </div>
+              <ProjectGroup
+                key={g.key}
+                group={g}
+                currentProjectId={currentProjectId}
+                selectProject={selectProject}
+                collapsed={collapsed.has(g.key)}
+                onToggle={() => toggleGroup(g.key)}
+              />
             ))}
           </div>
         )}
@@ -231,12 +304,70 @@ export function ProjectNav() {
   );
 }
 
-/** One row in the project list — wraps the existing card UI in a
- *  drag handle so the user can grab anywhere on the row. */
+/** A single bucket: a header (collapse toggle + drop zone) and a
+ *  SortableContext of the bucket's items. The whole group is a
+ *  droppable so dropping onto an empty group or the header itself
+ *  still resolves to the right bucket. */
+function ProjectGroup({
+  group, currentProjectId, selectProject, collapsed, onToggle,
+}: {
+  group: Group;
+  currentProjectId: number | null;
+  selectProject: (id: number) => void;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  // useDroppable makes the group container a valid drop target with
+  // id = "group:{key}". We need this because a SortableContext only
+  // knows about its own items, not "the empty space below them" or
+  // "the group header above them".
+  const { setNodeRef, isOver } = useDroppable({ id: `${GROUP_ID_PREFIX}${group.key}` });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`projectnav-group ${isOver ? "drag-over" : ""}`}
+    >
+      <button
+        className="projectnav-group-head"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+      >
+        <span className="projectnav-group-caret">{collapsed ? "▶" : "▼"}</span>
+        <span className="projectnav-group-label">{group.label}</span>
+        <span className="projectnav-group-count">{group.items.length}</span>
+      </button>
+      {!collapsed && (
+        <SortableContext
+          items={group.items.map((i) => `${PROJECT_ID_PREFIX}${i.id}`)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="projectnav-list">
+            {group.items.map((p) => (
+              <SortableProjectItem
+                key={p.id}
+                project={p}
+                active={p.id === currentProjectId}
+                onSelect={() => selectProject(p.id)}
+              />
+            ))}
+            {group.items.length === 0 && (
+              <div className="projectnav-list-empty muted tiny">（空）</div>
+            )}
+          </div>
+        </SortableContext>
+      )}
+    </div>
+  );
+}
+
 function SortableProjectItem({
   project, active, onSelect,
 }: { project: Project; active: boolean; onSelect: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  // Round F: useSortable now keys on the prefixed id so collision
+  // detection in DndContext can match active/over to the same item.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: `${PROJECT_ID_PREFIX}${project.id}`,
+  });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,

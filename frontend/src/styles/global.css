@@ -452,6 +452,25 @@ table tbody tr.clickable { cursor: pointer; }
 }
 .provider-card:hover { border-color: var(--accent-gold-dim); }
 .provider-card.disabled { opacity: 0.7; }
+/* P0-MODEL-10: highlight the Provider card whose edit drawer is
+   open. Uses the gold accent so it pairs with the existing
+   hover style. ``.editing`` wins over ``.disabled`` opacity so
+   the user can always tell which row owns the drawer. */
+.provider-card.editing {
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 1px var(--accent-gold-dim), 0 4px 18px rgba(196, 161, 76, 0.18);
+}
+.provider-card.editing .provider-card-name {
+  color: var(--accent-gold);
+  position: relative;
+  padding-left: 14px;
+}
+.provider-card.editing .provider-card-name::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--accent-gold);
+}
 .provider-card-head {
   display: flex;
   align-items: center;
@@ -538,6 +557,14 @@ table tbody tr.clickable { cursor: pointer; }
   overflow: auto;
 }
 
+/* P0-MODEL-6: success card for create / edit confirmation. Mirrors
+   .error-card's structure but uses a calm green so the user knows
+   the click landed and a new card is in the list below. */
+.success-card {
+  border-color: rgba(120, 199, 122, 0.35);
+  background: rgba(120, 199, 122, 0.06);
+}
+
 .key-edit-block {
   margin-top: 10px;
   padding: 10px 12px;
@@ -555,3 +582,89 @@ button.link {
   font-size: inherit;
 }
 button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
+
+/* P0-MODEL-10: right-side drawer for the edit / create form.
+   Used to render at the bottom of the page (after the role-binding
+   matrix) and the user couldn't see it without scrolling. Now the
+   drawer is fixed on the right, always inside the viewport, with
+   a backdrop that closes on click and an Escape handler in
+   ModelsPage.tsx. */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 18, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  /* Tiny entry animation: backdrop fades in. */
+  animation: drawer-fade-in 0.14s ease-out;
+}
+@keyframes drawer-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.drawer {
+  width: min(520px, 100vw);
+  max-width: 100vw;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg-base);
+  border-left: 1px solid var(--accent-line);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  /* Slide in from the right. */
+  animation: drawer-slide-in 0.18s ease-out;
+}
+@keyframes drawer-slide-in {
+  from { transform: translateX(40px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+/* The form is wrapped in a ``.card`` to keep the visual style
+   consistent with the rest of the app, but the drawer's own
+   padding replaces the card's default margins. */
+.drawer-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 18px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--accent-line-soft);
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-base);
+  z-index: 1;
+}
+.drawer-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.drawer-close:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--accent-line);
+}
+/* Small viewports: full-screen sheet instead of side drawer. */
+@media (max-width: 640px) {
+  .drawer { width: 100vw; border-left: 0; }
+}

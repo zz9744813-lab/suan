@@ -168,3 +168,94 @@ class BehaviorPattern(Base):
     evidence: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+# ============================================================
+# Round E (P1-1) — 人物关系图谱
+# ============================================================
+# A real knowledge graph: nodes are characters (linked to either a
+# project_id or a study material), edges are typed relations
+# (师父/对手/恋人/... — the user picks). This is the back-end of
+# the new `/graph` page; the writing pipeline (Planner / Drafter) can
+# later consume the graph for "what does this character already know
+# about X" reasoning.
+#
+# The data model is intentionally generic: ``node_kind`` can be
+# ``study_character`` (extracted by StudyCharacterAgent), ``project_character``
+# (the project's own character roster — see memory.py), or
+# ``faction`` / ``location`` for non-person entities. The UI renders
+# all kinds in the same canvas with different colours.
+
+class GraphNode(Base):
+    """A node in the character/relation graph.
+
+    For ``node_kind='study_character'`` the ``ref_study_character_id`` is
+    set; for ``node_kind='project_character'`` the ``ref_character_id``
+    (from ``MemoryCharacter``) is set. The two ``ref_*_id`` columns are
+    nullable so we can also add hand-authored nodes that aren't linked
+    to a project or study.
+    """
+
+    __tablename__ = "graph_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # project scoping — a node belongs to a project OR is global (None).
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True, default=None
+    )
+    # Optional: a study material the node originated from. The graph page
+    # uses this to surface "this character was extracted from 拆书《xxx》"
+    # in the node tooltip.
+    source_material_id: Mapped[int | None] = mapped_column(
+        ForeignKey("study_materials.id", ondelete="SET NULL"), default=None
+    )
+    node_kind: Mapped[str] = mapped_column(String(40), default="study_character")
+    # ``study_character`` | ``project_character`` | ``faction`` | ``location`` | ``other``
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    # Optional cross-references: at most ONE of these is populated per row.
+    ref_study_character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("study_characters.id", ondelete="SET NULL"), default=None
+    )
+    ref_character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("memory_characters.id", ondelete="SET NULL"), default=None
+    )
+    # Misc profile bag — same shape as StudyCharacter.base_profile, but
+    # the user can hand-edit. Stored as JSON for forward-compat.
+    extra: Mapped[dict | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+class GraphEdge(Base):
+    """A directed typed relation between two ``GraphNode`` rows.
+
+    ``relation`` is a free-form string ("师父", "对手", "暗恋", ...). The
+    graph page groups edges by relation in a sidebar so the user can
+    toggle whole relationship families on/off.
+
+    ``weight`` is a 0..1 confidence / strength score the LLM (or the
+    user) assigns. The visualisation uses it for stroke thickness.
+    """
+
+    __tablename__ = "graph_edges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True, default=None
+    )
+    source_node_id: Mapped[int] = mapped_column(
+        ForeignKey("graph_nodes.id", ondelete="CASCADE"), index=True,
+    )
+    target_node_id: Mapped[int] = mapped_column(
+        ForeignKey("graph_nodes.id", ondelete="CASCADE"), index=True,
+    )
+    relation: Mapped[str] = mapped_column(String(60), index=True)
+    weight: Mapped[float] = mapped_column(Float, default=0.5)
+    # Optional short evidence quote backing the edge.
+    evidence: Mapped[str | None] = mapped_column(Text, default=None)
+    extra: Mapped[dict | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+    source_node: Mapped["GraphNode"] = relationship(foreign_keys=[source_node_id])
+    target_node: Mapped["GraphNode"] = relationship(foreign_keys=[target_node_id])

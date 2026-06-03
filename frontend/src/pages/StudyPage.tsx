@@ -16,9 +16,12 @@
  *   └────────────────────────────────────────────────────┘
  *
  * The Study MVP uses a deterministic regex-based stub for
- * character extraction (P1-3 limitation: the prompt library ships
- * study_character but the route is wired for swap-in once a model
- * picker is in place).
+ * character extraction as a LAST-DITCH fallback. The primary path
+ * is now (P15 / P0-STUDY-1) the real ``StudyCharacterAgent`` LLM
+ * call — same router, same model-role bindings, same prompt engine
+ * and prompt versioning as the chapter pipeline. The agent has
+ * ``allow_json_fallback=True`` so a model hiccup degrades to the
+ * stub instead of failing the whole request.
  */
 import { useEffect, useMemo, useState } from "react";
 import {

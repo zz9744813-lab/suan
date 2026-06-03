@@ -56,6 +56,10 @@ class ModelProviderRead(BaseModel):
     last_health_latency_ms: int | None = None
     last_health_model: str | None = None
     last_health_at: datetime | None = None
+    # P15 / P0-HEALTH-1: per-test detail + role recommendations
+    # (single JSON blob so the role matrix can colour-code bindings
+    # without re-running the probe on every page load).
+    last_health_full: dict[str, Any] | None = None
     extra: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
@@ -84,6 +88,8 @@ class ModelProviderRead(BaseModel):
             last_health_latency_ms=obj.last_health_latency_ms,
             last_health_model=obj.last_health_model,
             last_health_at=obj.last_health_at,
+            # P15 / P0-HEALTH-1: pass through the per-test detail.
+            last_health_full=obj.last_health_full,
             extra=obj.extra,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
@@ -105,8 +111,8 @@ class ModelProviderTestResult(BaseModel):
 # (``unreachable`` / ``auth_failed`` / ``model_missing``) so the
 # dashboard never shows a red bar for a slow-but-healthy provider.
 HealthStatus = Literal[
-    "healthy",        # replied within 5s
-    "degraded",       # replied but > 5s
+    "healthy",        # all probed tests passed
+    "degraded",       # some tests passed, some failed / warned
     "unreachable",    # TCP / DNS / HTTP 5xx
     "auth_failed",    # 401 / 403
     "model_missing",  # 404 on the model id
@@ -114,7 +120,56 @@ HealthStatus = Literal[
 ]
 
 
+# P15 / P0-HEALTH-1: per-test health item. The probe runs N tests
+# (short_chat, json_output, critic_schema, long_text) and reports each
+# independently. The top-level ``status`` is derived from the items
+# below so the UI can drill in.
+HealthCheckItemName = Literal[
+    "short_chat",     # can the model reply to a 1-token ping? (ping)
+    "json_output",    # does the model output strict JSON without markdown?
+    "critic_schema",  # does the model return the Critic JSON schema?
+    "long_text",      # can the model output ≥ 1000 chars of Chinese prose?
+]
+
+HealthCheckItemStatus = Literal[
+    "passed",
+    "failed",
+    "warning",
+    "skipped",
+]
+
+
+class ModelHealthCheckItem(BaseModel):
+    """One probe in a multi-test health check.
+
+    P15 / P0-HEALTH-1: each item carries its own latency so the UI can
+    show the slow-but-passed cases in a different colour from
+    fast-and-passed. ``raw_preview`` is a truncated view of the raw
+    model output for the items that need a human to look (critic
+    schema failures, JSON wrapped in markdown, ...).
+    """
+    name: HealthCheckItemName
+    status: HealthCheckItemStatus
+    latency_ms: int
+    message: str
+    suggestion: str | None = None
+    raw_preview: str | None = None
+
+
 class ModelHealthCheckResult(BaseModel):
+    """Aggregate health check result.
+
+    Backward-compatible with R11 (the original ping-only probe):
+    ``status`` / ``message`` / ``suggestion`` / ``latency_ms`` keep
+    their old semantics so the role-matrix "健康" cell keeps working
+    without code changes there. The new fields are:
+      - ``results``: per-test breakdown
+      - ``score``: 0..100 (weighted average of test pass rates)
+      - ``recommended_roles``: roles the model is suitable for, given
+        its test results (e.g. a model that passed critic_schema is
+        eligible for the ``Critic`` role; one that passed long_text
+        is eligible for ``Draft`` / ``Rewrite``).
+    """
     ok: bool
     status: HealthStatus
     message: str
@@ -122,6 +177,11 @@ class ModelHealthCheckResult(BaseModel):
     model: str
     latency_ms: int
     checked_at: datetime
+    # P15 / P0-HEALTH-1: per-test detail.
+    results: list[ModelHealthCheckItem] = Field(default_factory=list)
+    score: int = 0
+    # role -> list of "suitable" | "risky" | "unsuitable" reasons.
+    recommended_roles: dict[str, str] = Field(default_factory=dict)
 
 
 class ModelRoleAssignmentRead(BaseModel):
@@ -161,3 +221,24 @@ class ModelProviderUpdate(BaseModel):
     default_model: str = ""
     enabled: bool = True
     extra: dict | None = None
+
+
+# P0-MODEL-7: lightweight 「试拉一下」 endpoint. The user is filling in
+# the new-Provider form and wants a dropdown of models the provider
+# exposes — but they haven't saved the row yet, so we can't reuse the
+# /test endpoint (which needs a provider_id). This endpoint takes the
+# raw base_url + api_key from the form, calls
+# ``LLMClient.list_models`` directly, and returns the list. We
+# deliberately do NOT touch the database: it's a stateless preview.
+class ProviderPreviewModelsRequest(BaseModel):
+    base_url: str = Field(..., min_length=1)
+    api_key: str = ""  # mock:// URLs don't need a real key; some
+    # providers (e.g. local llama.cpp) also allow empty keys.
+
+
+class ProviderPreviewModelsResponse(BaseModel):
+    ok: bool
+    models: list[str] = Field(default_factory=list)
+    message: str = ""
+    suggestion: str | None = None
+    latency_ms: int | None = None

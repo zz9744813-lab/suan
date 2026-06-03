@@ -93,6 +93,25 @@
 .agent-rail-step.status-skipped .agent-rail-label { color: var(--text-faint); }
 .agent-rail-step.status-skipped .agent-rail-meta { color: var(--text-faint); }
 
+/* P15 / P0-RETRY-1: reused = output carried over from a previous
+ * run (e.g. when the user retries with retry_mode=from_failed_step).
+ * Visually distinct from "succeeded" (fresh LLM call) by being a
+ * calm blue rather than green, with a "↺" glyph and a dashed border
+ * to suggest "no LLM call was made here". */
+.agent-rail-step.status-reused .agent-rail-dot {
+  background: rgba(110, 158, 207, 0.18);
+  border-color: rgba(110, 158, 207, 0.55);
+  border-style: dashed;
+  color: #6e9ecf;
+}
+.agent-rail-step.status-reused .agent-rail-label { color: #6e9ecf; }
+.agent-rail-step.status-reused .agent-rail-meta { color: #6e9ecf; }
+.agent-rail-step.status-reused .agent-rail-connector {
+  background: rgba(110, 158, 207, 0.5);
+  border-top: 1px dashed rgba(110, 158, 207, 0.5);
+  height: 0;
+}
+
 .agent-rail-step.status-pending .agent-rail-dot {
   background: var(--bg-elevated);
   color: var(--text-faint);

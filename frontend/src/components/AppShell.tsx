@@ -36,16 +36,18 @@ export function AppShell({ children }: Props) {
 
   const projectNavMode = useLayoutStore((s) => s.projectNavMode);
   const chiefPanelMode = useLayoutStore((s) => s.chiefPanelMode);
+  const setChiefPanelMode = useLayoutStore((s) => s.setChiefPanelMode);
   const cycleProjectNav = useLayoutStore((s) => s.cycleProjectNav);
   const cycleChiefPanel = useLayoutStore((s) => s.cycleChiefPanel);
 
   const location = useLocation();
-  const chiefIsForced = !location.pathname.startsWith("/dashboard")
-    && !location.pathname.startsWith("/projects");
-  // The chief panel is route-gated: on /tasks, /worker, /models,
-  // /prompts, /study we hide it entirely. On /dashboard and /projects
-  // it follows the user's mode choice.
-  const chiefMode = chiefIsForced ? "hidden" : chiefPanelMode;
+  // R15 / P0-CHIEF-1: ChiefAgent is now globally available on every
+  // route. The user's panel mode (expanded / compact / hidden) is
+  // respected everywhere; we no longer force-hide it on /tasks,
+  // /worker, /models, /prompts, /study, /memory, /discussion. The
+  // panel receives `pageContext` so its quick-commands can change
+  // based on the current page.
+  const chiefMode = chiefPanelMode;
 
   useEffect(() => { refreshProjects(); }, [refreshProjects]);
   useEffect(() => { startWorkerPolling(); }, [startWorkerPolling]);
@@ -134,8 +136,25 @@ export function AppShell({ children }: Props) {
         <ChiefAgentPanel
           projectId={currentProjectId}
           mode={chiefMode}
+          pageContext={location.pathname}
           onCycle={cycleChiefPanel}
+          onHide={() => setChiefPanelMode("hidden")}
         />
+      )}
+
+      {/* R12.2 / P0-UI-7b: floating recovery button shown only when the
+          chief panel is fully hidden (and we're on a route where it
+          would normally be visible). Mirrors the rail-recover pattern
+          already used for projectnav. */}
+      {chiefMode === "hidden" && (
+        <button
+          className="chief-recover-fab"
+          onClick={() => setChiefPanelMode("expanded")}
+          title="恢复总编面板"
+          aria-label="恢复总编面板"
+        >
+          总
+        </button>
       )}
 
       <BottomStatusBar />

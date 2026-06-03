@@ -184,5 +184,84 @@ class BehaviorPatternUpdate(BaseModel):
     evidence: list[str] | None = None
 
 
+# ============================================================
+# Round E (P1-1) — 人物关系图谱 GraphNode / GraphEdge
+# ============================================================
+
+class GraphNodeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int | None
+    source_material_id: int | None
+    node_kind: str
+    name: str
+    ref_study_character_id: int | None
+    ref_character_id: int | None
+    extra: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class GraphNodeCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    node_kind: Literal[
+        "study_character", "project_character", "faction", "location", "other"
+    ] = "study_character"
+    project_id: int | None = None
+    source_material_id: int | None = None
+    ref_study_character_id: int | None = None
+    ref_character_id: int | None = None
+    extra: dict[str, Any] | None = None
+
+
+class GraphNodeUpdate(BaseModel):
+    name: str | None = None
+    node_kind: Literal[
+        "study_character", "project_character", "faction", "location", "other"
+    ] | None = None
+    extra: dict[str, Any] | None = None
+
+
+class GraphEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int | None
+    source_node_id: int
+    target_node_id: int
+    relation: str
+    weight: float
+    evidence: str | None
+    extra: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class GraphEdgeCreate(BaseModel):
+    source_node_id: int
+    target_node_id: int
+    relation: str = Field(..., min_length=1, max_length=60)
+    weight: float = 0.5
+    project_id: int | None = None
+    evidence: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+class GraphEdgeUpdate(BaseModel):
+    relation: str | None = None
+    weight: float | None = None
+    evidence: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+# Convenience: the graph page wants a single ``/api/graph`` payload
+# with the full adjacency list, not separate node/edge round-trips.
+class GraphBundle(BaseModel):
+    """One project's full graph (nodes + edges) for the canvas."""
+    nodes: list[GraphNodeRead] = Field(default_factory=list)
+    edges: list[GraphEdgeRead] = Field(default_factory=list)
+
+
 # Resolve the forward references in StudyMaterialDetail.
 StudyMaterialDetail.model_rebuild()

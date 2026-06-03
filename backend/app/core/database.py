@@ -87,6 +87,10 @@ async def init_db() -> None:
         ("model_providers", "last_health_latency_ms", "INTEGER"),
         ("model_providers", "last_health_model", "VARCHAR(120)"),
         ("model_providers", "last_health_at", "DATETIME"),
+        # P15 / P0-HEALTH-1: per-test breakdown + role recommendations.
+        # Single JSON blob so the role-binding matrix can colour-code
+        # risky bindings without us re-running the probe on every load.
+        ("model_providers", "last_health_full", "JSON"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

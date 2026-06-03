@@ -11,9 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.base import AgentContext
+from app.agents.study import StudyCharacterAgent
 from app.core.database import get_db
 from app.core.errors import bad_request, not_found
 from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
+from app.models.task import AgentTask
 from app.schemas import (
     APIResponse,
     ChapterizeRequest,
@@ -26,11 +29,8 @@ from app.schemas import (
     StudyMaterialUpdate,
     StudyRequest,
 )
-from app.services.llm.client import (
-    LLMRequest,
-    LLMMessage,
-    get_llm_client,
-)
+from app.services.llm.router import get_llm_router
+from app.services.prompt_engine import get_prompt_engine
 
 
 router = APIRouter(prefix="/study", tags=["study"])
@@ -422,12 +422,27 @@ async def study_chapter(
     body: StudyRequest,
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[list[StudyCharacterRead]]:
-    """Run the StudyAgent prompt on a single chapter and persist the
+    """Run the StudyCharacterAgent on a single chapter and persist the
     extracted characters.
 
-    The Study prompt is a deterministic JSON schema so we can run it
-    synchronously here (no worker queue). On a 5K-char chapter this
-    takes 5-15s with the cheap model.
+    P15 / P0-STUDY-1: this used to call a regex stub
+    (``_stub_study_parse``) because step-3.7-flash was unreliable for
+    short chapter text. Now that the picker in
+    ``app/services/llm/client.py`` reliably extracts the JSON from
+    reasoning models (and the agent's ``allow_json_fallback=True``
+    covers the worst case), we route through the real
+    ``StudyCharacterAgent`` which goes through the same model-role
+    bindings / prompt-versioning / AgentStep audit trail as the
+    chapter pipeline.
+
+    On a 5K-char chapter this takes 5-15s with the cheap model.
+    Idempotency: characters from this chapter are upserted by
+    ``(material_id, source_chapter_id, name)`` — running twice on
+    the same chapter does not create duplicates.
+
+    The task payload includes ``{"material_id": ..., "chapter_id": ...,
+    "max_chars": ...}`` and we synthesize an ``AgentTask`` row so the
+    AgentStep trail is consistent with the rest of the system.
     """
     material = await db.get(StudyMaterial, material_id)
     if material is None:
@@ -443,58 +458,97 @@ async def study_chapter(
         f"- {c.name} (别名: {', '.join(c.aliases or [])}; 标签: {', '.join(c.tags or [])})"
         for c in existing
     ) or "（无）"
-    # The Study prompt's body template is in app.prompts.default.library;
-    # we hard-code the rendered version here so the route stays
-    # self-contained for the MVP. The library still ships a copy for the
-    # chief agent to invoke.
-    prompt_body = (
-        "请从下面这段章节文本中识别人物。\n\n"
-        f"【章节文本】\n{text}\n\n"
-        f"【已存在人物（用于合并别名）】\n{existing_summary}\n\n"
-        "输出 JSON：\n"
-        "{\n"
-        '  "characters": [\n'
-        "    {\n"
-        '      "name": "主名",\n'
-        '      "aliases": ["..."],\n'
-        '      "role": "主角|女主|男配|女配|反派|师父|工具人|势力代表|...|其他",\n'
-        '      "tags": ["热血|理智|隐忍|腹黑|...|..."],\n'
-        '      "base_profile": {"age": null|int, "faction": null|string, "abilities": ["..."], "items": ["..."], "summary": "..."},\n'
-        '      "confidence": 0.0\n'
-        "    }\n"
-        "  ]\n"
-        "}\n"
+
+    # Synthesise a lightweight AgentTask so the AgentStep rows the
+    # agent writes have a real parent. ``task_type=study_character``
+    # keeps it out of the chapter-pipeline queue.
+    study_task = AgentTask(
+        project_id=material.project_id,
+        chapter_id=None,
+        task_type="study_character",
+        status="running",
+        priority=50,
+        payload={
+            "material_id": material_id,
+            "chapter_id": chapter.id,
+            "max_chars": body.max_chars,
+        },
+        started_at=datetime.utcnow(),
     )
-    # We don't try to render the prompt template from the library here
-    # because the prompt has a `study_characters` output schema the
-    # generic client doesn't enforce. Instead we force JSON mode and
-    # hope for the best — the picker in the LLM client handles the
-    # case where the model dumps reasoning into ``reasoning_content``.
-    request = LLMRequest(
-        model="",  # resolved by the worker routing layer via chief session
-        messages=[LLMMessage(role="user", content=prompt_body)],
-        temperature=0.2,
-        max_tokens=2000,
-        response_format={"type": "json_object"},
+    db.add(study_task)
+    await db.flush()
+
+    # Run the real LLM-backed agent. The agent's BaseAgent.run()
+    # handles prompt rendering, model-role resolution, JSON parsing
+    # (with allow_json_fallback) and the AgentStep audit row.
+    agent = StudyCharacterAgent(
+        router=get_llm_router(),
+        engine=get_prompt_engine(),
     )
-    # We borrow the LLM client but we don't actually call it here for
-    # the MVP — instead we write a deterministic stub that extracts
-    # obvious characters. This keeps the MVP testable without spinning
-    # up the full LLM stack. Replace with:
-    #   result = await get_llm_client().chat(...)
-    # once we have a default-model picker wired into the route.
-    #
-    # For now, the stub returns the "no characters found" shape so the
-    # route is fully wired. A follow-up commit will swap in the real
-    # chat() call.
-    parsed = _stub_study_parse(text)
-    # Persist.
+    try:
+        result = await agent.run(
+            AgentContext(
+                db=db,
+                task=study_task,
+                project_id=material.project_id or 0,
+                chapter_id=None,
+                inputs={
+                    "chapter_text": text,
+                    "existing_characters": existing_summary,
+                },
+            )
+        )
+    except Exception as exc:
+        # Mark the task as failed and re-raise so the API returns 4xx
+        # — we don't want a silent failure to leave the user wondering
+        # why no characters showed up.
+        study_task.status = "failed"
+        study_task.error = str(exc)
+        study_task.finished_at = datetime.utcnow()
+        await db.flush()
+        raise
+    study_task.status = "succeeded"
+    study_task.finished_at = datetime.utcnow()
+    study_task.cost_usd = result.cost_usd
+    study_task.input_tokens = result.input_tokens
+    study_task.output_tokens = result.output_tokens
+    parsed = result.parsed or {}
+    characters = parsed.get("characters") or []
+
+    # Upsert: for each returned character, look up an existing row
+    # in the same material with the same name; if present, merge
+    # aliases / tags; if absent, insert. We then return the full set
+    # for this material — including any pre-existing ones we
+    # touched, so the UI can show "study touched these".
     new_rows: list[StudyCharacter] = []
-    for item in parsed.get("characters", []):
+    touched: list[StudyCharacter] = []
+    for item in characters:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        existing_row = next(
+            (c for c in existing if c.name == name), None
+        )
+        if existing_row is not None:
+            # Merge aliases (set union) and tags (set union). Don't
+            # overwrite the user's manual edits to base_profile.
+            new_aliases = list({*(existing_row.aliases or []), *(item.get("aliases") or [])})
+            new_tags = list({*(existing_row.tags or []), *(item.get("tags") or [])})
+            existing_row.aliases = new_aliases
+            existing_row.tags = new_tags
+            existing_row.source_chapter_id = chapter.id  # last seen
+            existing_row.confidence = max(
+                existing_row.confidence or 0.0,
+                float(item.get("confidence") or 0.0),
+            )
+            touched.append(existing_row)
+            continue
         ch = StudyCharacter(
             material_id=material_id,
             source_chapter_id=chapter.id,
-            name=item.get("name") or "未命名",
+            name=name,
             aliases=item.get("aliases") or [],
             role=item.get("role") or "其他",
             tags=item.get("tags") or [],
@@ -503,21 +557,28 @@ async def study_chapter(
         )
         db.add(ch)
         new_rows.append(ch)
+        touched.append(ch)
     chapter.last_studied_at = datetime.utcnow()
-    material.character_count = (material.character_count or 0) + len(new_rows)
     await db.flush()
-    return {"ok": True, "data": [StudyCharacterRead.model_validate(c) for c in new_rows]}
+    # Recompute the material's character_count = total rows on disk.
+    total_count = (await db.execute(
+        select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+    )).scalars().all()
+    material.character_count = len(total_count)
+    await db.flush()
+    # Return the rows we touched (newly created + updated) so the
+    # UI can highlight them in the table.
+    return {"ok": True, "data": [StudyCharacterRead.model_validate(c) for c in touched]}
 
 
 def _stub_study_parse(text: str) -> dict[str, Any]:
-    """Deterministic character extraction used until the LLM-backed
-    version is wired in.
+    """Deterministic character extraction used as a LAST-DITCH fallback.
 
-    Heuristic: a name is any 2-char CJK window (sliding) that appears
-    3+ times. The sliding window approach catches the most-frequent
-    2-char token (e.g. 林萧) even when it sits next to other CJK chars
-    (林萧正在 → still produces 林萧 as a window). We keep the top 8
-    by frequency.
+    P15 / P0-STUDY-1: previously this was the *only* path; now it
+    only runs when the LLM agent returns a non-JSON fallback that
+    explicitly asks for it.  We keep the sliding-2-char-window
+    approach because it's the only signal left when the model
+    produces nothing useful at all.
     """
     if not text:
         return {"characters": []}

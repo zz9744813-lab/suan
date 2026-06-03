@@ -13,10 +13,13 @@ import type {
   ChiefAgentSession,
   DiscussionParticipantKey,
   DiscussionSession,
+  GraphEdge,
+  GraphNode,
   MemoryCharacter,
   MemoryForeshadow,
   MemoryHardFact,
   ModelHealthCheckResult,
+  ModelPreviewResult,
   ModelProvider,
   ModelProviderTestResult,
   ModelRoleAssignment,
@@ -171,13 +174,30 @@ export const updateProvider = (id: number, body: Partial<ModelProvider>) =>
 export const deleteProvider = (id: number) =>
   api.delete<{ deleted: number }>(`/api/models/providers/${id}`);
 export const testProvider = (id: number) =>
-  api.post<ModelProviderTestResult>(`/api/models/providers/${id}/test`);
+  api.post<ModelProviderTestResult>(`/api/models/providers/${id}/test`, undefined, 25_000);
+// P0-MODEL-7: stateless model-list preview. Called from the new/edit
+// Provider form so the user can pick ``default_model`` from a
+// dropdown without first saving the row. Returns the list of model
+// ids the provider exposes via /v1/models. 25s is plenty — the
+// backend caps the read timeout at 15s for this call.
+export const previewProviderModels = (baseUrl: string, apiKey: string) =>
+  api.post<ModelPreviewResult>(
+    "/api/models/providers/preview-models",
+    { base_url: baseUrl, api_key: apiKey },
+    25_000,
+  );
 // P0-MODEL-3: lightweight per-model health probe. The optional
 // ``model`` query param targets a specific model id; omit it to test
-// the provider's default model.
+// the provider's default model. The backend runs FOUR probes in
+// sequence (the ``long_text`` probe can take ~30s on slow providers)
+// so we give the frontend 120s headroom before the AbortController
+// fires.
+export const HEALTH_CHECK_TIMEOUT_MS = 120_000;
 export const healthCheckProvider = (id: number, model?: string) =>
   api.post<ModelHealthCheckResult>(
     `/api/models/providers/${id}/health-check` + (model ? `?model=${encodeURIComponent(model)}` : ""),
+    undefined,
+    HEALTH_CHECK_TIMEOUT_MS,
   );
 
 export const listRoles = () =>
@@ -282,6 +302,37 @@ export const updateBehaviorPattern = (id: number, body: Partial<BehaviorPattern>
   api.patch<BehaviorPattern>(`/api/behavior/patterns/${id}`, body);
 export const deleteBehaviorPattern = (id: number) =>
   api.delete<{ deleted: number }>(`/api/behavior/patterns/${id}`);
+
+// ----- Round E: Graph (人物关系图谱) -----
+export const getGraph = (projectId: number) =>
+  api.get<{ nodes: GraphNode[]; edges: GraphEdge[] }>(`/api/graph/${projectId}`);
+export const createGraphNode = (projectId: number, body: {
+  name: string;
+  node_kind?: "study_character" | "project_character" | "faction" | "location" | "other";
+  source_material_id?: number | null;
+  ref_study_character_id?: number | null;
+  ref_character_id?: number | null;
+  extra?: Record<string, any> | null;
+}) => api.post<GraphNode>(`/api/graph/${projectId}/nodes`, body);
+export const updateGraphNode = (projectId: number, nodeId: number, body: Partial<GraphNode>) =>
+  api.patch<GraphNode>(`/api/graph/${projectId}/nodes/${nodeId}`, body);
+export const deleteGraphNode = (projectId: number, nodeId: number) =>
+  api.delete<{ deleted: number }>(`/api/graph/${projectId}/nodes/${nodeId}`);
+export const createGraphEdge = (projectId: number, body: {
+  source_node_id: number;
+  target_node_id: number;
+  relation: string;
+  weight?: number;
+  evidence?: string | null;
+}) => api.post<GraphEdge>(`/api/graph/${projectId}/edges`, body);
+export const updateGraphEdge = (projectId: number, edgeId: number, body: Partial<GraphEdge>) =>
+  api.patch<GraphEdge>(`/api/graph/${projectId}/edges/${edgeId}`, body);
+export const deleteGraphEdge = (projectId: number, edgeId: number) =>
+  api.delete<{ deleted: number }>(`/api/graph/${projectId}/edges/${edgeId}`);
+export const materialiseFromStudy = (projectId: number, materialId: number) =>
+  api.post<{ nodes: GraphNode[]; edges: GraphEdge[] }>(
+    `/api/graph/${projectId}/materialise_from_study/${materialId}`,
+  );
 
 // ----- Discussion Room -----
 export const runDiscussion = (body: {
