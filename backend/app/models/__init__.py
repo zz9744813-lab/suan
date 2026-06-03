@@ -21,6 +21,7 @@ from app.models.memory import (
     MemoryHardFact,
 )
 from app.models.chief_agent import ChiefAgentMessage, ChiefAgentSession
+from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
 
 __all__ = [
     "Project",
@@ -43,4 +44,8 @@ __all__ = [
     "MemoryHardFact",
     "ChiefAgentSession",
     "ChiefAgentMessage",
+    "StudyMaterial",
+    "StudyChapter",
+    "StudyCharacter",
+    "BehaviorPattern",
 ]

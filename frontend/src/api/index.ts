@@ -5,6 +5,7 @@ import type {
   AgentEvent,
   AgentStep,
   AgentTask,
+  BehaviorPattern,
   Bible,
   Chapter,
   ChapterVersion,
@@ -18,6 +19,10 @@ import type {
   Project,
   PromptTemplate,
   PromptVersion,
+  StudyCharacter,
+  StudyMaterial,
+  StudyMaterialDetail,
+  StudyChapter,
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
@@ -194,3 +199,80 @@ export const chiefChat = (body: {
 }) => api.post<ChiefAgentMessage>("/api/chief-agent/chat", body);
 export const confirmChiefAction = (actionId: string, body: any) =>
   api.post<any>(`/api/chief-agent/actions/${actionId}/confirm`, body);
+
+// ----- Round 5: study (拆书) -----
+export const listStudyMaterials = (projectId?: number) => {
+  const q = projectId ? `?project_id=${projectId}` : "";
+  return api.get<StudyMaterial[]>(`/api/study/materials${q}`);
+};
+export const createStudyMaterial = (body: {
+  title: string;
+  author?: string;
+  source?: "paste" | "upload" | "url";
+  project_id?: number;
+  raw_text?: string;
+}) => api.post<StudyMaterial>("/api/study/materials", body);
+export const getStudyMaterial = (id: number, includeText = false) =>
+  api.get<StudyMaterialDetail>(`/api/study/materials/${id}?include_text=${includeText ? 1 : 0}`);
+export const updateStudyMaterial = (id: number, body: Partial<StudyMaterial>) =>
+  api.patch<StudyMaterial>(`/api/study/materials/${id}`, body);
+export const deleteStudyMaterial = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/study/materials/${id}`);
+export const chapterizeStudyMaterial = (id: number, body: { min_chapter_chars?: number; pattern?: "auto" | "chinese" | "english" } = {}) =>
+  api.post<StudyMaterialDetail>(`/api/study/materials/${id}/chapterize`, body);
+export const listStudyChapters = (materialId: number) =>
+  api.get<StudyChapter[]>(`/api/study/materials/${materialId}/chapters`);
+export const listStudyCharacters = (materialId: number) =>
+  api.get<StudyCharacter[]>(`/api/study/materials/${materialId}/characters`);
+export const addStudyCharacter = (materialId: number, body: {
+  name: string;
+  aliases?: string[];
+  role?: string;
+  tags?: string[];
+  base_profile?: Record<string, any> | null;
+  confidence?: number;
+}) => api.post<StudyCharacter>(`/api/study/materials/${materialId}/characters`, body);
+export const deleteStudyCharacter = (materialId: number, characterId: number) =>
+  api.delete<{ deleted: number }>(`/api/study/materials/${materialId}/characters/${characterId}`);
+export const runStudyChapter = (materialId: number, body: { chapter_id: number; max_chars?: number }) =>
+  api.post<StudyCharacter[]>(`/api/study/materials/${materialId}/study`, body);
+// Multipart upload (FormData). The client takes a Blob/File directly.
+export const uploadStudyMaterial = (form: FormData) =>
+  api.post<StudyMaterial>("/api/study/materials/upload", form);
+
+// ----- Round 5: behavior patterns -----
+export const listBehaviorPatterns = (q: {
+  character?: string[];
+  situation?: string[];
+  search?: string;
+  source_material_id?: number;
+  limit?: number;
+} = {}) => {
+  const params = new URLSearchParams();
+  (q.character ?? []).forEach((c) => params.append("character", c));
+  (q.situation ?? []).forEach((s) => params.append("situation", s));
+  if (q.search) params.set("search", q.search);
+  if (q.source_material_id != null) params.set("source_material_id", String(q.source_material_id));
+  if (q.limit != null) params.set("limit", String(q.limit));
+  const qs = params.toString();
+  return api.get<BehaviorPattern[]>(`/api/behavior/patterns${qs ? "?" + qs : ""}`);
+};
+export const getBehaviorPattern = (id: number) =>
+  api.get<BehaviorPattern>(`/api/behavior/patterns/${id}`);
+export const createBehaviorPattern = (body: {
+  name: string;
+  character_tags?: string[];
+  situation_tags?: string[];
+  typical_behavior?: string[];
+  dialogue_style?: string[];
+  scene_function?: string[];
+  risks?: string[];
+  recommended_plot_followup?: string[];
+  confidence?: number;
+  evidence?: string[];
+  source_material_id?: number;
+}) => api.post<BehaviorPattern>("/api/behavior/patterns", body);
+export const updateBehaviorPattern = (id: number, body: Partial<BehaviorPattern>) =>
+  api.patch<BehaviorPattern>(`/api/behavior/patterns/${id}`, body);
+export const deleteBehaviorPattern = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/behavior/patterns/${id}`);

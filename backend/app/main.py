@@ -13,6 +13,7 @@ from app.core.database import init_db
 from app.core.errors import APIError
 from app.core.events import Event, event_bus
 from app.routers import (
+    behavior,
     chapters,
     chief_agent,
     events,
@@ -20,6 +21,7 @@ from app.routers import (
     models,
     projects,
     prompts,
+    study,
     tasks,
     worker,
 )
@@ -92,5 +94,5 @@ async def health() -> dict:
 PREFIX = settings.api_prefix
 for r in (projects.router, chapters.router, tasks.router, prompts.router,
           models.router, worker.router, chief_agent.router, memory.router,
-          events.router):
+          events.router, study.router, behavior.router):
     app.include_router(r, prefix=PREFIX)

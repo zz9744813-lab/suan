@@ -88,6 +88,7 @@ export function AppShell({ children }: Props) {
         <div className="rail-divider" />
         <RailItem to="/prompts" label="Prompt" icon="✎" />
         <RailItem to="/models" label="模型" icon="◈" />
+        <RailItem to="/study" label="拆书" icon="☷" />
         <div className="rail-spacer" />
         {/* ProjectNav recover button — only when fully hidden */}
         {projectNavMode === "hidden" && (

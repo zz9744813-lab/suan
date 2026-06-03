@@ -54,6 +54,20 @@ from app.schemas.chief_agent import (
     ChiefAgentMessageRead,
     ChiefAgentSessionRead,
 )
+from app.schemas.study import (
+    BehaviorPatternCreate,
+    BehaviorPatternRead,
+    BehaviorPatternUpdate,
+    ChapterizeRequest,
+    StudyChapterRead,
+    StudyCharacterCreate,
+    StudyCharacterRead,
+    StudyMaterialCreate,
+    StudyMaterialDetail,
+    StudyMaterialRead,
+    StudyMaterialUpdate,
+    StudyRequest,
+)
 
 __all__ = [
     "APIError",
@@ -101,4 +115,16 @@ __all__ = [
     "ChiefAgentChatRequest",
     "ChiefAgentMessageRead",
     "ChiefAgentSessionRead",
+    "BehaviorPatternCreate",
+    "BehaviorPatternRead",
+    "BehaviorPatternUpdate",
+    "ChapterizeRequest",
+    "StudyChapterRead",
+    "StudyCharacterCreate",
+    "StudyCharacterRead",
+    "StudyMaterialCreate",
+    "StudyMaterialDetail",
+    "StudyMaterialRead",
+    "StudyMaterialUpdate",
+    "StudyRequest",
 ]

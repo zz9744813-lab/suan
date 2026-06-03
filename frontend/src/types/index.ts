@@ -325,3 +325,70 @@ export type TaskDiagnosis = {
   steps: TaskDiagnosisStep[];
   retry_count: number;
 };
+
+// ----- Round 5: Study (拆书) / Behavior Pattern -----
+
+export type StudyMaterial = {
+  id: number;
+  project_id: number | null;
+  title: string;
+  author: string;
+  source: string;           // paste | upload | url
+  status: string;           // empty | draft | ready | failed
+  error: string | null;
+  chapter_count: number;
+  character_count: number;
+  // Only populated on the detail view (and only if ``?include_text=1``
+  // was sent). The list endpoint sends 0 to keep payloads small.
+  raw_text_length: number;
+  extra: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StudyMaterialDetail = StudyMaterial & {
+  raw_text: string;
+  chapters: StudyChapter[];
+  characters: StudyCharacter[];
+};
+
+export type StudyChapter = {
+  id: number;
+  material_id: number;
+  chapter_index: number;
+  title: string;
+  content: string;
+  char_count: number;
+  last_studied_at: string | null;
+  created_at: string;
+};
+
+export type StudyCharacter = {
+  id: number;
+  material_id: number;
+  source_chapter_id: number | null;
+  name: string;
+  aliases: string[];
+  role: string;             // 主角|女主|男配|...|其他
+  tags: string[];
+  base_profile: Record<string, any> | null;
+  confidence: number;       // 0..1
+  created_at: string;
+};
+
+export type BehaviorPattern = {
+  id: number;
+  source_material_id: number | null;
+  name: string;
+  character_tags: string[];
+  situation_tags: string[];
+  typical_behavior: string[];
+  dialogue_style: string[];
+  scene_function: string[];
+  risks: string[];
+  recommended_plot_followup: string[];
+  confidence: number;
+  evidence: string[];
+  created_at: string;
+  updated_at: string;
+};
