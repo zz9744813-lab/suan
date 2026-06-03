@@ -10,6 +10,7 @@ import type {
   ChapterVersion,
   ChiefAgentMessage,
   ChiefAgentSession,
+  ModelHealthCheckResult,
   ModelProvider,
   ModelProviderTestResult,
   ModelRoleAssignment,
@@ -160,6 +161,13 @@ export const deleteProvider = (id: number) =>
   api.delete<{ deleted: number }>(`/api/models/providers/${id}`);
 export const testProvider = (id: number) =>
   api.post<ModelProviderTestResult>(`/api/models/providers/${id}/test`);
+// P0-MODEL-3: lightweight per-model health probe. The optional
+// ``model`` query param targets a specific model id; omit it to test
+// the provider's default model.
+export const healthCheckProvider = (id: number, model?: string) =>
+  api.post<ModelHealthCheckResult>(
+    `/api/models/providers/${id}/health-check` + (model ? `?model=${encodeURIComponent(model)}` : ""),
+  );
 
 export const listRoles = () =>
   api.get<ModelRoleAssignment[]>("/api/models/roles");

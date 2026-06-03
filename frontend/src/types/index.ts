@@ -196,10 +196,27 @@ export type ModelProvider = {
   last_test_status: string | null;
   last_test_message: string | null;
   last_test_at: string | null;
+  // P0-MODEL-3: per-model health probe state.
+  last_health_status: ModelHealthStatus | null;
+  last_health_message: string | null;
+  last_health_latency_ms: number | null;
+  last_health_model: string | null;
+  last_health_at: string | null;
   extra: Record<string, any> | null;
   created_at: string;
   updated_at: string;
 };
+
+// P0-MODEL-3: friendly health enum the UI can render straight as a
+// green / yellow / red pill. Keep these values in sync with the
+// backend's ``HealthStatus`` Literal.
+export type ModelHealthStatus =
+  | "healthy"
+  | "degraded"
+  | "unreachable"
+  | "auth_failed"
+  | "model_missing"
+  | "unknown_error";
 
 export type ModelRoleAssignment = {
   id: number;
@@ -218,6 +235,17 @@ export type ModelProviderTestResult = {
   suggestion?: string;
   models: string[];
   latency_ms: number;
+};
+
+// P0-MODEL-3: lightweight per-model health probe result.
+export type ModelHealthCheckResult = {
+  ok: boolean;
+  status: ModelHealthStatus;
+  message: string;
+  suggestion?: string;
+  model: string;
+  latency_ms: number;
+  checked_at: string;
 };
 
 export type ChiefAgentMessage = {

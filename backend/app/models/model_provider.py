@@ -28,6 +28,13 @@ class ModelProvider(Base):
     last_test_status: Mapped[str | None] = mapped_column(String(20), default=None)
     last_test_message: Mapped[str | None] = mapped_column(Text, default=None)
     last_test_at: Mapped[datetime | None] = mapped_column(default=None)
+    # P0-MODEL-3: lightweight per-model health probe (ping).
+    # Distinct from ``last_test_*`` which is a full ``/v1/models`` call.
+    last_health_status: Mapped[str | None] = mapped_column(String(20), default=None)
+    last_health_message: Mapped[str | None] = mapped_column(Text, default=None)
+    last_health_latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    last_health_model: Mapped[str | None] = mapped_column(String(120), default=None)
+    last_health_at: Mapped[datetime | None] = mapped_column(default=None)
     extra: Mapped[dict | None] = mapped_column(JSON, default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)

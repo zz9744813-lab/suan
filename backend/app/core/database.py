@@ -81,6 +81,12 @@ async def init_db() -> None:
         ("projects", "sort_order", "INTEGER DEFAULT 0"),
         ("projects", "pinned", "BOOLEAN DEFAULT 0"),
         ("projects", "last_opened_at", "DATETIME"),
+        # P0-MODEL-3: per-model health probe state on the Provider row.
+        ("model_providers", "last_health_status", "VARCHAR(20)"),
+        ("model_providers", "last_health_message", "TEXT"),
+        ("model_providers", "last_health_latency_ms", "INTEGER"),
+        ("model_providers", "last_health_model", "VARCHAR(120)"),
+        ("model_providers", "last_health_at", "DATETIME"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

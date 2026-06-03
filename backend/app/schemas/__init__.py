@@ -28,6 +28,8 @@ from app.schemas.task import (
     WorkerStatusRead,
 )
 from app.schemas.model_provider import (
+    HealthStatus,
+    ModelHealthCheckResult,
     ModelProviderCreate,
     ModelProviderRead,
     ModelProviderTestResult,
@@ -86,6 +88,8 @@ __all__ = [
     "ModelProviderUpdate",
     "ModelRoleAssignmentRead",
     "ModelRoleAssignmentUpdate",
+    "HealthStatus",
+    "ModelHealthCheckResult",
     "PromptTemplateRead",
     "PromptVersionRead",
     "PromptVersionUpdate",

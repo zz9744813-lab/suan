@@ -1,9 +1,25 @@
 import { useEffect, useState } from "react";
 import {
   listProviders, createProvider, updateProvider, deleteProvider, testProvider,
+  healthCheckProvider,
   listRoles, setRole,
 } from "../api";
-import type { ModelProvider, ModelRoleAssignment, ModelProviderTestResult } from "../types";
+import type {
+  ModelProvider, ModelRoleAssignment, ModelProviderTestResult,
+  ModelHealthCheckResult, ModelHealthStatus,
+} from "../types";
+
+// P0-MODEL-3: status → label/colour mapping for the health pill.
+// Colours come from the existing design tokens (--state-ok / --state-warn
+// / --state-error) so the pill blends in with the rest of the app.
+const HEALTH_BADGE: Record<ModelHealthStatus, { label: string; cls: string }> = {
+  healthy:        { label: "健康",  cls: "ok" },
+  degraded:       { label: "缓慢",  cls: "warn" },
+  unreachable:    { label: "无法连接", cls: "error" },
+  auth_failed:    { label: "鉴权失败", cls: "error" },
+  model_missing:  { label: "模型不存在", cls: "error" },
+  unknown_error:  { label: "未知错误", cls: "error" },
+};
 
 // Role names follow the agent roles wired into the pipeline. Order is
 // the on-screen order; the backend has no canonical order.
@@ -32,6 +48,9 @@ export function ModelsPage() {
   const [roles, setRoles] = useState<ModelRoleAssignment[]>([]);
   const [editing, setEditing] = useState<EditState | null>(null);
   const [testResult, setTestResult] = useState<{ providerId: number; result: ModelProviderTestResult } | null>(null);
+  // P0-MODEL-3: per-provider health probe result. Distinct from
+  // ``testResult`` so the two panes don't fight for the same UI slot.
+  const [healthResult, setHealthResult] = useState<{ providerId: number; result: ModelHealthCheckResult } | null>(null);
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -83,6 +102,20 @@ export function ModelsPage() {
       setErrorMsg(e?.message ?? String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // P0-MODEL-3: ping a specific model (or default) with a 4-token
+  // call. The endpoint is slower than a UI-side ping so we don't
+  // bundle busy=true; we just disable the button inline.
+  const onHealthCheck = async (p: ModelProvider, model?: string) => {
+    setErrorMsg(null);
+    try {
+      const r = await healthCheckProvider(p.id, model);
+      setHealthResult({ providerId: p.id, result: r });
+      refresh();
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? String(e));
     }
   };
 
@@ -167,6 +200,10 @@ export function ModelsPage() {
         )}
         {providers.map((p) => {
           const isTesting = testResult?.providerId === p.id;
+          const isHealthChecking = healthResult?.providerId === p.id;
+          const health = p.last_health_status
+            ? HEALTH_BADGE[p.last_health_status as ModelHealthStatus] ?? HEALTH_BADGE.unknown_error
+            : null;
           return (
             <div key={p.id} className={`provider-card ${p.enabled ? "" : "disabled"}`}>
               <div className="provider-card-head">
@@ -175,6 +212,15 @@ export function ModelsPage() {
                   {p.enabled
                     ? <span className="pill succeeded tiny">启用</span>
                     : <span className="pill stopped tiny">禁用</span>}
+                  {/* P0-MODEL-3: small status pill on the header. */}
+                  {health && (
+                    <span
+                      className={`pill tiny ${health.cls}`}
+                      title={p.last_health_message || ""}
+                    >
+                      {health.label}
+                    </span>
+                  )}
                 </div>
                 <button
                   className="link small"
@@ -222,6 +268,32 @@ export function ModelsPage() {
                     {p.last_test_at && <span className="muted tiny" style={{ marginLeft: 6 }}>· {new Date(p.last_test_at).toLocaleString()}</span>}
                   </span>
                 </div>
+                {/* P0-MODEL-3: per-model health row. */}
+                <div className="kv">
+                  <span className="k">健康</span>
+                  <span className="v small">
+                    {p.last_health_at
+                      ? <>
+                          <span className={health?.cls ?? "muted"}>
+                            {health?.label ?? p.last_health_status ?? "—"}
+                          </span>
+                          {p.last_health_model && (
+                            <span className="mono tiny muted" style={{ marginLeft: 6 }}>
+                              {p.last_health_model}
+                            </span>
+                          )}
+                          {p.last_health_latency_ms != null && (
+                            <span className="muted tiny" style={{ marginLeft: 6 }}>
+                              · {p.last_health_latency_ms}ms
+                            </span>
+                          )}
+                          <span className="muted tiny" style={{ marginLeft: 6 }}>
+                            · {new Date(p.last_health_at).toLocaleString()}
+                          </span>
+                        </>
+                      : <span className="muted">— 还没跑过</span>}
+                  </span>
+                </div>
                 {p.extra && Object.keys(p.extra).length > 0 && (
                   <div className="kv">
                     <span className="k">Extra</span>
@@ -233,6 +305,14 @@ export function ModelsPage() {
               </div>
               <div className="provider-card-foot">
                 <button onClick={() => onTest(p.id)} disabled={busy}>测试连接</button>
+                {/* P0-MODEL-3: per-model health probe button. */}
+                <button
+                  onClick={() => onHealthCheck(p)}
+                  disabled={isHealthChecking || !p.enabled}
+                  title={p.enabled ? `向 ${p.default_model || "默认模型"} 发送一次 ping` : "Provider 已禁用"}
+                >
+                  {isHealthChecking ? "检查中…" : "健康检查"}
+                </button>
                 <button onClick={() => setEditing({ mode: "edit", id: p.id, draft: { ...p }, replacingKey: false })}>
                   编辑
                 </button>
@@ -255,6 +335,23 @@ export function ModelsPage() {
                     </div>
                   )}
                   <div className="muted tiny" style={{ marginTop: 8 }}>延迟：{testResult.result.latency_ms}ms</div>
+                </div>
+              )}
+              {/* P0-MODEL-3: health-check result pane. */}
+              {isHealthChecking && healthResult && (
+                <div className="provider-card-test">
+                  <div className={healthResult.result.ok ? "ok" : "error"}>
+                    {healthResult.result.ok ? "✓" : "✗"}{" "}
+                    <b>{HEALTH_BADGE[healthResult.result.status]?.label ?? healthResult.result.status}</b>
+                    {" "}— {healthResult.result.message}
+                  </div>
+                  {healthResult.result.suggestion && (
+                    <div className="warn small" style={{ marginTop: 4 }}>建议：{healthResult.result.suggestion}</div>
+                  )}
+                  <div className="muted tiny" style={{ marginTop: 8 }}>
+                    模型 {healthResult.result.model} · 延迟 {healthResult.result.latency_ms}ms ·{" "}
+                    {new Date(healthResult.result.checked_at).toLocaleString()}
+                  </div>
                 </div>
               )}
             </div>
@@ -362,9 +459,22 @@ export function ModelsPage() {
                   </td>
                   <td>
                     {provider ? (
-                      provider.last_test_status === "ok"
-                        ? <span className="ok tiny">良好</span>
-                        : <span className="warn tiny" title="最近一次测试失败">待检查</span>
+                      // P0-MODEL-3: prefer the per-model health probe
+                      // over the older /test status because it actually
+                      // exercises the model the role is bound to.
+                      provider.last_health_status === "healthy"
+                        ? <span className="ok tiny" title={provider.last_health_message ?? ""}>
+                            良好 · {provider.last_health_latency_ms}ms
+                          </span>
+                        : provider.last_health_status === "degraded"
+                        ? <span className="warn tiny" title={provider.last_health_message ?? ""}>
+                            缓慢 · {provider.last_health_latency_ms}ms
+                          </span>
+                        : provider.last_health_status
+                        ? <span className="error tiny" title={provider.last_health_message ?? ""}>
+                            {HEALTH_BADGE[provider.last_health_status as ModelHealthStatus]?.label ?? provider.last_health_status}
+                          </span>
+                        : <span className="muted tiny" title="还没跑过健康检查">待检查</span>
                     ) : (
                       <span className="muted tiny">未绑定</span>
                     )}

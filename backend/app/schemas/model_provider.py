@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,6 +50,12 @@ class ModelProviderRead(BaseModel):
     last_test_status: str | None
     last_test_message: str | None
     last_test_at: datetime | None
+    # P0-MODEL-3: lightweight per-model health probe.
+    last_health_status: str | None = None
+    last_health_message: str | None = None
+    last_health_latency_ms: int | None = None
+    last_health_model: str | None = None
+    last_health_at: datetime | None = None
     extra: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
@@ -73,6 +79,11 @@ class ModelProviderRead(BaseModel):
             last_test_status=obj.last_test_status,
             last_test_message=obj.last_test_message,
             last_test_at=obj.last_test_at,
+            last_health_status=obj.last_health_status,
+            last_health_message=obj.last_health_message,
+            last_health_latency_ms=obj.last_health_latency_ms,
+            last_health_model=obj.last_health_model,
+            last_health_at=obj.last_health_at,
             extra=obj.extra,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
@@ -85,6 +96,32 @@ class ModelProviderTestResult(BaseModel):
     models: list[str] = Field(default_factory=list)
     suggestion: str | None = None
     latency_ms: int | None = None
+
+
+# P0-MODEL-3: lightweight per-model health probe.
+# The status field is a friendly enum the UI can map straight to a
+# colour-coded pill (green / yellow / red). The endpoint distinguishes
+# "model replied but slow" (``degraded``) from a real failure
+# (``unreachable`` / ``auth_failed`` / ``model_missing``) so the
+# dashboard never shows a red bar for a slow-but-healthy provider.
+HealthStatus = Literal[
+    "healthy",        # replied within 5s
+    "degraded",       # replied but > 5s
+    "unreachable",    # TCP / DNS / HTTP 5xx
+    "auth_failed",    # 401 / 403
+    "model_missing",  # 404 on the model id
+    "unknown_error",  # anything else
+]
+
+
+class ModelHealthCheckResult(BaseModel):
+    ok: bool
+    status: HealthStatus
+    message: str
+    suggestion: str | None = None
+    model: str
+    latency_ms: int
+    checked_at: datetime
 
 
 class ModelRoleAssignmentRead(BaseModel):
