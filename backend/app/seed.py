@@ -54,6 +54,25 @@ async def seed() -> None:
                 )
                 db.add(tpl)
                 await db.flush()
+            else:
+                # R15 / Plan A: keep the template's metadata in sync with the
+                # library spec on every seed run. Without this, allowed_inputs
+                # and hard_rules on existing rows never update — the body
+                # gets auto-bumped (see below) but the UI version viewer
+                # keeps showing the old metadata. This 8-line sync makes the
+                # whole template self-healing.
+                tpl.name = spec["name"]
+                tpl.category = spec["category"]
+                tpl.role = spec["role"]
+                tpl.scope = spec["scope"]
+                tpl.genre = spec.get("genre")
+                tpl.description = spec.get("description")
+                tpl.allowed_inputs = spec.get("allowed_inputs", [])
+                tpl.forbidden_inputs = spec.get("forbidden_inputs", [])
+                tpl.output_schema = spec.get("output_schema")
+                tpl.can_modify = spec.get("can_modify", [])
+                tpl.cannot_modify = spec.get("cannot_modify", [])
+                tpl.hard_rules = spec.get("hard_rules", [])
             # ensure v1 exists
             existing = (
                 await db.execute(

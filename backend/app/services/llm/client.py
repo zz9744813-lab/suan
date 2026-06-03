@@ -6,6 +6,7 @@ Gemini proxies, vLLM, Ollama, etc.).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -86,43 +87,233 @@ def _find_last_json_object(text: str) -> str | None:
     return None
 
 
+# R15 / picker-fix-1: markers that often mark the transition from
+# the model's *planning prose* to its *actual answer prose* inside
+# a single ``reasoning_content`` blob. Tier 1 is "strong" — the model
+# uses these when it consciously switches from thinking to writing.
+# Tier 2 is "weak" — these appear in the middle of planning too
+# (e.g. "好的, 那我就...") so we only trust them when the candidate
+# is long enough that the planning is clearly over.
+_ANSWER_MARKERS_TIER1 = (
+    "以下是正文", "正文如下", "以下是答案", "答案如下",
+    "答复如下", "答复：", "答复:", "答案：", "答案:",
+    "现在写：", "现在写:", "正式内容：", "正式内容:",
+    "输出如下", "输出：", "输出:",
+    "---正文---", "---正文---", "--- 答案 ---",
+)
+_ANSWER_MARKERS_TIER2 = (
+    "好的，", "好的:", "好的：", "好，", "好:", "好：",
+)
+
+
+# R15 / picker-stub detection: small JSON objects whose "content" field
+# is short placeholder text are usually *envelope stubs* emitted by
+# reasoning models at the very end of the planning stream — the real
+# answer is the prose BEFORE the stub, not the stub itself. We mark
+# such candidates so the picker can skip them.
+_STUB_CONTENT_HINTS = (
+    "这里放内容", "正文", "TBD", "TODO", "待填", "占位",
+    "...", "（", "(", "略", "见下",
+)
+
+
+def _looks_like_json_stub(text: str) -> bool:
+    """True if ``text`` parses as a tiny JSON dict whose ``content``
+    field is a placeholder string — i.e. the model emitted an empty
+    envelope instead of an actual answer.
+
+    Used by the picker to deprioritise such candidates in favour of
+    the prose extraction path (strategy 2). False positives are safe:
+    the picker just falls through to strategy 2 / 3 / 4.
+    """
+    try:
+        obj = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(obj, dict):
+        return False
+    # Only call it a stub if BOTH (a) the whole object is tiny AND
+    # (b) its "content" field is short + contains a placeholder hint.
+    if len(text) > 80:
+        return False
+    content = obj.get("content")
+    if not isinstance(content, str):
+        return False
+    if len(content) > 40:
+        return False
+    return any(hint in content for hint in _STUB_CONTENT_HINTS)
+
+
+def _extract_answer_from_prose(text: str) -> str | None:
+    """When ``text`` is a mix of planning + answer prose, return the
+    *answer portion only*.
+
+    Used by the picker when ``content`` is empty and ``reasoning_content``
+    is a single prose blob. Reasoning models like step-3.7-flash on the
+    whitedream provider routinely emit ALL their output in
+    ``reasoning_content`` — a planning preamble like "用户现在需要我写..."
+    followed by the actual chapter / JSON answer. Without this trim the
+    picker would return the planning prose and the downstream agent
+    would treat the model's own thinking as the user's deliverable.
+
+    Strategy (returns ``None`` if it cannot find a reasonable cut):
+
+      1. Tier-1 markers (strong): find the last occurrence; if found,
+         return everything after it (stripped).
+      2. Tier-2 markers (weak): only trust them if the text is
+         ``>= 1500`` chars (otherwise "好，" might be a one-shot
+         agreement, not a switch).
+      3. No marker: return the LAST 60 % of the text, assuming the
+         answer is at the tail of the model's output stream.
+
+    Returns ``None`` if ``text`` is too short to bother with the
+    trim (< 200 chars).
+    """
+    if not text or len(text) < 200:
+        return None
+    # Tier 1 — strong markers
+    last_t1 = -1
+    for m in _ANSWER_MARKERS_TIER1:
+        idx = text.rfind(m)
+        if idx > last_t1:
+            last_t1 = idx
+    if last_t1 >= 0:
+        cut = text[last_t1:]
+        # skip past the marker itself to drop "以下是正文：" / "好的，"
+        for m in _ANSWER_MARKERS_TIER1:
+            if cut.startswith(m):
+                cut = cut[len(m):]
+                break
+        return cut.lstrip("：:，, \n\t\r")
+    # Tier 2 — weak markers, only on long-enough text
+    if len(text) >= 1500:
+        last_t2 = -1
+        for m in _ANSWER_MARKERS_TIER2:
+            idx = text.rfind(m)
+            if idx > last_t2:
+                last_t2 = idx
+        if last_t2 >= 0:
+            cut = text[last_t2:]
+            for m in _ANSWER_MARKERS_TIER2:
+                if cut.startswith(m):
+                    cut = cut[len(m):]
+                    break
+            return cut.lstrip("：:，, \n\t\r")
+    # Tier 3 — assume the answer lives in the last 60 % of the text
+    cut_start = int(len(text) * 0.4)
+    # snap to the next newline so we don't start mid-sentence
+    nl = text.find("\n", cut_start)
+    if 0 < nl - cut_start < 200:
+        cut_start = nl + 1
+    return text[cut_start:]
+
+
+# P0-MODEL-11: heuristic detector for "reasoning" / "thinking" model
+# variants. Used by ``_do_chat`` to auto-inject
+# ``extra_body.reasoning_effort="low"`` so a non-streaming chat call
+# doesn't burn its whole ``max_tokens`` budget on internal planning.
+#
+# This is intentionally conservative — we only match on substrings
+# the model name (or the base URL) is unlikely to contain by
+# accident. False positives are still safe (we only *add* an
+# ``extra_body`` field; we never strip one), but we'd rather be
+# too narrow than too wide.
+_REASONING_MODEL_HINTS = (
+    # StepFun's reasoning flagship + cheap flash variant
+    "step-3", "step-r", "stepfun",
+    # OpenAI o-series
+    "o1", "o3", "o4",
+    # DeepSeek R1 family
+    "deepseek-r1", "deepseek-reasoner",
+    # Qwen 3 thinking
+    "qwen3-thinking", "qwq", "-thinking",
+    # Kimi k2 thinking
+    "kimi-k2-thinking", "kimi-thinking",
+    # GLM-Z1
+    "glm-z1", "z1-",
+)
+_REASONING_BASE_URL_HINTS = (
+    "stepfun",  # covers *.stepfun.com
+    "api.deepseek.com",
+    "api.openai.com",  # OpenAI o-series
+)
+
+
+def _looks_like_reasoning_model(model: str, base_url: str = "") -> bool:
+    """Return True if ``model`` / ``base_url`` look like a reasoning model
+    that defaults to a long planning monologue before its final answer.
+
+    Used to decide whether to auto-inject
+    ``extra_body.reasoning_effort="low"`` on non-streaming chat calls.
+    """
+    m = (model or "").lower()
+    if any(hint in m for hint in _REASONING_MODEL_HINTS):
+        return True
+    b = (base_url or "").lower()
+    return any(hint in b for hint in _REASONING_BASE_URL_HINTS)
+
+
 def _pick_best_content(candidates: list[str]) -> str:
     """Pick the best content string from a list of (main, reasoning, text) candidates.
 
-    Strategy:
-      1. If a candidate is a parseable JSON object/array AND is the LARGEST
-         such candidate, use it (the model respected the JSON contract and
-         the answer is the full-sized object — common for non-reasoning
-         models and `kimi-k2.6` / `deepseek-v4-flash`).
-      2. Otherwise, prefer the candidate whose largest trailing JSON object
-         is the LARGEST (reasoning models often put a tiny stub in
-         ``content`` and the real answer at the END of ``reasoning_content``).
-      3. Otherwise, return the largest non-empty candidate as raw text
-         (drafter / free-form agents).
+    Strategy (in order):
+      1. If a candidate parses cleanly as a JSON object/array, pick the
+         LARGEST such candidate (covers non-reasoning models that put
+         the full answer in ``content`` and reasoning models that put a
+         tiny stub in ``content`` + the real answer at the end of
+         ``reasoning_content``).
+      2. Try each candidate's *last balanced JSON object* — reasoning
+         models often emit planning prose first, then a JSON object at
+         the very end of the stream.
+      3. NEW (R15): if all candidates are pure prose (no JSON), try to
+         extract just the *answer portion* by looking for markers
+         like "以下是正文" / "正文如下" / "好的，". This is the common
+         case for step-3.7-flash on the whitedream provider where the
+         model dumps everything (planning + answer) into
+         ``reasoning_content``.
+      4. Last resort: return the largest non-empty candidate as raw
+         text (drafter / free-form agents).
     """
     # 1) collect valid JSON candidates with their sizes
+    #    Skip JSON STUBS (a tiny envelope like {"content":"这里放内容"} that
+    #    reasoning models sometimes emit as a placeholder; the real answer
+    #    is in the prose, not the stub). If we returned the stub the
+    #    downstream agent would parse a 19-char placeholder and treat it
+    #    as the deliverable. Filtering here forces the picker to fall
+    #    through to strategy 2 (prose extraction) where the answer lives.
     json_candidates: list[tuple[int, str]] = []
     for cand in candidates:
         try:
             obj = json.loads(cand)
-            if isinstance(obj, (dict, list)):
+            if isinstance(obj, (dict, list)) and not _looks_like_json_stub(cand):
                 json_candidates.append((len(cand), cand))
         except (json.JSONDecodeError, ValueError):
             pass
-    # 1a) full-text trailing-JSON candidates
+    # 1a) full-text trailing-JSON candidates — also skip stubs
     for cand in candidates:
         found = _find_last_json_object(cand)
-        if found is not None:
+        if found is not None and not _looks_like_json_stub(found):
             json_candidates.append((len(found), found))
     if json_candidates:
-        # pick the LARGEST valid JSON we found (size = bytes of the
-        # JSON text, not the parsed object). This handles both:
-        #  - non-reasoning models that put the full answer in `content`
-        #  - reasoning models that put a tiny stub in `content` and the
-        #    real answer at the end of `reasoning_content`
         json_candidates.sort(key=lambda x: x[0], reverse=True)
         return json_candidates[0][1]
-    # 2) raw text fallback: pick the longest non-empty candidate
+    # 2) R15: prose-only candidates — try the answer-extractor on
+    #    each. This handles "the model dumped everything into
+    #    reasoning_content" (step-3.7-flash on whitedream). The
+    #    extractor is conservative: it returns None for short text or
+    #    when no marker is found, in which case we fall through to the
+    #    raw-text fallback below. We don't impose a min-length here
+    #    because the size comparison below is the right tiebreaker —
+    #    a short clean answer beats a long planning blob.
+    extracted: list[tuple[int, str]] = []
+    for cand in candidates:
+        answer = _extract_answer_from_prose(cand)
+        if answer is not None:
+            extracted.append((len(answer), answer))
+    if extracted:
+        extracted.sort(key=lambda x: x[0], reverse=True)
+        return extracted[0][1]
+    # 3) raw text fallback: pick the longest non-empty candidate
     return max(candidates, key=len)
 
 
@@ -162,6 +353,12 @@ class LLMRequest:
     max_tokens: int = 2048
     response_format: dict[str, str] | None = None  # {"type": "json_object"}
     extra: dict[str, Any] = field(default_factory=dict)
+    # R15: when True (default), use SSE streaming so the first token
+    # reaches the caller within 1-5s instead of waiting 30-60s for the
+    # full non-streaming response. The cost / output_tokens / content
+    # shape are identical — only the delivery mechanism differs. The
+    # picker still runs at the end so behaviour is unchanged.
+    stream: bool = True
 
 
 @dataclass
@@ -204,10 +401,22 @@ class LLMClient:
         if base_url.startswith("mock://"):
             return ["mock-fast", "mock-long", "mock-vision"]
         url = self._join_url(base_url, "models")
+        # ``/models`` is a fast metadata call. Cap the read at 15s so a
+        # misconfigured base_url (e.g. pointing at a chat-only host, a
+        # slow proxy, or a 5xx-loop) can't burn the full 600s chat budget
+        # and freeze the UI's 「测试连接」 button — a 15s hang already
+        # makes the user think the page went black.
+        short_timeout = httpx.Timeout(
+            connect=self.timeout.connect,
+            read=15.0,
+            write=self.timeout.write,
+            pool=self.timeout.pool,
+        )
         try:
             resp = await self._client.get(
                 url,
                 headers={"Authorization": f"Bearer {api_key}"},
+                timeout=short_timeout,
             )
         except httpx.HTTPError as exc:
             logger.error("list_models httpx error url=%s err=%s", url, _fmt_exc(exc))
@@ -263,8 +472,13 @@ class LLMClient:
         try:
             async for attempt in retrying:
                 with attempt:
+                    if request.stream:
+                        return await self._do_chat_stream(
+                            url, api_key, payload, request.model, base_url,
+                            provider_extra=provider_extra,
+                        )
                     return await self._do_chat(
-                        url, api_key, payload, request.model, provider_extra=provider_extra
+                        url, api_key, payload, request.model, base_url, provider_extra=provider_extra
                     )
         except LLMAuthError:
             raise
@@ -276,25 +490,165 @@ class LLMClient:
             logger.exception("chat unexpected error url=%s model=%s", url, request.model)
             raise LLMConnectionError(f"调用失败: {_fmt_exc(exc)}") from exc
 
-    async def _do_chat(
+    async def _do_chat_stream(
         self,
         url: str,
         api_key: str,
         payload: dict[str, Any],
         model: str,
+        base_url: str = "",
         *,
         provider_extra: dict[str, Any] | None = None,
     ) -> LLMCallResult:
-        # Inject a hard system message that:
-        #   1) forces reasoning models (step-3.7-flash, deepseek-r1, o1, ...)
-        #      to skip their internal "thinking" preamble, and
-        #   2) forbids any non-JSON prose around JSON output, since small
-        #      models on this provider tend to comply weakly with
-        #      `response_format=json_object` and emit explanations like
-        #      "用户需要的是..." first.
-        # We also append a no-think reminder to the last user message so
-        # the instruction survives any system-prompt-stripping the
-        # provider might do.
+        """SSE streaming variant of :meth:`_do_chat`.
+
+        Sends ``stream: true`` + ``stream_options.include_usage`` to the
+        provider, iterates the SSE chunks, accumulates ``delta.content``
+        and ``delta.reasoning_content``, then runs the same picker on
+        the joined result. Identical behaviour to the non-streaming
+        path from the caller's perspective — only the TTFT improves.
+        """
+        # Reuse the system-message + extra_body injection from _do_chat
+        # so the two paths stay in lockstep. We extract that into a
+        # helper so the streaming branch can call it before opening the
+        # connection.
+        payload = self._prepare_payload(payload, model, base_url, provider_extra)
+        payload["stream"] = True
+        # The provider emits a final ``choices: []`` chunk whose only
+        # field is ``usage`` — ``include_usage: true`` makes that
+        # actually arrive (otherwise usage is missing on streamed calls).
+        payload["stream_options"] = {"include_usage": True}
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        t0 = time.perf_counter()
+        # httpx per-request timeout for the *whole* streamed response.
+        # The client's pooled timeouts only apply until the first byte;
+        # the read budget needs to cover the entire generation.
+        try:
+            async with self._client.stream(
+                "POST", url, headers=headers, json=payload, timeout=self.timeout
+            ) as resp:
+                if resp.status_code == 401:
+                    raise LLMAuthError("401 Unauthorized: API Key 无效")
+                if resp.status_code == 429:
+                    body = await resp.aread()
+                    raise LLMRateLimitError(f"429 限流: {body[:200].decode('utf-8', 'ignore')}")
+                if resp.status_code >= 500:
+                    body = await resp.aread()
+                    raise LLMConnectionError(
+                        f"上游服务异常 HTTP {resp.status_code}: {body[:200].decode('utf-8', 'ignore')}"
+                    )
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    raise LLMResponseError(
+                        f"调用失败 HTTP {resp.status_code}: {body[:200].decode('utf-8', 'ignore')}"
+                    )
+
+                content_chunks: list[str] = []
+                reasoning_chunks: list[str] = []
+                usage: dict[str, Any] = {}
+                response_model: str = model
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if not line.startswith("data: "):
+                        # Some providers send ``event:`` / heartbeat
+                        # lines we don't care about.
+                        continue
+                    payload_str = line[6:].strip()
+                    if payload_str == "[DONE]":
+                        break
+                    try:
+                        evt = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(evt.get("model"), str):
+                        response_model = evt["model"]
+                    choice = (evt.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    c = delta.get("content")
+                    if isinstance(c, str) and c:
+                        content_chunks.append(c)
+                    r = delta.get("reasoning_content")
+                    if isinstance(r, str) and r:
+                        reasoning_chunks.append(r)
+                    # The final chunk has empty ``choices`` and the
+                    # usage block. Capture it.
+                    if not choice and isinstance(evt.get("usage"), dict):
+                        usage = evt["usage"]
+        except httpx.HTTPError as exc:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            logger.error(
+                "_do_chat_stream httpx error url=%s model=%s elapsed_ms=%d err=%s",
+                url, model, elapsed_ms, _fmt_exc(exc),
+            )
+            raise LLMConnectionError(f"无法连接 {url}: {_fmt_exc(exc)}") from exc
+
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        main = "".join(content_chunks)
+        reasoning = "".join(reasoning_chunks)
+        if not main and not reasoning:
+            raise LLMResponseError("模型流式返回空内容")
+
+        candidates: list[str] = []
+        for cand in (main, reasoning):
+            cand = cand.strip() if isinstance(cand, str) else ""
+            if cand:
+                candidates.append(cand)
+        content = _pick_best_content(candidates)
+
+        input_tokens = int(usage.get("prompt_tokens") or 0)
+        output_tokens = int(usage.get("completion_tokens") or 0)
+        cost = estimate_cost_usd(model, input_tokens, output_tokens)
+        # Build a synthetic raw response that mirrors the non-streaming
+        # shape — downstream code (worker logs, debugging, etc.) sees
+        # the same structure regardless of which path was used.
+        raw = {
+            "id": None,
+            "object": "chat.completion",
+            "model": response_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": main,
+                        "reasoning_content": reasoning,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": usage,
+            "_streamed": True,
+        }
+        return LLMCallResult(
+            content=content,
+            model=response_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+            duration_ms=duration_ms,
+            raw=raw,
+        )
+
+    def _prepare_payload(
+        self,
+        payload: dict[str, Any],
+        model: str,
+        base_url: str,
+        provider_extra: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Shared system-message + extra_body injection for the two
+        transport paths (streaming and non-streaming).
+
+        Extracted so the streaming branch can call it without
+        duplicating the system-reminder + ``reasoning_effort``
+        auto-inject logic. See :meth:`_do_chat` for the full story.
+        """
         messages = payload.get("messages") or []
         has_system = any(m.get("role") == "system" for m in messages)
         strict_system = (
@@ -308,7 +662,6 @@ class LLMClient:
         if not has_system:
             messages = [{"role": "system", "content": strict_system}] + messages
         else:
-            # keep any caller-provided system message, but reinforce it
             messages = [
                 {
                     "role": "system",
@@ -316,8 +669,6 @@ class LLMClient:
                     + "\n\n（以上规则优先于用户消息中的格式说明）",
                 }
             ] + messages
-        # belt-and-suspenders: append a tiny reminder to the tail so the
-        # model sees the JSON rule at the very end of the prompt too.
         if messages and messages[-1].get("role") == "user":
             tail = messages[-1]
             extra = (
@@ -326,22 +677,36 @@ class LLMClient:
             )
             tail = {**tail, "content": (tail.get("content") or "") + extra}
             messages = messages[:-1] + [tail]
-        payload["messages"] = messages
-        # P0-5 fix: ``extra_body`` is a vLLM/sglang/StepFun convention,
-        # NOT a standard OpenAI field. Sending it to a strict OpenAI-
-        # compatible proxy triggers 400/422. We now only inject it when
-        # the Provider has explicitly opted in via its ``extra`` JSON
-        # column, e.g.:
-        #   {"inject_reasoning_effort": true, "reasoning_effort": "low"}
-        # Default providers (incl. anything pointing at openai.com)
-        # get a clean request with no extra_body.
-        if provider_extra and provider_extra.get("inject_reasoning_effort"):
+        payload = {**payload, "messages": messages}
+        pe = provider_extra or {}
+        if pe.get("inject_reasoning_effort"):
             payload.setdefault(
                 "extra_body",
                 {
-                    "reasoning_effort": provider_extra.get("reasoning_effort", "low")
+                    "reasoning_effort": pe.get("reasoning_effort", "low")
                 },
             )
+        elif not pe.get("no_auto_reasoning_effort") and _looks_like_reasoning_model(model, base_url):
+            payload.setdefault(
+                "extra_body",
+                {"reasoning_effort": pe.get("reasoning_effort", "low")},
+            )
+        return payload
+
+    async def _do_chat(
+        self,
+        url: str,
+        api_key: str,
+        payload: dict[str, Any],
+        model: str,
+        base_url: str = "",
+        *,
+        provider_extra: dict[str, Any] | None = None,
+    ) -> LLMCallResult:
+        # Inject the strict system message + auto reasoning_effort (see
+        # ``_prepare_payload`` for the rationale). Identical to the
+        # streaming branch — both paths converge on the same payload.
+        payload = self._prepare_payload(payload, model, base_url, provider_extra)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

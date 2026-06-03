@@ -257,6 +257,11 @@ async def _first_version_summary(db: AsyncSession, chapter_id: int) -> str | Non
             select(ChapterVersion)
             .where(ChapterVersion.chapter_id == chapter_id)
             .order_by(ChapterVersion.version_no.desc())
+            # R15 fix: cap at 1 row. ``scalar_one_or_none`` raises
+            # ``MultipleResultsFound`` once a chapter accumulates 2+ versions
+            # (e.g. chapter 3 has draft + rewrite_1 + final). The "most
+            # recent" semantics is preserved by the ``order_by`` above.
+            .limit(1)
         )
     ).scalar_one_or_none()
 

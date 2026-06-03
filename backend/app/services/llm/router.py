@@ -45,7 +45,18 @@ class LLMRouter:
             .options(selectinload(ModelRoleAssignment.provider))
             .where(ModelRoleAssignment.role == role)
         )
-        result = (await db.execute(stmt)).scalar_one_or_none()
+        # P15 / P0-STUDY-1 fix: use ``.scalars().first()`` (not
+        # ``scalar_one_or_none()``) so multiple role-assignment rows
+        # for the same role don't blow up the call. In practice the
+        # UI only shows one row per role, but the DB doesn't enforce
+        # that constraint and an older seed script or a manual
+        # import may leave duplicates. Pick the lowest-id row — the
+        # most recent assignment wins visually because the UI sorts
+        # by id desc, so taking the smallest id gives us the
+        # original "first" binding.
+        result = (
+            await db.execute(stmt.order_by(ModelRoleAssignment.id.asc()))
+        ).scalars().first()
         if result and result.provider and result.provider.enabled:
             return ResolvedCall(
                 provider=result.provider,
@@ -54,13 +65,19 @@ class LLMRouter:
                 max_tokens=result.max_tokens,
             )
         # fallback: first enabled provider with a default model
+        # Same fix: ``.scalars().first()`` to avoid MultipleResultsFound
+        # when the user has more than one provider enabled, AND to
+        # return a model instance (not a Row tuple) so attribute
+        # access works on ``first.default_model`` below. ORDER BY id
+        # keeps the pick stable across calls.
         first = (
             await db.execute(
                 select(ModelProvider)
                 .where(ModelProvider.enabled.is_(True))
                 .order_by(ModelProvider.id.asc())
+                .limit(1)
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if first is None:
             raise bad_request(
                 "尚未配置任何已启用的模型 Provider",
@@ -88,6 +105,12 @@ class LLMRouter:
         max_tokens: int | None = None,
         response_format: dict[str, str] | None = None,
         extra: dict[str, Any] | None = None,
+        # R15: when True (default), the LLM client opens an SSE stream
+        # so the first token reaches the caller in 1-5s. Identical
+        # cost / output shape as non-streaming — only the delivery
+        # mechanism differs. The picker still runs at the end so the
+        # returned content is unchanged.
+        stream: bool = True,
     ) -> tuple[ResolvedCall, LLMCallResult]:
         resolved = await self.resolve(db, role)
         request = LLMRequest(
@@ -97,6 +120,7 @@ class LLMRouter:
             max_tokens=max_tokens if max_tokens is not None else resolved.max_tokens,
             response_format=response_format,
             extra=extra or {},
+            stream=stream,
         )
         try:
             result = await self.client.chat(

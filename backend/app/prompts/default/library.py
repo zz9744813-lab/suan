@@ -85,6 +85,8 @@ WRITING_PROMPTS: dict[str, dict] = {
             "active_foreshadows",
             "detail_constraints",
             "behavior_patterns",
+            "min_word_count",
+            "max_word_count",
         ],
         "forbidden_inputs": ["critic_hidden_rubric", "other_agent_private_notes"],
         "output_schema": "chapter_draft",
@@ -94,21 +96,36 @@ WRITING_PROMPTS: dict[str, dict] = {
             "必须遵守 chapter_plan 中 must_follow / avoid。",
             "不能修改 Bible。",
             "不能编造已确认设定之外的新规则。",
-            "如果注入行为模式，必须体现人物标签与情节标签的匹配。",
-            "正文用稿纸风格中文，对话短而有情绪。",
+            "如果注入行为模式，必须体现人物标签与情境标签的匹配；不要机械堆砌。",
+            "实际字数必须在 min_word_count ~ max_word_count 之间，超出或不足都要重写。",
+            "开篇 100 字内必须出现冲突 / 悬念 / 转折 / 情感爆点之一。",
+            "章末 100 字内必须留一个钩子（危机、悬念揭示、关系转折或关键决策）。",
+            "对话（带引号「」或破折号——）占全文不少于 30%。",
+            "禁止 AI 腔：避免「于是」「不禁」「心中暗道」「眼眸微眯」「嘴角勾起」「一抹冷笑」「缓缓」「骤然」「竟然」「居然」「眉头微皱」「眼中闪过」「心头一凛」「浑身一震」「仿佛」「似乎」「霎时」「蓦然」「陡然」「赫然」「顷刻」「冷然」「傲然」「淡然」「飘然」「一股」等套路化词汇。",
+            "正文用稿纸风格中文，段间留白，对话短而有情绪。",
         ],
         "body": (
             "你是玄幻长篇小说的正文写手。\n"
-            "请根据下面的章节规划写第 {{chapter_no}} 章《{{title}}》，目标 {{target_word_count}} 字。\n\n"
+            "请根据下面的章节规划写第 {{chapter_no}} 章《{{title}}》，目标 {{target_word_count}} 字"
+            "（硬约束：实际字数必须落在 {{min_word_count}} ~ {{max_word_count}} 字之间）。\n\n"
+            "【玄幻网文风格硬规则】\n"
+            "1. 三段式结构：开篇 100 字内必须出现冲突 / 悬念 / 转折 / 情感爆点之一；中段是动作 / 对话 / 心理推进；章末 100 字内必须留一个钩子（危机、悬念揭示、关系转折、关键决策），让读者想翻下一章。\n"
+            "2. 段落节奏：每段 1~3 句为主；对话独占一行；段间留一空行；避免一段超过 5 句。\n"
+            "3. 对话占比：全文对话（带引号「」或破折号——）不少于 30%，用于推进冲突、揭示信息、表现人物。\n"
+            "4. 字数硬约束：实际字数必须在 {{min_word_count}} ~ {{max_word_count}} 之间。写完请自查，差太多就要补，差太少就要砍。\n"
+            "5. 禁止 AI 腔：避免「于是」「不禁」「心中暗道」「眼眸微眯」「嘴角勾起」「一抹冷笑」「缓缓」「骤然」「竟然」「居然」「眉头微皱」「眼中闪过」「心头一凛」「浑身一震」「仿佛」「似乎」「霎时」「蓦然」「陡然」「赫然」「顷刻」「冷然」「傲然」「淡然」「飘然」「一股」等套路化词汇；用具体动作、外貌细节、可观察行为替代抽象心理。\n"
+            "6. 不要写元说明，不要写「以下是正文」「好的」等开场白。\n"
+            "7. 默认第三人称；如未明确要求第一人称，不要随意切换视角。\n"
+            "8. 章末必须以一个钩子收尾——可以是危机、悬念揭示、关系转折或关键决策。\n\n"
             "【章节规划】\n{{chapter_plan}}\n\n"
             "【记忆上下文】\n{{memory_context}}\n\n"
             "【细节约束】\n{{detail_constraints}}\n\n"
-            "【行为模式参考】\n{{behavior_patterns}}\n\n"
+            "【行为模式参考】\n"
+            "{{behavior_patterns}}\n"
+            "如果注入了行为模式卡，必须把这些卡里的「典型行为 / 对话风格 / 场景功能」自然融入到本节的人物动作和对白里，不要机械堆砌关键词。\n\n"
             "【风格指南】\n{{style_guide}}\n\n"
             "【用户偏好】\n{{user_preferences}}\n\n"
-            "请直接输出正文，使用稿纸段落（不要写元说明，不要写\"以下是正文\"）。\n"
-            "如果必须使用第一人称叙述，请用「我」；否则默认用第三人称。\n"
-            "章末必须以一个钩子收尾。\n"
+            "请直接输出正文，使用稿纸段落。章末必须以一个钩子收尾。\n"
         ),
     },
     "critic_main": {
@@ -387,6 +404,85 @@ WRITING_PROMPTS: dict[str, dict] = {
             '      "role": "主角|女主|男配|女配|反派|师父|工具人|势力代表|...|其他",\n'
             '      "tags": ["热血|理智|隐忍|腹黑|...|..."],\n'
             '      "base_profile": {"age": null|int, "faction": null|string, "abilities": ["..."], "items": ["..."], "summary": "..."}\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        ),
+    },
+    "study_event": {
+        "template_key": "study_event",
+        "name": "拆书·事件识别",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "从章节文本中识别伏笔 / 转折 / 升级等情节事件。",
+        "allowed_inputs": ["chapter_text", "chapter_no", "existing_foreshadows"],
+        "forbidden_inputs": [],
+        "output_schema": "study_events",
+        "can_modify": ["study_events"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "事件必须能在文本中找到对应依据。",
+            "伏笔必须有明确埋设位置。",
+            "不要把日常对话当事件。",
+        ],
+        "body": (
+            "请从下面这段章节文本中识别对剧情有重要推进作用的事件："
+            "伏笔、转折点、升级契机、关键抉择、势力变动等。\n\n"
+            "【章节号】\n{{chapter_no}}\n\n"
+            "【章节文本】\n{{chapter_text}}\n\n"
+            "【已存在伏笔（用于去重）】\n{{existing_foreshadows}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "events": [\n'
+            '    {\n'
+            '      "name": "事件名（20字内）",\n'
+            '      "summary": "50~100 字描述",\n'
+            '      "kind": "伏笔|转折|升级|抉择|势力变动|...|其他",\n'
+            '      "importance": 1-5 的整数,\n'
+            '      "related_characters": ["人物名"],\n'
+            '      "quote": "原文 1~2 句作为依据（必须来自章节文本）"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        ),
+    },
+    "study_behavior_pattern": {
+        "template_key": "study_behavior_pattern",
+        "name": "拆书·行为模式归纳",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "从若干个章节片段中归纳「人物 × 情境」维度的可复用行为模式。",
+        "allowed_inputs": ["evidence_chunks", "existing_patterns"],
+        "forbidden_inputs": [],
+        "output_schema": "study_behavior_patterns",
+        "can_modify": ["behavior_patterns"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "必须能从 evidence_chunks 找到至少 1 个原文片段作为依据。",
+            "不能凭空生成人物标签，必须与 evidence_chunks 中的人物一致。",
+        ],
+        "body": (
+            "请从以下若干个章节片段（evidence_chunks）中归纳"
+            "「人物 × 情境」维度的可复用行为模式。\n\n"
+            "【章节片段】\n{{evidence_chunks}}\n\n"
+            "【已存在行为模式（用于去重）】\n{{existing_patterns}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "patterns": [\n'
+            '    {\n'
+            '      "name": "模式名（20字内）",\n'
+            '      "character_tags": ["主角", "..."],\n'
+            '      "situation_tags": ["公开羞辱", "..."],\n'
+            '      "typical_behavior": ["...","..."],\n'
+            '      "dialogue_style": ["...","..."],\n'
+            '      "scene_function": ["推动冲突", "..."],\n'
+            '      "risks": ["过度套路", "..."],\n'
+            '      "recommended_plot_followup": ["...","..."],\n'
+            '      "evidence": ["原文片段 1", "原文片段 2"]\n'
             "    }\n"
             "  ]\n"
             "}\n"
