@@ -37,6 +37,7 @@ export function AppShell({ children }: Props) {
   const projectNavMode = useLayoutStore((s) => s.projectNavMode);
   const chiefPanelMode = useLayoutStore((s) => s.chiefPanelMode);
   const setChiefPanelMode = useLayoutStore((s) => s.setChiefPanelMode);
+  const setProjectNavMode = useLayoutStore((s) => s.setProjectNavMode);
   const cycleProjectNav = useLayoutStore((s) => s.cycleProjectNav);
   const cycleChiefPanel = useLayoutStore((s) => s.cycleChiefPanel);
 
@@ -154,6 +155,20 @@ export function AppShell({ children }: Props) {
           aria-label="恢复总编面板"
         >
           总
+        </button>
+      )}
+
+      {/* R16 / P0-UI-8: project nav is hidden by default. Show a
+          small affordance so users who want the inline list can
+          toggle it on. Mirrors the chief-recover-fab pattern. */}
+      {projectNavMode === "hidden" && (
+        <button
+          className="projectnav-recover-fab"
+          onClick={() => setProjectNavMode("expanded")}
+          title="展开项目侧边栏"
+          aria-label="展开项目侧边栏"
+        >
+          ☰ 项目
         </button>
       )}
 

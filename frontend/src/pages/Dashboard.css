@@ -43,6 +43,14 @@
   .dashboard-row { grid-template-columns: 1fr; }
 }
 
+/* R16 / P0-DASH-1: full-width row, used for the pass/fail rate
+   dashboard. Single column, no responsive collapse. */
+.dashboard-row-full {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
 .dashboard-failure-wrap {
   display: flex;
   flex-direction: column;

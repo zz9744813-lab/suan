@@ -10,6 +10,11 @@
  *   标准    — 默认 (跟 seed 出来的一样)
  *   激进    — 高目标, 高预算, 多重试
  *   实验    — 极宽松门槛, 关闭 auto_continue (适合手动观察)
+ *
+ * R16 / P0-WORKER-2: 第 5 张「自定义」卡. 用户点开后展开一个 7 字段
+ * 表单, 填好点保存 → 写到 localStorage (novelforge.worker.custom.v1)
+ * 同时 PUT 到 /api/projects/{id}/policy. 重启浏览器后仍能看到这张卡.
+ * 没有后端改动 — 跟其他 4 张卡一样, 最终值是 PUT 到 worker_policies.
  */
 import { useEffect, useState } from "react";
 import { useProjectStore } from "../../stores/projectStore";
@@ -88,6 +93,35 @@ const PRESETS: Preset[] = [
   },
 ];
 
+// R16: localStorage key for the user's custom preset. Bump suffix
+// if we ever need to invalidate.
+const CUSTOM_PRESET_KEY = "novelforge.worker.custom.v1";
+
+type CustomPreset = {
+  name: string;
+  body: Partial<WorkerPolicy>;
+};
+
+function loadCustomPreset(): CustomPreset | null {
+  try {
+    const raw = localStorage.getItem(CUSTOM_PRESET_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.body) return null;
+    return parsed as CustomPreset;
+  } catch {
+    return null;
+  }
+}
+
+function saveCustomPreset(p: CustomPreset) {
+  localStorage.setItem(CUSTOM_PRESET_KEY, JSON.stringify(p));
+}
+
+function clearCustomPreset() {
+  localStorage.removeItem(CUSTOM_PRESET_KEY);
+}
+
 function presetsDiffer(p: WorkerPolicy, body: Partial<WorkerPolicy>): boolean {
   for (const k of Object.keys(body) as (keyof WorkerPolicy)[]) {
     if ((body as any)[k] !== (p as any)[k]) return true;
@@ -95,11 +129,27 @@ function presetsDiffer(p: WorkerPolicy, body: Partial<WorkerPolicy>): boolean {
   return false;
 }
 
+const FIELDS: Array<{ key: keyof WorkerPolicy; label: string; type: "number" | "checkbox"; step?: number }> = [
+  { key: "daily_word_goal", label: "每日目标字数", type: "number", step: 1000 },
+  { key: "daily_budget_usd", label: "每日预算 ($)", type: "number", step: 0.5 },
+  { key: "pass_score", label: "通过分数", type: "number", step: 1 },
+  { key: "max_rewrite_rounds", label: "最大改稿轮数", type: "number", step: 1 },
+  { key: "max_retry_per_task", label: "每任务最大重试", type: "number", step: 1 },
+  { key: "consecutive_fail_stop", label: "连续失败停机阈值", type: "number", step: 1 },
+  { key: "auto_continue", label: "auto_continue (自动续写)", type: "checkbox" },
+];
+
 export function PolicyPresetsCard() {
   const projectId = useProjectStore((s) => s.currentProjectId);
   const [policy, setPolicy] = useState<WorkerPolicy | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  // R16: custom preset state. Loaded once on mount. ``editing`` flips
+  // to true when the user clicks the 5th card (saved or empty) to
+  // bring up the inline form.
+  const [custom, setCustom] = useState<CustomPreset | null>(() => loadCustomPreset());
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Partial<WorkerPolicy>>({});
 
   useEffect(() => {
     if (!projectId) { setPolicy(null); return; }
@@ -151,11 +201,61 @@ export function PolicyPresetsCard() {
     }
   }
 
+  // R16: open the custom editor. If a saved preset exists, prefill
+  // the form with its body. Otherwise prefill from the current
+  // policy so the user can tweak incrementally.
+  function startEdit() {
+    setDraft(custom?.body ?? policy ?? {});
+    setEditing(true);
+  }
+
+  async function saveCustom() {
+    if (!projectId) return;
+    // Reject obviously bogus values so the worker doesn't loop at 0
+    // words forever or burn the daily budget in 1 chapter.
+    if (typeof draft.daily_word_goal === "number" && draft.daily_word_goal < 100) {
+      setMsg({ type: "err", text: "每日目标字数不能小于 100" });
+      return;
+    }
+    if (typeof draft.daily_budget_usd === "number" && draft.daily_budget_usd <= 0) {
+      setMsg({ type: "err", text: "每日预算必须 > 0" });
+      return;
+    }
+    setBusy("custom"); setMsg(null);
+    try {
+      const body = { ...policy, ...draft } as Partial<WorkerPolicy>;
+      const updated = await updatePolicy(projectId, body);
+      setPolicy(updated);
+      const name = custom?.name ?? "自定义";
+      const next: CustomPreset = { name, body: draft };
+      saveCustomPreset(next);
+      setCustom(next);
+      setEditing(false);
+      setMsg({ type: "ok", text: `已保存「${name}」自定义预设` });
+      setTimeout(() => setMsg(null), 2500);
+    } catch (e: any) {
+      setMsg({ type: "err", text: `保存失败: ${e.message}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function deleteCustom() {
+    if (!confirm("删除自定义预设?\n\n(只删本地保存,当前已应用的策略不会回退)")) return;
+    clearCustomPreset();
+    setCustom(null);
+    setEditing(false);
+    setMsg({ type: "ok", text: "已删除自定义预设" });
+    setTimeout(() => setMsg(null), 2500);
+  }
+
+  const customIsCurrent = custom ? presetsDiffer(policy, custom.body) === false : false;
+
   return (
     <div className="card ppc-card">
       <div className="ppc-head">
         <h3>策略预设</h3>
-        <span className="muted small">项目 #{projectId} · 4 套一键套用</span>
+        <span className="muted small">项目 #{projectId} · {PRESETS.length + (custom ? 1 : 0) + 1} 套一套用</span>
       </div>
 
       <div className="ppc-grid">
@@ -182,6 +282,84 @@ export function PolicyPresetsCard() {
             </button>
           );
         })}
+
+        {/* R16: 5th card — custom (saved or empty) */}
+        {!editing && (
+          <button
+            className={`ppc-tile ${custom ? "" : "ppc-tile-custom-empty"} ${customIsCurrent ? "current" : ""} ${busy === "custom" ? "busy" : ""}`}
+            onClick={startEdit}
+            disabled={busy !== null}
+            title={custom ? `已保存「${custom.name}」,点开编辑` : "点开自定义策略"}
+          >
+            <div className="ppc-tile-emoji">{custom ? "📝" : "＋"}</div>
+            <div className="ppc-tile-name">
+              {custom?.name ?? "自定义"}
+              {customIsCurrent && <span className="ppc-current-tag">当前</span>}
+            </div>
+            <div className="ppc-tile-desc">
+              {custom
+                ? `已保存 · ${custom.body.daily_word_goal}字 $${custom.body.daily_budget_usd} ≥${custom.body.pass_score}分`
+                : "点开设置自己的 7 字段 · 保存在本地"}
+            </div>
+            {custom && (
+              <div className="ppc-tile-stats">
+                <span><b>{custom.body.daily_word_goal}</b>字/日</span>
+                <span><b>${custom.body.daily_budget_usd}</b>/日</span>
+                <span>≥ <b>{custom.body.pass_score}</b>分</span>
+              </div>
+            )}
+          </button>
+        )}
+
+        {editing && (
+          <div className="ppc-edit-form">
+            <div className="ppc-field" style={{ gridColumn: "1 / -1" }}>
+              <label>预设名称</label>
+              <input
+                type="text"
+                value={custom?.name ?? ""}
+                placeholder="(留空则用「自定义」)"
+                maxLength={20}
+                onChange={(e) => setCustom((c) => ({ name: e.target.value, body: c?.body ?? draft }))}
+              />
+            </div>
+            {FIELDS.map((f) => (
+              <div className="ppc-field" key={f.key}>
+                <label>
+                  {f.label}
+                  {f.type === "checkbox" && (
+                    <input
+                      type="checkbox"
+                      checked={Boolean((draft as any)[f.key])}
+                      onChange={(e) => setDraft({ ...draft, [f.key]: e.target.checked })}
+                    />
+                  )}
+                </label>
+                {f.type === "number" && (
+                  <input
+                    type="number"
+                    step={f.step}
+                    value={(draft as any)[f.key] ?? 0}
+                    onChange={(e) => setDraft({ ...draft, [f.key]: Number(e.target.value) })}
+                  />
+                )}
+              </div>
+            ))}
+            <div className="ppc-form-actions">
+              {custom && (
+                <button className="danger" onClick={deleteCustom} disabled={busy !== null}>
+                  删除
+                </button>
+              )}
+              <button onClick={() => setEditing(false)} disabled={busy !== null}>
+                取消
+              </button>
+              <button className="primary" onClick={saveCustom} disabled={busy !== null}>
+                {busy === "custom" ? "保存中…" : "保存并应用"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {msg && (
@@ -189,7 +367,7 @@ export function PolicyPresetsCard() {
       )}
 
       <div className="ppc-foot muted tiny">
-        💡 也可到「项目 → 策略」标签页手动微调单个字段。
+        💡 也可到「项目 → 策略」标签页手动微调单个字段。自定义预设只保存在当前浏览器(不跨设备)。
       </div>
     </div>
   );

@@ -1,0 +1,304 @@
+/* PassFailRateCard — Dashboard 上的「成稿率 / 废稿率」仪表盘 (R16)
+ *
+ * 4 桶: 成稿 / 需复审 / 失败 / 跑批中.  圆环 + 图例 + 可点击的章节抽屉.
+ * 整体配色走 Concept B: bg-paper-soft 底, accent-gold 主色, 状态色用
+ * 全局 state-ok / state-warn / state-error 变量.
+ */
+
+.pfr-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pfr-card .card-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #2a2a2a);
+}
+
+.pfr-body {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 8px 4px 4px;
+  flex-wrap: wrap;
+}
+
+.pfr-donut-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.pfr-donut {
+  display: block;
+}
+
+.pfr-donut-seg {
+  transition: stroke-width 0.15s ease, opacity 0.15s ease;
+}
+.pfr-donut-seg:hover {
+  stroke-width: 24;
+  opacity: 0.85;
+}
+
+.pfr-donut-empty {
+  width: 160px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-soft, #d4cfc0);
+  border-radius: 50%;
+  font-size: 28px;
+}
+
+.pfr-donut-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 22px;
+  font-weight: 700;
+  fill: var(--text-primary, #2a2a2a);
+}
+
+.pfr-donut-sub {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  fill: var(--text-muted, #8a96a8);
+  letter-spacing: 1px;
+}
+
+.pfr-rate-row {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-muted, #8a96a8);
+}
+
+.pfr-rate {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.pfr-rate-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pfr-rate-label {
+  font-size: 10px;
+  color: var(--text-muted, #8a96a8);
+}
+
+/* Legend — 4 行可点击,显示在圆环右侧 */
+.pfr-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.pfr-legend-item {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius, 4px);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-primary, #2a2a2a);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pfr-legend-item:hover {
+  background: var(--bg-elev, #f6f1e6);
+  border-color: var(--border-soft, #d4cfc0);
+}
+.pfr-legend-item.active {
+  background: rgba(212, 175, 55, 0.1);
+  border-color: var(--accent-gold, #d4af37);
+}
+
+.pfr-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pfr-legend-label {
+  font-weight: 500;
+}
+
+.pfr-legend-num {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  color: var(--text-primary, #2a2a2a);
+}
+
+.pfr-legend-pct {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-muted, #8a96a8);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Chapter list drawer — 模态浮层,列出该桶内的所有章节 */
+.pfr-drawer {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 25, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 24px;
+  animation: pfr-fade-in 0.12s ease;
+}
+
+@keyframes pfr-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pfr-drawer-inner {
+  background: var(--bg-paper, #faf6ec);
+  border: 1px solid var(--accent-line, #d4cfc0);
+  border-radius: var(--radius, 6px);
+  max-width: 880px;
+  width: 100%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  animation: pfr-slide-up 0.16s ease;
+}
+
+@keyframes pfr-slide-up {
+  from { transform: translateY(12px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.pfr-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--accent-line, #d4cfc0);
+  background: var(--bg-paper-soft, #f6f1e6);
+  border-radius: 6px 6px 0 0;
+}
+
+.pfr-drawer-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary, #2a2a2a);
+}
+
+.pfr-drawer-head button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  font-size: 14px;
+  color: var(--text-muted, #8a96a8);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+.pfr-drawer-head button:hover {
+  border-color: var(--border-soft, #d4cfc0);
+  color: var(--text-primary, #2a2a2a);
+}
+
+.pfr-drawer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  overflow-y: auto;
+  display: block;
+  max-height: calc(80vh - 60px);
+}
+
+.pfr-drawer-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-paper-soft, #f6f1e6);
+  z-index: 1;
+}
+
+.pfr-drawer-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #8a96a8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--accent-line, #d4cfc0);
+}
+
+.pfr-drawer-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft, #ebe5d5);
+  color: var(--text-primary, #2a2a2a);
+}
+
+.pfr-drawer-table tr:hover td {
+  background: var(--bg-elev, #f6f1e6);
+}
+
+.pfr-drawer-table a {
+  color: var(--accent-gold, #d4af37);
+  text-decoration: none;
+  font-weight: 500;
+}
+.pfr-drawer-table a:hover {
+  text-decoration: underline;
+}
+
+.pfr-drawer-table .pill {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  letter-spacing: 0.3px;
+  font-family: var(--font-mono, monospace);
+  text-transform: lowercase;
+}
+.pfr-drawer-table .pill.succeeded {
+  background: rgba(74, 222, 128, 0.15);
+  color: #16a34a;
+}
+.pfr-drawer-table .pill.needs_review {
+  background: rgba(251, 191, 36, 0.15);
+  color: #d97706;
+}
+.pfr-drawer-table .pill.failed {
+  background: rgba(248, 113, 113, 0.15);
+  color: #dc2626;
+}
+.pfr-drawer-table .pill.running,
+.pfr-drawer-table .pill.queued {
+  background: rgba(212, 175, 55, 0.15);
+  color: #b45309;
+}

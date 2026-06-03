@@ -703,6 +703,38 @@
   z-index: 140 !important;
 }
 
+/* R16 / P0-UI-8: project nav is hidden by default (the rail's
+   avatar strip + /projects page are enough). This small FAB shows
+   up so users who DO want the inline list have a one-click way to
+   bring it back. Sits to the LEFT of the chief-recover-fab (which
+   lives bottom-right) so the two don't collide visually. */
+.projectnav-recover-fab {
+  position: fixed !important;
+  left: calc(var(--rail-width) + 16px) !important;
+  bottom: calc(var(--statusbar-height) + 16px) !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+  border-radius: 18px !important;
+  background: var(--bg-elev) !important;
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border: 1px solid var(--border-soft) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  cursor: pointer !important;
+  z-index: 95 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, color 0.15s ease !important;
+}
+.projectnav-recover-fab:hover {
+  transform: scale(1.04) !important;
+  color: var(--accent-gold) !important;
+  box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3) !important;
+}
+
 @media (max-width: 1100px) {
   .app-shell,
   .shell {

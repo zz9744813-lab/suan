@@ -41,7 +41,13 @@ function cycle(mode: PanelMode): PanelMode {
 export const useLayoutStore = create<State & Actions>()(
   persist(
     (set, get) => ({
-      projectNavMode: "expanded",
+      // R16 / P0-UI-8: project nav default flipped to "hidden".
+      // The expanded sidebar took 1/4 of the screen for project
+      // listing when the rail already has a compact avatar strip
+      // AND /projects route handles full project management. Users
+      // who want the inline list can still cycle to it via the
+      // toggle button (now opt-in instead of opt-out).
+      projectNavMode: "hidden",
       chiefPanelMode: "expanded",
       setProjectNavMode: (mode) => set({ projectNavMode: mode }),
       setChiefPanelMode: (mode) => set({ chiefPanelMode: mode }),
@@ -53,8 +59,19 @@ export const useLayoutStore = create<State & Actions>()(
       cycleChiefPanel: () => set({ chiefPanelMode: cycle(get().chiefPanelMode) }),
     }),
     {
-      name: "noverlforge.layout.v1",
-      version: 1,
+      // Bumped the storage key so users on the old "expanded"
+      // default get the new "hidden" default on next visit,
+      // instead of being stuck with their old persisted value.
+      name: "noverlforge.layout.v2",
+      version: 2,
+      migrate: (persisted: any, _v: number) => {
+        // Force project nav to hidden on upgrade; chief panel
+        // preference is preserved across versions.
+        if (persisted && typeof persisted === "object") {
+          return { ...persisted, projectNavMode: "hidden" };
+        }
+        return persisted;
+      },
     }
   )
 );

@@ -116,3 +116,82 @@
   color: var(--text-muted, #8a96a8);
   font-style: italic;
 }
+
+/* R16 / P0-WORKER-2: custom (5th) card. Shows either an empty
+   "未设置" tile, a saved custom preset, OR an inline edit form. */
+.ppc-tile-custom-empty {
+  border-style: dashed;
+  border-color: var(--border-soft);
+  background: transparent;
+  color: var(--text-muted);
+}
+.ppc-tile-custom-empty:hover {
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+}
+
+.ppc-edit-form {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 16px;
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--accent-gold);
+  border-radius: var(--radius);
+}
+.ppc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ppc-field label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.ppc-field input[type="number"],
+.ppc-field input[type="text"] {
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+}
+.ppc-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin-top: 4px;
+}
+.ppc-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.ppc-form-actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-paper-soft);
+  color: var(--text-primary);
+}
+.ppc-form-actions button.primary {
+  background: var(--accent-gold);
+  color: var(--bg-base);
+  border-color: var(--accent-gold);
+  font-weight: 600;
+}
+.ppc-form-actions button.danger {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+.ppc-form-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

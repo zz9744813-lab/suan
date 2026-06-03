@@ -32,6 +32,7 @@ import { CurrentPipelinePanel } from "../components/dashboard/CurrentPipelinePan
 import { FailureDiagnosisCard } from "../components/dashboard/FailureDiagnosisCard";
 import { ChapterPreviewCard } from "../components/dashboard/ChapterPreviewCard";
 import { UsefulEventStream } from "../components/dashboard/UsefulEventStream";
+import { PassFailRateCard } from "../components/dashboard/PassFailRateCard";
 import "./Dashboard.css";
 
 export function Dashboard() {
@@ -92,6 +93,10 @@ export function Dashboard() {
               </div>
             </section>
           )}
+        </div>
+
+        <div className="dashboard-row dashboard-row-full">
+          <PassFailRateCard projectId={currentProjectId} />
         </div>
 
         <div className="dashboard-row">

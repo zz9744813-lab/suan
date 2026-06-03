@@ -49,36 +49,49 @@ export const useChiefStore = create<State & Actions>((set, get) => ({
         project_id: projectId,
         message: msg,
       });
-      // session is created on the backend if it didn't exist
+      // Build the new messages list BEFORE touching the session.
+      // We do this in one place so we can branch on "is this a
+      // brand-new session" without racing against startSession's
+      // loadMessages() call.
+      const userEcho = {
+        id: -Date.now(),
+        session_id: reply.session_id,
+        role: "user" as const,
+        content: msg,
+        actions: null,
+        thinking: null,
+        tokens_in: 0,
+        tokens_out: 0,
+        cost_usd: 0,
+        created_at: new Date().toISOString(),
+      };
+      const newMessages = [...get().messages, userEcho, reply];
+
+      // P0-CHIEF-2 / R16 fix: DO NOT call startSession() here when
+      // the chat just created a fresh session. startSession() wipes
+      // the local messages to [] then awaits loadMessages() — but
+      // loadMessages() will return the [user, chief] we just sent,
+      // and THEN we appended [user, chief] AGAIN below the
+      // startSession() call. Net effect: every fresh-session first
+      // message gets a double echo (the chief reply appears twice).
+      //
+      // We just set the session in-place and use the messages we
+      // already built. Existing sessions take the normal "append"
+      // path.
       if (!get().session) {
-        // refresh the new session
-        await get().startSession({
-          id: reply.session_id,
-          title: msg.slice(0, 30) || "新会话",
-          project_id: projectId ?? null,
-          page_context: null,
-          created_at: reply.created_at,
-        });
-      }
-      // append both user echo (synthesized) and the chief reply
-      set({
-        messages: [
-          ...get().messages,
-          {
-            id: -Date.now(),
-            session_id: reply.session_id,
-            role: "user",
-            content: msg,
-            actions: null,
-            thinking: null,
-            tokens_in: 0,
-            tokens_out: 0,
-            cost_usd: 0,
-            created_at: new Date().toISOString(),
+        set({
+          session: {
+            id: reply.session_id,
+            title: msg.slice(0, 30) || "新会话",
+            project_id: projectId ?? null,
+            page_context: null,
+            created_at: reply.created_at,
           },
-          reply,
-        ],
-      });
+          messages: newMessages,
+        });
+      } else {
+        set({ messages: newMessages });
+      }
     } catch (e: any) {
       set({
         messages: [
