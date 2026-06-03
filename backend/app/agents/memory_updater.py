@@ -15,6 +15,30 @@ class MemoryUpdateAgent(BaseAgent):
     extra_temperature = 0.0
     extra_max_tokens = 2000
 
+    # P0-4c: a missing memory update should be no-op, not a hard
+    # 400. The MemoryService.update_from_chapter() call below will
+    # then simply skip the chapter and we'll just lose incremental
+    # memory writes for that one chapter — fine, the next chapter
+    # will catch up. The continuity / chief pages already surface
+    # ``parse_failed=True`` as a yellow badge.
+    allow_json_fallback = True
+
+    def _build_json_fallback(self, raw: str) -> dict[str, Any]:
+        """MemoryUpdate-shaped fallback when the model returned non-JSON.
+
+        Empty update lists are safe — ``MemoryService.update_from_chapter``
+        iterates whatever's there and the empty case is a no-op.
+        """
+        return {
+            "character_state_updates": [],
+            "foreshadow_updates": [],
+            "hard_fact_additions": [],
+            "parse_failed": True,
+            "fallback": True,
+            "raw_preview": (raw or "")[:1000],
+            "summary": "MemoryUpdateAgent 返回内容无法解析为 JSON，已跳过本章记忆抽取。",
+        }
+
     async def after_run(
         self, ctx: AgentContext, parsed: dict[str, Any] | None, raw: str
     ) -> None:

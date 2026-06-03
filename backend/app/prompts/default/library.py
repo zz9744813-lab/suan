@@ -222,7 +222,13 @@ WRITING_PROMPTS: dict[str, dict] = {
             "【草稿】\n{{draft_content}}\n\n"
             "【记忆上下文】\n{{memory_context}}\n\n"
             "【活跃伏笔】\n{{active_foreshadows}}\n\n"
-            "请输出 JSON：\n"
+            "【输出要求 — 严格遵守】\n"
+            "1. 你的回复必须是且只能是一个 JSON 对象。\n"
+            "2. 不要写任何前置说明、不要写「下面是」「好的」等客套话。\n"
+            "3. 不要用 ```json ... ``` 包裹，直接以 { 开头。\n"
+            "4. 不要用中文全角括号 【】 代替 JSON {}。\n"
+            "5. 如果草稿没有冲突,把 conflicts 留空数组,ok 设为 true。\n\n"
+            "输出 schema：\n"
             "{\n"
             '  "conflicts": [\n'
             '    {"type": "时间线|人物状态|伏笔|物品|势力", "severity": "high|medium|low", "detail": "..."}\n'
@@ -253,6 +259,11 @@ WRITING_PROMPTS: dict[str, dict] = {
             "请从下面这章的最终正文中抽取需要写入记忆的事实。\n\n"
             "【最终正文】\n{{final_content}}\n\n"
             "【当前记忆上下文】\n{{memory_context}}\n\n"
+            "【输出要求 — 严格遵守】\n"
+            "1. 你的回复必须是且只能是一个 JSON 对象。\n"
+            "2. 不要写任何前置说明、不要写「下面是」「好的」等客套话。\n"
+            "3. 不要用 ```json ... ``` 包裹，直接以 { 开头。\n"
+            "4. 如果本章没有需要抽取的事实,把所有数组留空,只填 summary 一句话。\n\n"
             "输出 JSON：\n"
             "{\n"
             '  "character_state_updates": [\n'

@@ -1,0 +1,142 @@
+/* TasksPage — 任务列表 (Round 13, P0-UI-7) */
+
+.tasks-page { padding: 0; }
+
+/* ---- filter chips ---- */
+.tasks-filter-row {
+  display: flex;
+  gap: 8px;
+  padding: 0 24px 12px;
+  flex-wrap: wrap;
+}
+.tasks-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 14px;
+  background: var(--bg-paper);
+  color: var(--text-muted, #8a96a8);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.tasks-filter-chip:hover {
+  border-color: var(--accent-gold);
+  color: var(--text-primary);
+}
+.tasks-filter-chip.active {
+  border-color: var(--accent-gold);
+  background: rgba(212, 175, 55, 0.12);
+  color: var(--accent-gold);
+  font-weight: 600;
+}
+.tasks-filter-chip .chip-count {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  padding: 0 5px;
+  background: var(--bg-paper-soft);
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+.tasks-filter-chip.active .chip-count {
+  background: var(--accent-gold);
+  color: var(--bg-base, #181c24);
+}
+
+/* ---- flash banner ---- */
+.tasks-flash {
+  margin: 0 24px 12px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.tasks-flash-ok {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+.tasks-flash-err {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+
+/* ---- table ---- */
+.tasks-table {
+  width: 100%;
+  font-size: 12.5px;
+}
+.tasks-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #8a96a8);
+}
+.tasks-table tr.is-failed { background: rgba(248, 113, 113, 0.04); }
+.tasks-table tr.expanded { background: rgba(212, 175, 55, 0.06); }
+
+.expand-caret {
+  color: var(--text-muted, #8a96a8);
+  font-size: 10px;
+  text-align: center;
+}
+
+.task-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+button.link.retry { color: var(--accent-gold); }
+button.link.retry:hover { color: #fbbf24; text-decoration: underline; }
+button.link.cancel { color: #f87171; }
+button.link.cancel:hover { color: #ef4444; text-decoration: underline; }
+button.link:disabled { opacity: 0.5; cursor: wait; }
+
+/* ---- expanded detail row ---- */
+.detail-row { background: var(--bg-paper-soft, #f6f1e6); }
+.detail-row td { padding: 0 !important; }
+
+.tasks-detail {
+  padding: 12px 16px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tasks-detail-block { font-size: 12px; }
+.detail-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #8a96a8);
+  margin-bottom: 4px;
+}
+
+.error-text {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.06);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  max-height: 200px;
+  overflow: auto;
+  margin: 0;
+}
+
+.steps-table { width: 100%; font-size: 12px; }
+.steps-table th {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted, #8a96a8);
+  font-weight: 500;
+}
+.steps-table td { padding: 4px 8px; }
+.steps-table tr { border-bottom: 1px solid var(--accent-line-soft, rgba(0,0,0,0.04)); }
+.steps-table tr:last-child { border-bottom: 0; }

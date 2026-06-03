@@ -246,4 +246,100 @@ def _safe_json_loads(text: str) -> dict[str, Any] | None:
                 pass
         # move to next { after the failed one
         start = text.find("{", start + 1)
+
+    # 4) Last-ditch: extract known scalar fields from prose via regex.
+    # Some step-3.7-flash outputs look like::
+    #     **结论**: 存在 1 处人物状态冲突: 林萧已经筑基...
+    #     **建议**: 需要在第三章交代...
+    # We pull a few common keys the pipeline actually consumes and
+    # synthesise a minimal valid dict. The caller is expected to be
+    # an agent with ``allow_json_fallback=True`` (Critic, Continuity,
+    # MemoryUpdate, ...) and to handle the ``prose_fallback=True``
+    # marker as "the model tried, just not in JSON form".
+    prose = _extract_prose_fallback(text)
+    if prose is not None:
+        return prose
+    return None
+
+
+def _extract_prose_fallback(text: str) -> dict[str, Any] | None:
+    """Best-effort field extraction when the model wrote prose instead of JSON.
+
+    Looks for two signals commonly present in the agent prompts we ship:
+      - a boolean truth marker (「无冲突」「通过」「存在冲突」「发现问题」)
+      - a numeric score (「总分 78」「score: 82」「82 分」)
+    Returns a minimally populated dict; otherwise None. The output shape
+    intentionally matches the agent's expected schema where possible:
+      - Continuity: looks for "conflicts" / "ok"
+      - Critic:     looks for "total" / "issues"
+      - MemoryUpdate: looks for "character_state_updates"
+    The caller will overwrite / merge keys the agent's
+    ``_build_json_fallback`` produces, so we keep the dict small.
+    """
+    if not text or len(text.strip()) < 4:
+        return None
+
+    snippet = text[:4000]
+    result: dict[str, Any] = {"prose_fallback": True, "raw_preview": text[:1000]}
+
+    # Boolean truth — supports Chinese 玄幻 prompts.
+    #
+    # Note: bare keywords like "冲突" are too noisy — a sentence like
+    # "没有发现明显的时间线冲突" (no conflict found) should NOT count as
+    # a conflict. We resolve this by looking for an explicit
+    # affirmative pattern ("存在X冲突" / "发现X冲突" / "有矛盾" / "fail")
+    # first, and only fall back to bare keyword matching if no
+    # negation is present in the surrounding sentence.
+    falsy_strong = (
+        "存在冲突", "发现冲突", "发现矛盾", "有问题", "存在矛盾",
+        "fail", "not ok", "存在问题",
+    )
+    truthy_strong = (
+        "无冲突", "无问题", "无矛盾", "通过检查", "一致性良好",
+        "前后一致", "全部通过", "完全正确", "ok", "pass",
+    )
+    falsy_weak = ("冲突", "矛盾", "硬伤")
+    truthy_weak = ("通过", "合格", "正确")
+
+    snippet_low = snippet.lower()
+    if any(s in snippet_low or s in snippet for s in falsy_strong):
+        result["ok"] = False
+        result["_prose_signal"] = "conflict_detected"
+    elif any(s in snippet_low or s in snippet for s in truthy_strong):
+        result["ok"] = True
+        result["_prose_signal"] = "clean"
+    else:
+        # Fall back to weak keywords, but only when they're NOT inside
+        # a negation ("没有冲突", "未发现矛盾"). We do this by checking
+        # the 4 chars before each match for common negators.
+        import re as _re
+        def _is_negated(needle: str) -> bool:
+            for m in _re.finditer(needle, snippet):
+                pre = snippet[max(0, m.start() - 6):m.start()]
+                if any(neg in pre for neg in ("没有", "未发现", "不存在", "无", "没", "未")):
+                    return True
+            return False
+        falsy_match = next((s for s in falsy_weak if s in snippet and not _is_negated(s)), None)
+        truthy_match = next((s for s in truthy_weak if s in snippet and not _is_negated(s)), None)
+        if falsy_match and not truthy_match:
+            result["ok"] = False
+            result["_prose_signal"] = f"weak_keyword:{falsy_match}"
+        elif truthy_match and not falsy_match:
+            result["ok"] = True
+            result["_prose_signal"] = f"weak_keyword:{truthy_match}"
+
+    # Numeric score — "总分 78", "score: 82", "82 分", "Total: 78/100"
+    m = re.search(r"(?:总分|total|score)\s*[:：=]?\s*(\d{1,3})", snippet, re.IGNORECASE)
+    if not m:
+        m = re.search(r"(\d{1,3})\s*(?:分|/100|/\\d{2,3})", snippet)
+    if m:
+        score = max(0, min(100, int(m.group(1))))
+        result["total"] = score
+        result["_prose_score"] = score
+
+    # Return only if we found at least one signal — otherwise this is
+    # just noise and the caller should treat the model as totally
+    # unparseable.
+    if "ok" in result or "total" in result:
+        return result
     return None

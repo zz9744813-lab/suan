@@ -68,6 +68,29 @@ async def seed() -> None:
                 db.add(ver)
                 await db.flush()
                 tpl.active_version_id = ver.id
+            else:
+                # Auto-bump: if the library body diverges from the active
+                # version, snapshot a new version and switch the template
+                # over. This lets code-side prompt tweaks propagate via
+                # ``python -m app.seed`` without a manual "save new
+                # version" dance. Existing v1 is preserved as deprecated
+                # so the history page still shows the diff.
+                active = next(
+                    (v for v in existing if v.id == tpl.active_version_id),
+                    next((v for v in existing if v.status == "active"), existing[0]),
+                )
+                if active and active.body != spec["body"]:
+                    next_no = max(v.version for v in existing) + 1
+                    # Demote current active to deprecated
+                    active.status = "deprecated"
+                    ver = PromptVersion(
+                        template_id=tpl.id, version=next_no, body=spec["body"],
+                        status="active",
+                        change_note="auto-bump by seed: library body changed",
+                    )
+                    db.add(ver)
+                    await db.flush()
+                    tpl.active_version_id = ver.id
 
         # 2. A built-in stub provider so the system works out of the box.
         #    Uses the in-process mock LLM (`mock://`) so the UI and pipeline
