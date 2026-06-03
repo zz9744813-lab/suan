@@ -1,0 +1,66 @@
+# NovelForge 2.0 — Production deployment
+#
+# Three services on a private network:
+#   - backend    FastAPI + in-process asyncio worker (port 8000, internal)
+#   - frontend   Nginx serving the Vite bundle, /api proxied to backend
+#   - (no DB container)   SQLite is mounted as a volume — fine for a single
+#                          author / small team. Switch to Postgres by
+#                          changing DATABASE_URL and adding a db service.
+#
+# Quick start:
+#   cp .env.example .env   # edit NOVELFORGE_API_KEY
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# Data persists in the named volume `novelforge_data`. To start fresh:
+#   docker compose down -v
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: novelforge-backend:0.1.0
+    container_name: novelforge-backend
+    restart: unless-stopped
+    environment:
+      # Pass-through from host .env if present, else inline defaults
+      NOVELFORGE_API_KEY: ${NOVELFORGE_API_KEY:-novelforge-local-dev-key}
+      DEBUG: ${DEBUG:-false}
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////app/backend/data/novelforge.db}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
+    volumes:
+      - novelforge_data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - nfnet
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: novelforge-frontend:0.1.0
+    container_name: novelforge-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # host :8080 -> container :80
+      # Change to 80:80 if you want to serve on the standard port.
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - nfnet
+
+networks:
+  nfnet:
+    driver: bridge
+
+volumes:
+  novelforge_data:
+    name: novelforge_data
