@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useWorkerStore } from "../stores/workerStore";
 import { workerStart, workerPause, workerResume, workerStop, listTasks } from "../api";
 import type { AgentTask } from "../types";
+import { PolicyPresetsCard } from "../components/worker/PolicyPresetsCard";
 
 export function WorkerPage() {
   const status = useWorkerStore((s) => s.status);
@@ -68,6 +69,8 @@ export function WorkerPage() {
           </pre>
         </div>
       )}
+
+      <PolicyPresetsCard />
 
       <div className="card">
         <h3>任务队列（最近 30 条）</h3>
