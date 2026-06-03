@@ -1,0 +1,257 @@
+/* StudyPage — R18 拆书页样式
+ *
+ * 树状结构:
+ *   .study-tabs 顶部 tab 切换
+ *   .study-library
+ *     .study-toolbar (搜索 + 上传 + 粘贴)
+ *     .study-book-list
+ *       .study-book  (每本书的卡片, 默认折叠)
+ *         .study-book-head
+ *         .study-book-body (展开后)
+ *           .study-chapter-tree
+ *             .study-chapter  (每章一行, 可展开)
+ *               .study-chapter-row
+ *               .study-chapter-body (展开后: 人物 pill + 正文)
+ */
+
+.study-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--accent-line);
+  margin-bottom: 16px;
+}
+
+.study-tab {
+  padding: 9px 18px;
+  font-size: 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 0;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.study-tab:hover { color: var(--text-primary); }
+.study-tab.active {
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+}
+
+/* ---------- 我的书库 ---------- */
+
+.study-library {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.study-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px !important;
+  flex-wrap: wrap;
+}
+.study-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+  padding: 6px 12px;
+}
+.study-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  font-size: 13px;
+  background: var(--grad-primary);
+  color: #ffffff;
+  border: 1px solid var(--accent-gold-dim);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.12s ease;
+}
+.study-upload-btn:hover {
+  background: var(--grad-primary-hover);
+}
+
+.study-new-form {
+  padding: 14px 18px;
+}
+
+.study-empty {
+  text-align: center;
+  padding: 48px 24px;
+}
+.study-empty-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+}
+.study-empty-title {
+  font-size: 15px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+}
+
+.study-book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.study-book {
+  padding: 0 !important;
+  overflow: hidden;
+}
+.study-book-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 12px 18px;
+  text-align: left;
+  cursor: pointer;
+  gap: 12px;
+  border-radius: 0;
+  font-family: inherit;
+  color: inherit;
+  transition: background 0.12s ease;
+}
+.study-book-head:hover { background: var(--bg-paper-soft); }
+.study-book.expanded .study-book-head {
+  background: var(--bg-paper-soft);
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+
+.study-book-toggle {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex-shrink: 0;
+  width: 14px;
+}
+
+.study-book-title {
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.study-book-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.study-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-family: var(--font-mono, monospace);
+}
+.study-stat b {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.study-book-body {
+  padding: 12px 18px 16px;
+}
+
+/* ---------- chapter tree (嵌套) ---------- */
+
+.study-chapter-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 2px solid var(--accent-line-soft);
+  padding-left: 12px;
+  margin-left: 4px;
+}
+
+.study-chapter {
+  border-radius: var(--radius);
+  transition: background 0.1s ease;
+}
+.study-chapter.open {
+  background: var(--bg-elevated);
+}
+
+.study-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.study-chapter-toggle {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 0;
+  width: 18px;
+  flex-shrink: 0;
+}
+.study-chapter-toggle:hover { color: var(--text-primary); }
+
+.study-chapter-title {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.study-chapter-body {
+  padding: 8px 12px 12px 32px;
+  border-top: 1px solid var(--accent-line-soft);
+}
+
+.study-char-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  font-size: 11px;
+  border-radius: 11px;
+  background: var(--bg-paper-soft);
+  color: var(--text-secondary);
+  border: 1px solid var(--accent-line);
+}
+.study-char-pill b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.study-char-del {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 0;
+}
+.study-char-del:hover { color: var(--state-error); }
+
+.study-chapter-text {
+  margin: 0;
+  background: var(--bg-base);
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: var(--font-mono, monospace);
+}

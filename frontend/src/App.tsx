@@ -21,28 +21,16 @@ import { NotFound } from "./pages/NotFound";
 // only when ``import.meta.env.DEV`` is true. The banner is sticky at
 // the top of every page so a misconfigured Vite is impossible to
 // miss.
+//
+// R18: only the MISSING-CASE warning is rendered (red). The
+// "everything is fine, VITE_API_BASE is set" green banner used to
+// sit on every page, but it was constant noise once the
+// ``.env.development`` shipped — operators already know they're in
+// dev. Hide the happy-path entirely; show only the error.
 function DevApiBaseBanner() {
   if (!import.meta.env.DEV) return null;
   const base = (import.meta.env.VITE_API_BASE as string) || "";
-  if (base) {
-    return (
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 9999,
-          padding: "4px 12px",
-          fontSize: 12,
-          background: "rgba(120, 199, 122, 0.18)",
-          borderBottom: "1px solid rgba(120, 199, 122, 0.4)",
-          color: "#0d2c12",
-          textAlign: "center",
-        }}
-      >
-        dev mode · API 直连 <code>{base}</code>（已绕过 Vite proxy，PUT/POST body 不会丢）
-      </div>
-    );
-  }
+  if (base) return null; // healthy: API 直连, 无需提示
   return (
     <div
       style={{

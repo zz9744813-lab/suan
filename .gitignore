@@ -113,3 +113,9 @@ backend/*_now.json
 backend/*_final.json
 backend/probe*.json
 backend/dump*.json
+
+# R19: study batch upload test artifacts (probe books left over
+# from manual endpoint testing — book1/2/3/overflow_N + detail_out).
+# These are NOT real test files; the real suite lives under
+# backend/app/tests/ (excluded by the python section above).
+backend/tests/

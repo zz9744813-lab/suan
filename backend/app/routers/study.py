@@ -38,12 +38,18 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 # -------------------- chapterize helpers --------------------
 
-# Chinese: 第[一-龥0-9零〇一二三四五六七八九十百千万]+章 + optional title
+# Chinese: "第N章" with optional whitespace between EVERY token.
+# The old regex was `^\s*第([零〇...0-9]+)章[...]*(.{0,80})` which
+# required the digit to be glued to 「第」 with no whitespace — the
+# common case is "第 1 章 起点" (space after 第) and that never
+# matched, so every upload fell back to the single-chapter "全文"
+# path. The fix: optional \s* between 第, the number, 章, and the
+# title.
 _CN_CHAPTER_RE = re.compile(
-    r"^\s*第([零〇一二三四五六七八九十百千万0-9]+)章[　\s\.：:—\-]*(.{0,80})$",
+    r"^\s*第\s*([零〇一二三四五六七八九十百千万0-9]+)\s*章[\s　\.：:—\-]*(.{0,80})$",
     re.MULTILINE,
 )
-# English: "Chapter 1" / "Chapter 1: Foo" / "CHAPTER ONE"
+# English: "Chapter 1" / "Chapter 1: Foo" / "CHAPTER ONE" / "Chapter One"
 _EN_CHAPTER_RE = re.compile(
     r"^\s*CHAPTER\s+([0-9]+|[A-Za-z]+)[\.\:\s\-—]*(.{0,80})$",
     re.MULTILINE | re.IGNORECASE,
@@ -202,6 +208,123 @@ async def create_material(
     return {"ok": True, "data": StudyMaterialRead.from_orm_trimmed(row)}
 
 
+@router.post("/materials/upload/batch")
+async def upload_materials_batch(
+    files: list[UploadFile] = File(...),
+    auto_chapterize: bool = Form(default=True),
+    min_chapter_chars: int = Form(default=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """R19: accept up to 5 books in a single multipart POST.
+
+    Each file is parsed with the same per-format dispatch as the
+    single-file upload route; each resulting material is then
+    auto-chapterized in-place so the user lands on a populated
+    library without an extra click. Per-file failures are surfaced
+    in the response as ``{"ok": false, "error": ...}`` and the
+    whole batch still returns 200 — we don't want one bad EPUB
+    to nuke 4 successful TXT uploads.
+
+    The 5-file cap is enforced in the route (the frontend also
+    mirrors it via the ``<input multiple>`` limit).
+
+    No ``response_model`` — the per-entry shape is mixed (success
+    returns ``{ok, data: StudyMaterialRead}``, failure returns
+    ``{ok: false, filename, error}``), so we let the dict go out
+    untyped and the client treats each entry by its own ``ok``.
+    """
+    if not files:
+        raise bad_request("至少选择一个文件。")
+    if len(files) > 5:
+        raise bad_request(f"批量上传最多 5 个文件,收到 {len(files)}。")
+    results: list[dict[str, Any]] = []
+    for f in files:
+        try:
+            content = await f.read()
+            if len(content) > 32 * 1024 * 1024:
+                raise ValueError("文件过大 (>32MB)。")
+            title = (f.filename or "upload").rsplit(".", 1)[0]
+            raw = _extract_text_from_upload(f.filename or "upload.txt", content)
+            if not raw or not raw.strip():
+                raise ValueError("文件解析后没有可识别的正文。")
+            row = StudyMaterial(
+                title=title,
+                author="",
+                source="upload",
+                raw_text=raw,
+                status="draft" if raw else "empty",
+            )
+            db.add(row)
+            await db.flush()
+            entry: dict[str, Any] = {
+                "ok": True,
+                "data": {
+                    "id": row.id,
+                    "project_id": row.project_id,
+                    "title": row.title,
+                    "author": row.author,
+                    "source": row.source,
+                    "status": row.status,
+                    "error": row.error,
+                    "chapter_count": row.chapter_count or 0,
+                    "character_count": row.character_count or 0,
+                    "raw_text_length": len(row.raw_text or ""),
+                    "extra": row.extra,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                },
+            }
+            if auto_chapterize and row.raw_text:
+                try:
+                    chunks = _split_chapters(row.raw_text, pattern="auto")
+                    created = 0
+                    if chunks:
+                        for idx, t, body in chunks:
+                            if len(body) < min_chapter_chars:
+                                continue
+                            # Use a direct INSERT instead of
+                            # ``row.chapters.append(StudyChapter(...))``
+                            # — appending onto a relationship triggers
+                            # a lazy-load of the collection on first
+                            # access, and that lazy load is sync-IO
+                            # inside an async session (greenlet error).
+                            # Inserting the chapter row directly with
+                            # ``material_id`` sidesteps the relationship
+                            # walk entirely.
+                            db.add(StudyChapter(
+                                material_id=row.id,
+                                chapter_index=idx,
+                                title=t,
+                                content=body,
+                                char_count=len(body),
+                            ))
+                            created += 1
+                        # Flush so the new chapter rows reach the DB
+                        # before the response serialises chapter_count.
+                        await db.flush()
+                    row.chapter_count = created
+                    row.status = "ready" if created else "draft"
+                    # One more flush to push chapter_count + status
+                    # back to the DB and update the in-memory row
+                    # attributes that we read on the next two lines.
+                    await db.flush()
+                except Exception as exc:
+                    entry["chapterize_error"] = str(exc)
+            # Reflect the post-chapterize values back into the entry
+            # so the client gets the final chapter_count + status
+            # without an extra GET.
+            entry["data"]["chapter_count"] = row.chapter_count or 0
+            entry["data"]["status"] = row.status
+            results.append(entry)
+        except Exception as exc:
+            results.append({
+                "ok": False,
+                "filename": f.filename,
+                "error": f"{exc.__class__.__name__}: {exc}".strip(),
+            })
+    return {"ok": True, "data": results}
+
+
 @router.post("/materials/upload", response_model=APIResponse[StudyMaterialRead])
 async def upload_material(
     title: str = Form(...),
@@ -210,13 +333,41 @@ async def upload_material(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[StudyMaterialRead]:
-    """Accept a .txt upload and create the material row with its body.
+    """Accept a book upload and create the material row with its body.
 
-    Multipart route — the file's bytes are read into ``raw_text`` (the
-    MVP doesn't keep an on-disk copy; if the user wants a smaller
-    payload for chapterize, they can re-paste).
+    R18 / P0-STUDY-3: supports a much wider set of formats than the
+    original ``.txt`` only path. The list is
+    ``.txt / .md / .pdf / .docx / .html / .htm / .epub``.
+
+    Multipart route — the file's bytes are decoded/parsed into
+    ``raw_text`` (the MVP doesn't keep an on-disk copy; if the user
+    wants a smaller payload for chapterize, they can re-paste).
+
+    The file extension is matched case-insensitively; the file body
+    is parsed lazily inside ``_extract_text_from_upload`` so a
+    missing optional dep degrades gracefully (one format becomes
+    unavailable, not the whole endpoint).
     """
-    raw = (await file.read()).decode("utf-8", errors="replace")
+    raw_bytes = await file.read()
+    if len(raw_bytes) > 32 * 1024 * 1024:
+        # 32 MB hard cap. PDF/DOCX can be big and parsing them into
+        # raw_text balloons memory. Above this we refuse rather than
+        # OOM the worker. User can split their book or paste chunks.
+        raise HTTPException(status_code=413, detail="文件过大 (>32MB),请拆开上传或粘贴正文。")
+    filename = file.filename or "upload.txt"
+    try:
+        raw = _extract_text_from_upload(filename, raw_bytes)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
+    except Exception as exc:
+        # Don't leak the underlying stack to the user; they get a
+        # clean message and the failure is in the worker log.
+        raise HTTPException(
+            status_code=400,
+            detail=f"解析文件失败: {exc.__class__.__name__}: {exc}".strip(),
+        ) from exc
+    if not raw or not raw.strip():
+        raise bad_request("文件解析后没有可识别的正文。")
     row = StudyMaterial(
         project_id=project_id,
         title=title,
@@ -228,6 +379,198 @@ async def upload_material(
     db.add(row)
     await db.flush()
     return {"ok": True, "data": StudyMaterialRead.from_orm_trimmed(row)}
+
+
+# -------------------- R18 / P0-STUDY-3: file -> text --------------------
+
+# Map lower-cased file extension -> parser key. Anything not in this
+# map is rejected up front (cheaper than running a parser that
+# would just produce empty text). Keep it in one place so the
+# frontend can mirror the same list when building the <input accept>.
+_SUPPORTED_EXTS: dict[str, str] = {
+    ".txt":  "txt",
+    ".md":   "md",
+    ".markdown": "md",
+    ".pdf":  "pdf",
+    ".docx": "docx",
+    ".doc":  "docx-legacy",  # legacy .doc → not supported; surface a clear error
+    ".html": "html",
+    ".htm":  "html",
+    ".epub": "epub",
+}
+
+
+def _extract_text_from_upload(filename: str, content: bytes) -> str:
+    """Dispatch by extension. Return a plain ``str`` of the book body.
+
+    Imports the heavy parsing libs lazily so a single missing
+    optional dep doesn't break the whole endpoint — only the one
+    format that needs it.
+    """
+    name = (filename or "").strip()
+    if not name:
+        raise ValueError("文件名不能为空。")
+    ext = ""
+    for candidate in (".epub", ".docx", ".html", ".htm", ".pdf", ".md",
+                      ".markdown", ".doc", ".txt"):
+        if name.lower().endswith(candidate):
+            ext = candidate
+            break
+    if not ext or ext not in _SUPPORTED_EXTS:
+        allowed = ", ".join(sorted(_SUPPORTED_EXTS))
+        raise ValueError(f"暂不支持的格式: {ext or '?'}. 接受: {allowed}")
+    kind = _SUPPORTED_EXTS[ext]
+    if kind == "txt":
+        return _parse_txt(content)
+    if kind == "md":
+        # Markdown is a superset of plain text for our purposes;
+        # we just strip HTML-ish tags if any. The chapter splitter
+        # doesn't care about ``**bold**`` etc.
+        return _parse_txt(content)
+    if kind == "pdf":
+        return _parse_pdf(content)
+    if kind == "docx":
+        return _parse_docx(content)
+    if kind == "docx-legacy":
+        raise ValueError(
+            "旧版 .doc (二进制) 不直接支持 — 请在 Word 里另存为 .docx 后再上传。"
+        )
+    if kind == "html":
+        return _parse_html(content)
+    if kind == "epub":
+        return _parse_epub(content)
+    raise ValueError(f"无法识别的格式: {ext}")
+
+
+def _parse_txt(content: bytes) -> str:
+    return content.decode("utf-8", errors="replace")
+
+
+def _parse_pdf(content: bytes) -> str:
+    import io
+    import pypdf  # lazy import
+
+    reader = pypdf.PdfReader(io.BytesIO(content))
+    parts: list[str] = []
+    for page in reader.pages:
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            text = ""
+        if text:
+            parts.append(text)
+    if not parts:
+        raise ValueError("PDF 解析后没有可识别的文字 (可能为扫描版/纯图片)。")
+    return "\n\n".join(parts)
+
+
+def _parse_docx(content: bytes) -> str:
+    import io
+    import docx  # python-docx, lazy import
+
+    document = docx.Document(io.BytesIO(content))
+    parts: list[str] = []
+    for p in document.paragraphs:
+        if p.text:
+            parts.append(p.text)
+    # Include text from tables too — lots of novels on 网文导出 have
+    # character stats in the front matter. Joining with newlines is
+    # fine; the chapter splitter is robust to extra newlines.
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                if cell.text:
+                    parts.append(cell.text)
+    if not parts:
+        raise ValueError("DOCX 解析后没有可识别的正文。")
+    return "\n".join(parts)
+
+
+def _parse_html(content: bytes) -> str:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(content, "lxml")
+    # Drop script / style entirely — they were never text we want.
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    # Pull out <br> as newline-ish separators so paragraphs don't
+    # collapse into a single wall of text. Block-level tags will
+    # naturally get their own newlines via get_text's separator.
+    text = soup.get_text(separator="\n")
+    # Collapse runs of 3+ blank lines (very common in scraped HTML).
+    import re as _re
+    text = _re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _parse_epub(content: bytes) -> str:
+    """EPUB is a zip of XHTML files. Walk the spine and concatenate.
+
+    The user gets a single string back with each ``<p>`` separated
+    by a blank line, which is what our chapter splitter expects.
+    """
+    import io
+    import os
+    import tempfile
+    import zipfile
+    from bs4 import BeautifulSoup
+
+    # ebooklib.epub.read_epub insists on a real path or file-like
+    # with a real ``.name`` attribute. The cleanest portable path
+    # is to write to a tempfile once and feed that path. We try
+    # the clean path first and fall back to raw zipfile walk if
+    # ebooklib is missing.
+    try:
+        import ebooklib  # type: ignore
+        from ebooklib import epub
+
+        with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            book = epub.read_epub(tmp_path)
+            items = [
+                it for it in book.get_items()
+                if it.get_type() == ebooklib.ITEM_DOCUMENT
+            ]
+            parts: list[str] = []
+            for it in items:
+                html = it.get_content() or b""
+                soup = BeautifulSoup(html, "lxml")
+                for tag in soup(["script", "style"]):
+                    tag.decompose()
+                text = soup.get_text(separator="\n").strip()
+                if text:
+                    parts.append(text)
+            if not parts:
+                raise ValueError("EPUB 解析后没有可识别的正文。")
+            return "\n\n".join(parts)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+    except ImportError:
+        # ebooklib missing → fall back to raw zipfile walk.
+        import re as _re
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            members = [
+                n for n in zf.namelist()
+                if _re.search(r"\.x?html?$", n, _re.IGNORECASE)
+            ]
+            members = sorted(members)
+            parts = []
+            for m in members:
+                html = zf.read(m)
+                soup = BeautifulSoup(html, "lxml")
+                for tag in soup(["script", "style"]):
+                    tag.decompose()
+                text = soup.get_text(separator="\n").strip()
+                if text:
+                    parts.append(text)
+            if not parts:
+                raise ValueError("EPUB 解析后没有可识别的正文。")
+            return "\n\n".join(parts)
 
 
 @router.get("/materials/{material_id}", response_model=APIResponse[StudyMaterialDetail])

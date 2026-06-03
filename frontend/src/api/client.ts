@@ -53,13 +53,28 @@ async function request<T>(
   logBaseOnce();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // P0-STUDY-3 fix: FormData / Blob / URLSearchParams must NOT be
+  // serialised as JSON. Detect them and let the browser set its
+  // own ``Content-Type`` (with the correct multipart boundary
+  // for FormData). Without this the upload endpoint receives an
+  // empty body and the backend replies 422 with
+  // ``title: Field required; file: Field required`` — the
+  // multipart parts were never sent.
+  const isBinaryBody =
+    typeof FormData !== "undefined" && body instanceof FormData;
+  const isUrlEncoded =
+    typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams;
+  const headers: Record<string, string> = {};
+  if (!isBinaryBody && !isUrlEncoded) {
+    headers["Content-Type"] = "application/json; charset=utf-8";
+  }
   const opts: RequestInit = {
     method,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
+    headers,
     signal: ctrl.signal,
   };
   if (body !== undefined) {
-    opts.body = JSON.stringify(body);
+    opts.body = isBinaryBody || isUrlEncoded ? body : JSON.stringify(body);
   }
   let res: Response;
   try {

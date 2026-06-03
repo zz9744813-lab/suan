@@ -265,6 +265,16 @@ export const runStudyChapter = (materialId: number, body: { chapter_id: number; 
 // Multipart upload (FormData). The client takes a Blob/File directly.
 export const uploadStudyMaterial = (form: FormData) =>
   api.post<StudyMaterial>("/api/study/materials/upload", form);
+// R19: batch upload — up to 5 books in a single multipart POST.
+// Returns an array of per-file results: each entry is either
+// `{ok: true, data: StudyMaterial}` or `{ok: false, error, filename}`.
+// Backend auto-chapterizes each material by default.
+export type BatchUploadResult = (
+  | { ok: true; data: StudyMaterial; chapterize_error?: string }
+  | { ok: false; filename?: string; error: string }
+)[];
+export const uploadStudyMaterialsBatch = (form: FormData) =>
+  api.post<BatchUploadResult>("/api/study/materials/upload/batch", form);
 
 // ----- Round 5: behavior patterns -----
 export const listBehaviorPatterns = (q: {
