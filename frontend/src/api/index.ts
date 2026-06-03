@@ -15,6 +15,7 @@ import type {
   DiscussionSession,
   GraphEdge,
   GraphNode,
+  MaterialiseSummary,
   MemoryCharacter,
   MemoryForeshadow,
   MemoryHardFact,
@@ -28,12 +29,19 @@ import type {
   PromptTemplate,
   PromptVersion,
   SearchResult,
-  StudyCharacter,
-  StudyMaterial,
-  StudyMaterialDetail,
-  StudyChapter,
+  StudyBehaviorExtractRequest,
+  StudyBehaviorExtractResponse,
   StudyBulkRequestBody,
   StudyBulkStart,
+  StudyCharacter,
+  StudyForeshadowSummary,
+  StudyMaterial,
+  StudyMaterialDetail,
+  StudyMaterialOverview,
+  StudyChapter,
+  StudyRelationshipApplyRequest,
+  StudyRelationshipApplyResponse,
+  StudyRelationshipsResponse,
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
@@ -287,6 +295,55 @@ export type BatchUploadResult = (
 export const uploadStudyMaterialsBatch = (form: FormData) =>
   api.post<BatchUploadResult>("/api/study/materials/upload/batch", form);
 
+// ----- R22: study → graph / behavior / foreshadow linkage -----
+
+// Kick off an LLM run that turns a book into BehaviorPattern rows.
+// ``body`` controls the cap on patterns and which chapters to use as
+// evidence. Returns synchronously (one LLM call, no task_id).
+export const extractStudyBehaviors = (materialId: number, body: StudyBehaviorExtractRequest = {}) =>
+  api.post<StudyBehaviorExtractResponse>(
+    `/api/study/materials/${materialId}/extract-behaviors`,
+    body,
+  );
+
+// List the BehaviorPatterns sourced from this material (those with
+// ``source_material_id = materialId``).
+export const getStudyBehaviors = (materialId: number) =>
+  api.get<BehaviorPattern[]>(`/api/study/materials/${materialId}/behaviors`);
+
+// List the MemoryForeshadows stamped with this material id
+// (``source_material_id = materialId``).
+export const getStudyForeshadows = (materialId: number) =>
+  api.get<StudyForeshadowSummary[]>(`/api/study/materials/${materialId}/foreshadows`);
+
+// Co-occurrence analysis — for every character pair, count the
+// chapters both of them appear in, and return the top N pairs.
+export const getStudyRelationships = (materialId: number, params: { min_co_chapter_count?: number; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.min_co_chapter_count != null) q.set("min_co_chapter_count", String(params.min_co_chapter_count));
+  if (params.limit != null) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<StudyRelationshipsResponse>(
+    `/api/study/materials/${materialId}/relationships${s ? "?" + s : ""}`,
+  );
+};
+
+// Persist the user-picked (pair, relation) tuples as GraphEdge rows
+// under ``project_id``. Idempotent: same (source, target, relation)
+// triple on the same project is skipped.
+export const applyStudyRelationships = (materialId: number, body: StudyRelationshipApplyRequest) =>
+  api.post<StudyRelationshipApplyResponse>(
+    `/api/study/materials/${materialId}/relationships/apply`,
+    body,
+  );
+
+// One-stop dashboard: chapter_count / character_count /
+// behavior_count / foreshadow_count / graph_node_count, plus
+// sample rows of each. The Study page uses this for the per-book
+// 4-stat row so it doesn't have to make 4 round-trips.
+export const getStudyMaterialOverview = (materialId: number) =>
+  api.get<StudyMaterialOverview>(`/api/study/materials/${materialId}/overview`);
+
 // ----- Round 5: behavior patterns -----
 export const listBehaviorPatterns = (q: {
   character?: string[];
@@ -350,9 +407,15 @@ export const updateGraphEdge = (projectId: number, edgeId: number, body: Partial
   api.patch<GraphEdge>(`/api/graph/${projectId}/edges/${edgeId}`, body);
 export const deleteGraphEdge = (projectId: number, edgeId: number) =>
   api.delete<{ deleted: number }>(`/api/graph/${projectId}/edges/${edgeId}`);
-export const materialiseFromStudy = (projectId: number, materialId: number) =>
-  api.post<{ nodes: GraphNode[]; edges: GraphEdge[] }>(
-    `/api/graph/${projectId}/materialise_from_study/${materialId}`,
+export const materialiseFromStudy = (
+  projectId: number,
+  materialId: number,
+  kind: "all" | "character" | "event" | "behavior" = "all",
+  addCooccurrenceEdges: boolean = true,
+) =>
+  api.post<{ nodes: GraphNode[]; edges: GraphEdge[]; materialise_summary?: MaterialiseSummary }>(
+    `/api/graph/${projectId}/materialise_from_study/${materialId}` +
+      `?kind=${kind}&add_cooccurrence_edges=${addCooccurrenceEdges}`,
   );
 
 // ----- Discussion Room -----

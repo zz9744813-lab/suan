@@ -668,3 +668,27 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
 @media (max-width: 640px) {
   .drawer { width: 100vw; border-left: 0; }
 }
+
+/* R22: graph page transient toast (4s auto-clear). */
+.graph-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 1000;
+  padding: 10px 16px;
+  background: var(--bg-elevated, rgba(20, 26, 40, 0.95));
+  border: 1px solid var(--accent, #6a83f0);
+  color: var(--text-primary);
+  font-size: 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: graph-toast-in 0.18s ease-out;
+}
+.graph-toast:hover {
+  background: var(--bg-paper-soft, rgba(40, 48, 70, 0.95));
+}
+@keyframes graph-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

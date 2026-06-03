@@ -176,6 +176,168 @@ class StudyBulkStartResponse(BaseModel):
     message: str = "后台处理中。可轮询 /api/tasks/{task_id} 看进度。"
 
 
+# -------------------- R22: behavior extraction --------------------
+
+class StudyBehaviorExtractRequest(BaseModel):
+    """R22: kick off a whole-material behavior-pattern extraction.
+
+    The single LLM call sees the material's character roster + a
+    digest of representative chapter snippets and returns reusable
+    ``{character × situation}`` pattern cards. We persist the result
+    into ``behavior_patterns`` with ``source_material_id`` so the
+    drafter can pull them by tag during chapter generation.
+    """
+    # Cap on patterns to keep. Default 20 — the LLM doesn't always
+    # respect the cap, so the route truncates after the fact.
+    max_patterns: int = 20
+    # Re-run on a material that already has patterns. Default False
+    # so the user's first click is the canonical extraction; a
+    # re-click with force=True discards the old set for this material.
+    force: bool = False
+    # Truncate each evidence chunk to this many characters before
+    # shipping to the LLM. Cheap models on long contexts start
+    # dropping characters; 1500 is enough to keep the prompt
+    # focused on the 2-3 scenes the agent should reason about.
+    max_chunk_chars: int = 1500
+    # How many chapter snippets to include in evidence. The router
+    # picks the chapters with the most extracted characters (i.e.
+    # the most "active" scenes) so the agent reasons about the
+    # material's pivotal moments, not its opening or coda.
+    evidence_chapter_count: int = 5
+
+
+class StudyBehaviorExtractResponse(BaseModel):
+    """R22: the immediate response from extract-behaviors.
+
+    ``pattern_ids`` are the rows the route just inserted, so the UI
+    can scroll-jump to them in the Behavior page.
+    """
+    material_id: int
+    patterns_added: int
+    patterns_skipped: int
+    pattern_ids: list[int]
+    total_patterns_for_material: int
+    cost_usd: float
+    duration_ms: int
+    input_tokens: int
+    output_tokens: int
+    sample_names: list[str] = Field(default_factory=list)
+
+
+# -------------------- R22: relationship suggestions --------------------
+
+class StudyRelationshipSuggestion(BaseModel):
+    """One suggested edge between two characters that co-occur in the
+    same chapter.
+
+    ``co_chapter_count`` is how many chapters both names appear in
+    (capped at 1 in the MVP — we just want a yes/no "they share a
+    scene" signal). ``last_chapter_no`` is the most recent chapter
+    index where the pair co-occurs; the UI surfaces it so the user
+    can see at a glance where the relationship originates.
+    """
+    char_a_id: int
+    char_a_name: str
+    char_b_id: int
+    char_b_name: str
+    co_chapter_count: int
+    last_chapter_id: int
+    last_chapter_no: int
+    last_chapter_title: str
+    sample_quote: str = ""
+
+
+class StudyRelationshipsResponse(BaseModel):
+    """R22: the response from ``GET .../relationships``.
+
+    ``chapters_scanned`` is how many of the material's chapters we
+    actually ran co-occurrence against. The MVP scans all of them
+    but a future cap can trim it for very large books.
+    """
+    material_id: int
+    chapters_scanned: int
+    suggestions: list[StudyRelationshipSuggestion]
+    total_characters: int
+    min_co_chapter_count: int = 1
+
+
+class StudyRelationshipApplyRequest(BaseModel):
+    """R22: the user picked N of the suggested relationships and we
+    now create them as ``GraphEdge`` rows.
+    """
+    project_id: int
+    # The pair list — each is (char_a_id, char_b_id, relation).
+    # ``relation`` is free-form ("师父" / "同门" / ...) so the user
+    # can label the edge however they like.
+    pairs: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class StudyRelationshipApplyResponse(BaseModel):
+    """R22: how many edges were created (and skipped)."""
+    project_id: int
+    edges_added: int
+    edges_skipped: int
+    edge_ids: list[int]
+
+
+# -------------------- R22: study material overview --------------------
+
+class StudyMaterialOverview(BaseModel):
+    """R22: one-shot dashboard of a study material.
+
+    Aggregates the "where did the data go" question so the Study
+    page can show a 4-stat row (chapters / characters / behaviors /
+    foreshadows) and a "already on the graph" badge without making
+    four round-trips.
+    """
+    material_id: int
+    title: str
+    project_id: int | None
+    chapter_count: int
+    character_count: int
+    behavior_count: int
+    foreshadow_count: int
+    graph_node_count: int
+    # First few of each, for tooltip / click-through. Capped at 5
+    # so the payload stays small.
+    sample_characters: list[dict[str, Any]] = Field(default_factory=list)
+    sample_behaviors: list[dict[str, Any]] = Field(default_factory=list)
+    sample_foreshadows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# -------------------- R22: materialise summary + foreshadow summary --------------------
+
+class MaterialiseSummary(BaseModel):
+    """R22: counts surfaced by ``POST /api/graph/{pid}/materialise_from_study/{mid}``.
+
+    The route returns the standard ``APIResponse`` envelope (with
+    ``data`` carrying the full graph bundle) AND this sibling field
+    so the UI can show "新增 X 节点 / Y 关系" without re-fetching
+    the whole graph. Strict ``APIResponse[GraphBundle]`` would
+    strip the field, so the route's ``response_model=None``.
+    """
+    nodes_created: int
+    edges_created: int
+
+
+class StudyForeshadowSummary(BaseModel):
+    """R22: the narrow shape ``GET /api/study/materials/{id}/foreshadows`` returns.
+
+    Only the columns the Study page actually renders — fuller
+    columns (expected_payoff_chapter / related_items / related_main_plot)
+    are available on the memory page. Keeping this lean lets the
+    study overview render the "events from this book" list without
+    hauling 5KB of unrelated JSON for each row.
+    """
+    id: int
+    name: str
+    summary: str
+    planted_chapter: int | None
+    status: str
+    importance: float
+    related_characters: list[str] = Field(default_factory=list)
+
+
 # -------------------- BehaviorPattern --------------------
 
 class BehaviorPatternRead(BaseModel):

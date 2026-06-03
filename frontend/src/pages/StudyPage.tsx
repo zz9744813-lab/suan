@@ -31,6 +31,11 @@ import {
   deleteBehaviorPattern,
   deleteStudyMaterial,
   getTask,
+  extractStudyBehaviors,
+  getStudyMaterialOverview,
+  getStudyRelationships,
+  applyStudyRelationships,
+  getStudyForeshadows,
 } from "../api";
 import type {
   StudyMaterial,
@@ -39,6 +44,10 @@ import type {
   StudyCharacter,
   StudyBulkPayload,
   BehaviorPattern,
+  StudyMaterialOverview,
+  StudyRelationshipSuggestion,
+  StudyRelationshipsResponse,
+  StudyForeshadowSummary,
 } from "../types";
 import "./StudyPage.css";
 
@@ -117,6 +126,24 @@ function BookLibrary() {
     Record<number, StudyBulkPayload & { task_id: number; status: string }>
   >({});
   const bulkTimers = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
+  // R22: per-material overview cache (chapters/characters/behaviors/
+  // foreshadows/graph_node_count). Refreshed after a behavior
+  // extract or a graph materialise, so the badges stay honest.
+  const [overviews, setOverviews] = useState<Record<number, StudyMaterialOverview>>({});
+  // R22: relationships-modal state. ``relMaterialId`` opens the
+  // modal with the corresponding material's suggestions. The
+  // ``relationInputs`` map holds the per-suggestion free-form
+  // label the user types before applying.
+  const [relMaterialId, setRelMaterialId] = useState<number | null>(null);
+  const [relData, setRelData] = useState<StudyRelationshipsResponse | null>(null);
+  const [relLoading, setRelLoading] = useState(false);
+  const [relApplyMsg, setRelApplyMsg] = useState<string | null>(null);
+  const [relApplyBusy, setRelApplyBusy] = useState(false);
+  // ``selectedSuggestions`` is a Set of "a_id-b_id" keys the user
+  // ticked in the modal. Persists across renders so the user can
+  // freely edit relation labels without losing their selection.
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+  const [relationInputs, setRelationInputs] = useState<Record<string, string>>({});
 
   const refresh = () => {
     listStudyMaterials()
@@ -370,6 +397,135 @@ function BookLibrary() {
     };
   }, []);
 
+  // R22: load overviews for every material in the current list so
+  // the per-book 4-stat row can render the "behavior_count /
+  // foreshadow_count / graph_node_count" badges without four
+  // round-trips per book. Skips silently on error — the badges
+  // are advisory and the row is still informative with the
+  // list-endpoint's own chapter_count / character_count.
+  useEffect(() => {
+    if (materials.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const next: Record<number, StudyMaterialOverview> = {};
+      await Promise.all(materials.map(async (m) => {
+        try {
+          const o = await getStudyMaterialOverview(m.id);
+          if (!cancelled) next[m.id] = o;
+        } catch {
+          // Ignore — overview is optional.
+        }
+      }));
+      if (!cancelled) setOverviews(next);
+    })();
+    return () => { cancelled = true; };
+  }, [materials]);
+
+  // R22: re-fetch a single material's overview (e.g. after
+  // extract-behaviors) without paying for the whole list.
+  const refreshOverview = async (materialId: number) => {
+    try {
+      const o = await getStudyMaterialOverview(materialId);
+      setOverviews((prev) => ({ ...prev, [materialId]: o }));
+    } catch {
+      // Ignore.
+    }
+  };
+
+  // R22: kick off the behavior-pattern extraction. Synchronous
+  // endpoint (one LLM call) so we just await the response and
+  // refresh the overview once it's done.
+  const onExtractBehaviors = async (m: StudyMaterial) => {
+    setBusy(true);
+    setErrorMsg(null);
+    try {
+      const r = await extractStudyBehaviors(m.id, {
+        max_patterns: 20,
+        force: false,
+        max_chunk_chars: 1500,
+        evidence_chapter_count: 5,
+      });
+      const data = r ?? null;
+      const added = data?.patterns_added ?? 0;
+      const skipped = data?.patterns_skipped ?? 0;
+      const sample = (data?.sample_names ?? []).join("、") || "—";
+      setErrorMsg(
+        `提取完成: 新增 ${added} 条模式,跳过 ${skipped} 条(已存在)。示例: ${sample}。`,
+      );
+      await refreshOverview(m.id);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // R22: open the relationship-modal. The endpoint is cheap
+  // (just a SQL join) so we don't need a separate loading row.
+  const onAnalyzeRelationships = async (m: StudyMaterial) => {
+    setRelMaterialId(m.id);
+    setRelData(null);
+    setRelApplyMsg(null);
+    setSelectedSuggestions(new Set());
+    setRelationInputs({});
+    setRelLoading(true);
+    try {
+      const r = await getStudyRelationships(m.id, { min_co_chapter_count: 1, limit: 80 });
+      setRelData(r ?? null);
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? String(e));
+      setRelMaterialId(null);
+    } finally {
+      setRelLoading(false);
+    }
+  };
+
+  // R22: apply the user-picked (pair, relation) tuples as
+  // GraphEdge rows. Each picked suggestion becomes a single
+  // ``{char_a_id, char_b_id, relation}`` triple. We need the
+  // material's project_id to know which graph to write into;
+  // if it's not set, we surface a friendly error.
+  const onApplyRelationships = async (m: StudyMaterial) => {
+    if (!m.project_id) {
+      setRelApplyMsg("这本书还没关联到 project_id,没法写入图谱。先去编辑这本书绑定项目。");
+      return;
+    }
+    if (!relData || selectedSuggestions.size === 0) {
+      setRelApplyMsg("至少勾选一条关系再应用。");
+      return;
+    }
+    setRelApplyBusy(true);
+    setRelApplyMsg(null);
+    try {
+      const pairs: Array<Record<string, any>> = [];
+      for (const sug of relData.suggestions) {
+        const k = `${sug.char_a_id}-${sug.char_b_id}`;
+        if (!selectedSuggestions.has(k)) continue;
+        pairs.push({
+          char_a_id: sug.char_a_id,
+          char_b_id: sug.char_b_id,
+          relation: (relationInputs[k] || "同章节出现").trim() || "同章节出现",
+          weight: Math.min(1.0, 0.3 + 0.1 * sug.co_chapter_count),
+          evidence: sug.sample_quote,
+        });
+      }
+      const r = await applyStudyRelationships(m.id, {
+        project_id: m.project_id,
+        pairs,
+      });
+      const data = r ?? null;
+      setRelApplyMsg(
+        `已应用: 新增 ${data?.edges_added ?? 0} 条,跳过 ${data?.edges_skipped ?? 0} 条(已存在)。`,
+      );
+      setSelectedSuggestions(new Set());
+      await refreshOverview(m.id);
+    } catch (e: any) {
+      setRelApplyMsg(e?.message ?? String(e));
+    } finally {
+      setRelApplyBusy(false);
+    }
+  };
+
   return (
     <div className="study-library">
       {errorMsg && (
@@ -477,9 +633,31 @@ function BookLibrary() {
               onRunStudyBulk={(mode, limit) => onRunStudyBulk(m, mode, limit)}
               onDeleteCharacter={onDeleteCharacter}
               bulkProgress={bulkProgress[m.id] ?? null}
+              overview={overviews[m.id] ?? null}
+              onExtractBehaviors={() => onExtractBehaviors(m)}
+              onAnalyzeRelationships={() => onAnalyzeRelationships(m)}
             />
           ))}
         </div>
+      )}
+
+      {relMaterialId != null && (
+        <RelationshipsModal
+          material={materials.find((m) => m.id === relMaterialId)!}
+          data={relData}
+          loading={relLoading}
+          selected={selectedSuggestions}
+          setSelected={setSelectedSuggestions}
+          relationInputs={relationInputs}
+          setRelationInputs={setRelationInputs}
+          applyMsg={relApplyMsg}
+          applyBusy={relApplyBusy}
+          onApply={() => {
+            const m = materials.find((x) => x.id === relMaterialId);
+            if (m) onApplyRelationships(m);
+          }}
+          onClose={() => setRelMaterialId(null)}
+        />
       )}
     </div>
   );
@@ -488,7 +666,8 @@ function BookLibrary() {
 function BookCard({
   material, expanded, detail, busy,
   onToggle, onChapterize, onDelete, onRunStudy, onRunStudyBulk, onDeleteCharacter,
-  bulkProgress,
+  bulkProgress, overview,
+  onExtractBehaviors, onAnalyzeRelationships,
 }: {
   material: StudyMaterial;
   expanded: boolean;
@@ -501,6 +680,9 @@ function BookCard({
   onRunStudyBulk: (mode: "character" | "event" | "both", limit: number) => void;
   onDeleteCharacter: (id: number) => void;
   bulkProgress: (StudyBulkPayload & { task_id: number; status: string }) | null;
+  overview: StudyMaterialOverview | null;
+  onExtractBehaviors: () => void;
+  onAnalyzeRelationships: () => void;
 }) {
   // The detail fetch belongs to the EXPANDED book only; if this
   // card isn't the active one, we just show the summary fields
@@ -577,10 +759,52 @@ function BookCard({
             >
               试抽 5 章
             </button>
+            {/* R22: 联动按钮 — 提取行为模式 / 分析人物关系。
+                两个按钮都是同步端点,完成后刷新 overview 即可。
+                「行为模式」会复用抽取过的 character roster, 所以
+                在 character_count=0 时禁用,避免空跑 LLM。 */}
+            <button
+              disabled={busy || !material.character_count}
+              onClick={onExtractBehaviors}
+              title="基于已抽人物 + 章节摘要,跑一次 LLM 总结出 N 张行为模式卡"
+            >
+              🧩 提取行为模式
+            </button>
+            <button
+              disabled={busy || !material.character_count}
+              onClick={onAnalyzeRelationships}
+              title="分析书中同章节出现的人物对,生成可一键应用到图谱的关系建议"
+            >
+              🔗 分析人物关系
+            </button>
             <button className="danger" onClick={onDelete} disabled={busy}>
               删除
             </button>
           </div>
+
+          {/* R22: 概览行 — 让用户一眼看到这本书"数据沉淀到了哪"。
+              4 个数字 = character_count(已有) / behavior_count /
+              foreshadow_count / graph_node_count。如果 overview
+              还没加载完,这一行就不渲染,避免空 0 误导。 */}
+          {overview && (overview.behavior_count > 0 || overview.foreshadow_count > 0 || overview.graph_node_count > 0) && (
+            <div className="study-linkage-row">
+              <span className="muted small">联动数据：</span>
+              <span className="study-linkage-chip" title="已沉淀到行为模式库">
+                🧩 行为 <b>{overview.behavior_count}</b>
+              </span>
+              <span className="study-linkage-chip" title="已沉淀到伏笔库(需要 project_id)">
+                📜 伏笔 <b>{overview.foreshadow_count}</b>
+              </span>
+              <span className="study-linkage-chip" title="已导入到图谱(任何 kind)">
+                🌐 图谱 <b>{overview.graph_node_count}</b>
+              </span>
+              {overview.graph_node_count === 0 && material.project_id && (
+                <span className="muted tiny">
+                  提示: 进入「图谱」页 → 选这本书导入,即可一键把人物/伏笔/行为送进图谱
+                </span>
+              )}
+            </div>
+          )}
 
           {/* R21: live progress bar for the in-flight bulk job on
               this book. We pull the per-chapter counters from the
@@ -772,6 +996,115 @@ function ChapterTree({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// R22: 人物关系建议模态。
+// 显示每对 (char_a, char_b) 的 co_chapter_count / 最后出现章节 /
+// sample_quote,用户勾选并给一个关系标签,点"应用"批量写 graph_edges。
+function RelationshipsModal({
+  material, data, loading, selected, setSelected,
+  relationInputs, setRelationInputs,
+  applyMsg, applyBusy, onApply, onClose,
+}: {
+  material: StudyMaterial;
+  data: StudyRelationshipsResponse | null;
+  loading: boolean;
+  selected: Set<string>;
+  setSelected: (s: Set<string>) => void;
+  relationInputs: Record<string, string>;
+  setRelationInputs: (r: Record<string, string>) => void;
+  applyMsg: string | null;
+  applyBusy: boolean;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const toggle = (k: string) => {
+    const next = new Set(selected);
+    if (next.has(k)) next.delete(k);
+    else next.add(k);
+    setSelected(next);
+  };
+  const setRel = (k: string, v: string) => {
+    setRelationInputs({ ...relationInputs, [k]: v });
+  };
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+        <header>
+          <h3>人物关系分析 · {material.title}</h3>
+          <button onClick={onClose}>×</button>
+        </header>
+        <div className="modal-body">
+          {loading ? (
+            <div className="muted small">分析中…</div>
+          ) : !data || data.suggestions.length === 0 ? (
+            <div className="muted small">
+              还没有可建议的关系。要么这本书还没抽过人物,要么所有人物都没有挂在具体章节上。
+            </div>
+          ) : (
+            <>
+              <p className="muted small">
+                扫描了 <b>{data.chapters_scanned}</b> 章、共 <b>{data.total_characters}</b> 个有人物来源的角色,
+                按"同章节出现"频次排序。勾选要写入图谱的关系,给一个标签(默认「同章节出现」),点「应用」即可。
+              </p>
+              <div className="rel-suggestion-list">
+                {data.suggestions.map((sug) => {
+                  const k = `${sug.char_a_id}-${sug.char_b_id}`;
+                  const checked = selected.has(k);
+                  return (
+                    <div key={k} className={`rel-suggestion ${checked ? "checked" : ""}`}>
+                      <label className="rel-suggestion-head">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(k)}
+                        />
+                        <span>
+                          <b>{sug.char_a_name}</b> ↔ <b>{sug.char_b_name}</b>
+                          <span className="muted tiny" style={{ marginLeft: 8 }}>
+                            同章 {sug.co_chapter_count} 次 · 最近 第 {sug.last_chapter_no || "?"} 章
+                            {sug.last_chapter_title ? ` · ${sug.last_chapter_title}` : ""}
+                          </span>
+                        </span>
+                      </label>
+                      <div className="rel-suggestion-row">
+                        <input
+                          placeholder="关系标签,如 师父 / 恋人 / 对手"
+                          value={relationInputs[k] ?? ""}
+                          onChange={(e) => setRel(k, e.target.value)}
+                          disabled={!checked}
+                        />
+                      </div>
+                      {sug.sample_quote && (
+                        <div className="muted tiny rel-suggestion-quote">
+                          「{sug.sample_quote.slice(0, 160)}」
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+        <footer>
+          {applyMsg && <span className="muted small" style={{ marginRight: "auto" }}>{applyMsg}</span>}
+          <span className="spacer" />
+          <span className="muted small" style={{ marginRight: 8 }}>
+            已选 {selected.size} 条
+          </span>
+          <button onClick={onClose}>关闭</button>
+          <button
+            className="primary"
+            disabled={applyBusy || selected.size === 0 || !data || data.suggestions.length === 0}
+            onClick={onApply}
+          >
+            {applyBusy ? "写入中…" : "应用到图谱"}
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }

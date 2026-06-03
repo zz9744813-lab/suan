@@ -17,18 +17,23 @@
  *   └────────────┴────────────────────────────────────────┘
  */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   listBehaviorPatterns,
   createBehaviorPattern,
   updateBehaviorPattern,
   deleteBehaviorPattern,
+  listStudyMaterials,
 } from "../api";
-import type { BehaviorPattern } from "../types";
+import type { BehaviorPattern, StudyMaterial } from "../types";
+import { useProjectStore } from "../stores/projectStore";
 
 const SAMPLE_TAGS = ["主角", "女主", "反派", "热血", "理智", "隐忍", "腹黑"];
 const SAMPLE_SITUATIONS = ["公开羞辱", "宗门抛弃", "偶得异宝", "高人指点", "废柴逆袭", "日常", "危机"];
 
 export function BehaviorPage() {
+  const currentProjectId = useProjectStore((s) => s.currentProjectId);
+  const navigate = useNavigate();
   const [character, setCharacter] = useState<string[]>([]);
   const [situation, setSituation] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -36,11 +41,32 @@ export function BehaviorPage() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<BehaviorPattern | null>(null);
   const [showNew, setShowNew] = useState(false);
+  // R22: study materials list — used so the per-pattern "来源: 拆书《xxx》"
+  // link can resolve the source_material_id back to a real title and
+  // let the user click through to the Study page for that book.
+  const [materials, setMaterials] = useState<StudyMaterial[]>([]);
 
   const queryKey = useMemo(
     () => JSON.stringify({ character, situation, search }),
     [character, situation, search],
   );
+
+  // R22: load the project-scoped materials list once. We don't
+  // refetch on every refresh — the title lookup is just a Map, and
+  // re-fetching on every list query would be wasteful.
+  useEffect(() => {
+    if (currentProjectId == null) {
+      setMaterials([]);
+      return;
+    }
+    listStudyMaterials(currentProjectId).then((r) => setMaterials(r ?? [])).catch(() => {});
+  }, [currentProjectId]);
+
+  const materialTitlesById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const mat of materials) m.set(mat.id, mat.title);
+    return m;
+  }, [materials]);
 
   const refresh = async () => {
     setBusy(true);
@@ -130,6 +156,33 @@ export function BehaviorPage() {
               {p.evidence?.[0] && (
                 <blockquote className="quote">「{p.evidence[0]}」</blockquote>
               )}
+              {/* R22: provenance row — when this pattern was extracted
+                  from a study material, show a clickable link back to
+                  the Study page for that book. Clicking the row opens
+                  the edit modal (the parent onClick), so we stop
+                  propagation here. Falls back to a plain "手工创建"
+                  for rows that pre-date R22. */}
+              <div
+                className="behavior-source"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {p.source_material_id != null ? (
+                  <a
+                    className="muted tiny"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate("/study");
+                    }}
+                    href="/study"
+                    title="去拆书页查看这本书"
+                  >
+                    📚 来源: {materialTitlesById.get(p.source_material_id)
+                      ?? `拆书 #${p.source_material_id}`}
+                  </a>
+                ) : (
+                  <span className="muted tiny">✋ 手工创建</span>
+                )}
+              </div>
             </article>
           ))}
         </main>

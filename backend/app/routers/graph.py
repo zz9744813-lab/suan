@@ -215,42 +215,115 @@ async def get_graph(
 
 @router.post(
     "/{project_id}/materialise_from_study/{material_id}",
-    response_model=APIResponse[GraphBundle],
+    # R22: response shape now includes ``materialise_summary`` (a
+    # ``{nodes_created, edges_created}`` bag) on top of the standard
+    # ``{ok, data, error}`` envelope. Strict ``APIResponse[GraphBundle]``
+    # would strip the summary, so we let the dict go out untyped. The
+    # frontend already tolerates unknown fields on the envelope.
+    response_model=None,
 )
 async def materialise_from_study(
     project_id: int,
     material_id: int,
+    kind: str = Query(
+        default="all",
+        description=(
+            "R22: what to materialise. 'character' = study_characters → "
+            "graph nodes (and co-occurrence edges if 'character' or 'all'). "
+            "'event' = memory_foreshadows stamped with source_material_id → "
+            "graph nodes with node_kind='event'. 'behavior' = behavior_patterns "
+            "with source_material_id → graph nodes with node_kind='other' and "
+            "tags carried in extra. 'all' (default) = the lot."
+        ),
+    ),
+    add_cooccurrence_edges: bool = Query(
+        default=True,
+        description=(
+            "R22: when materialising characters, also create "
+            "graph_edges for each pair that co-occurs in a study chapter. "
+            "Edge relation defaults to '同章节出现' which the user can "
+            "rename after import."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[GraphBundle]:
-    """One-shot helper: read a StudyMaterial's characters and create
-    a GraphNode for each (if not already present).
+    """Materialise a StudyMaterial into the project's graph.
 
-    Designed for the "一键导入拆书人物到图谱" button on the graph
-    page. Idempotent: characters whose ``name`` already exists in
-    this project's graph are skipped.
+    Round 22 (R22) is the "功能联动" round. The original endpoint
+    only handled ``study_characters`` → ``graph_nodes``. Now we
+    also:
+
+    - materialise the material's foreshadows (rows in
+      ``memory_foreshadows`` with ``source_material_id``) as graph
+      nodes of kind ``event``, so the graph view shows them next
+      to the characters.
+    - materialise the material's behavior_patterns as graph nodes
+      of kind ``other``, so the user can drag them onto the canvas
+      as reference cards. (The writing pipeline already consumes
+      them via tag-match; the graph view is just for visualisation.)
+    - add co-occurrence edges between characters that share a
+      ``source_chapter_id`` so the canvas isn't just a sea of
+      unconnected dots.
+
+    Idempotent: characters / events / behaviors whose ``name``
+    already exists in this project's graph are skipped. Edges
+    are skipped by ``(source, target, relation)`` triple.
     """
-    from app.models.study import StudyCharacter, StudyMaterial
+    from app.models.memory import MemoryForeshadow
+    from app.models.study import (
+        BehaviorPattern,
+        StudyCharacter,
+        StudyMaterial,
+    )
 
     mat = await db.get(StudyMaterial, material_id)
     if mat is None:
         raise not_found("StudyMaterial", material_id)
-    chars = (
-        await db.execute(
-            select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+    if kind not in ("character", "event", "behavior", "all"):
+        raise bad_request(
+            f"kind 只接受 character|event|behavior|all，收到 {kind!r}。"
         )
-    ).scalars().all()
+    if kind in ("event", "all") and not mat.project_id:
+        # Foreshadows live under memory_foreshadows which is
+        # project-scoped; a book without project_id has no
+        # extracted foreshadows to pull.
+        if kind == "event":
+            raise bad_request(
+                "事件导入需要这本书有 project_id（先把材料绑到 project 跑一次批量抽事件）。",
+            )
+        # For kind=all we silently skip the event branch.
+
+    want_char = kind in ("character", "all")
+    want_event = kind in ("event", "all") and mat.project_id is not None
+    want_behavior = kind in ("behavior", "all")
+
     existing = (
         await db.execute(
             select(GraphNode).where(GraphNode.project_id == project_id)
         )
     ).scalars().all()
     existing_names = {n.name for n in existing}
+    # By source-material ref so co-occurrence edges below can find
+    # the just-created nodes in O(1) instead of re-querying.
+    nodes_by_ref: dict[tuple[str, int], GraphNode] = {}
+    for n in existing:
+        if n.ref_study_character_id is not None:
+            nodes_by_ref[("study_character", n.ref_study_character_id)] = n
+        if n.ref_character_id is not None:
+            nodes_by_ref[("project_character", n.ref_character_id)] = n
     created = 0
-    for c in chars:
-        if c.name in existing_names:
-            continue
-        db.add(
-            GraphNode(
+
+    # --- Characters ---------------------------------------------------
+    if want_char:
+        chars = (
+            await db.execute(
+                select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+            )
+        ).scalars().all()
+        for c in chars:
+            if c.name in existing_names:
+                continue
+            node = GraphNode(
                 project_id=project_id,
                 source_material_id=material_id,
                 node_kind="study_character",
@@ -262,7 +335,152 @@ async def materialise_from_study(
                     "aliases": c.aliases or [],
                 },
             )
-        )
-        created += 1
+            db.add(node)
+            await db.flush()
+            existing_names.add(c.name)
+            nodes_by_ref[("study_character", c.id)] = node
+            created += 1
+
+    # --- Events (foreshadows) ----------------------------------------
+    if want_event:
+        events = (
+            await db.execute(
+                select(MemoryForeshadow).where(
+                    MemoryForeshadow.source_material_id == material_id,
+                    MemoryForeshadow.project_id == mat.project_id,
+                )
+            )
+        ).scalars().all()
+        for f in events:
+            label = f.name
+            if label in existing_names:
+                continue
+            node = GraphNode(
+                project_id=project_id,
+                source_material_id=material_id,
+                node_kind="event",
+                name=label,
+                ref_study_character_id=None,
+                extra={
+                    "summary": (f.summary or "")[:400],
+                    "planted_chapter": f.planted_chapter,
+                    "importance": f.importance,
+                    "status": f.status,
+                    "related_characters": f.related_characters or [],
+                    "ref_foreshadow_id": f.id,
+                },
+            )
+            db.add(node)
+            await db.flush()
+            existing_names.add(label)
+            created += 1
+
+    # --- Behavior patterns -------------------------------------------
+    if want_behavior:
+        patterns = (
+            await db.execute(
+                select(BehaviorPattern).where(
+                    BehaviorPattern.source_material_id == material_id
+                )
+            )
+        ).scalars().all()
+        for p in patterns:
+            label = p.name
+            if label in existing_names:
+                continue
+            node = GraphNode(
+                project_id=project_id,
+                source_material_id=material_id,
+                node_kind="other",
+                name=label,
+                ref_study_character_id=None,
+                extra={
+                    "kind": "behavior_pattern",
+                    "character_tags": p.character_tags or [],
+                    "situation_tags": p.situation_tags or [],
+                    "ref_behavior_id": p.id,
+                },
+            )
+            db.add(node)
+            await db.flush()
+            existing_names.add(label)
+            created += 1
+
+    # --- Co-occurrence edges -----------------------------------------
+    edges_created = 0
+    if want_char and add_cooccurrence_edges:
+        from collections import defaultdict
+
+        # Bucket the material's study_characters by source chapter.
+        rows = (
+            await db.execute(
+                select(StudyCharacter).where(
+                    StudyCharacter.material_id == material_id,
+                    StudyCharacter.source_chapter_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+        chapter_to_chars: dict[int, list[StudyCharacter]] = defaultdict(list)
+        for c in rows:
+            chapter_to_chars[c.source_chapter_id].append(c)
+        # Pairs → count + last chapter.
+        pair_acc: dict[tuple[int, int], int] = {}
+        for chars_in_chap in chapter_to_chars.values():
+            for i, a in enumerate(chars_in_chap[:20]):
+                for b in chars_in_chap[i + 1: 20]:
+                    lo, hi = (a.id, b.id) if a.id < b.id else (b.id, a.id)
+                    pair_acc[(lo, hi)] = pair_acc.get((lo, hi), 0) + 1
+        if pair_acc:
+            existing_edges = (
+                await db.execute(
+                    select(GraphEdge).where(GraphEdge.project_id == project_id)
+                )
+            ).scalars().all()
+            edge_key = {
+                (e.source_node_id, e.target_node_id, e.relation)
+                for e in existing_edges
+            }
+            for (a_id, b_id), count in pair_acc.items():
+                a_node = nodes_by_ref.get(("study_character", a_id))
+                b_node = nodes_by_ref.get(("study_character", b_id))
+                # If the character wasn't materialised (deduped by
+                # name earlier), skip — the user can still add an
+                # edge by hand after.
+                if a_node is None or b_node is None:
+                    continue
+                # Don't self-loop.
+                if a_node.id == b_node.id:
+                    continue
+                relation = "同章节出现"
+                if (a_node.id, b_node.id, relation) in edge_key:
+                    continue
+                weight = min(1.0, 0.3 + 0.1 * count)
+                db.add(GraphEdge(
+                    project_id=project_id,
+                    source_node_id=a_node.id,
+                    target_node_id=b_node.id,
+                    relation=relation,
+                    weight=weight,
+                    evidence=None,
+                ))
+                edge_key.add((a_node.id, b_node.id, relation))
+                edges_created += 1
+
     await db.flush()
-    return await get_graph(project_id, db)
+    # Touch the result so the response carries the full updated
+    # graph (matches the original endpoint's contract).
+    result = await get_graph(project_id, db)
+    # R22: surface the counts we just produced so the UI can show
+    # "新增 X 节点 / Y 关系" without parsing the bundle. We add
+    # the summary to the same envelope — response_model=None
+    # means the dict goes out untyped.
+    payload = {
+        "ok": True,
+        "data": result.get("data") if isinstance(result, dict) else None,
+        "error": None,
+        "materialise_summary": {
+            "nodes_created": created,
+            "edges_created": edges_created,
+        },
+    }
+    return payload

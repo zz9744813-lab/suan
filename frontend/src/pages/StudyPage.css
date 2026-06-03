@@ -294,3 +294,79 @@
 .bulk-progress.error .bulk-progress-fill {
   background: var(--error, #e15a5a);
 }
+
+/* R22: 联动数据概览行 — 出现在每本书展开后的按钮行下面,
+   用 3 个 chip 标签告诉用户"数据已经沉淀到哪"。 */
+.study-linkage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  background: var(--bg-soft, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--accent-line-soft, rgba(120, 130, 200, 0.12));
+  font-size: 12px;
+}
+.study-linkage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-paper-soft, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--accent-line, rgba(120, 130, 200, 0.18));
+}
+.study-linkage-chip b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* R22: 关系模态 — 复用全局 .modal 样式, 用 .modal-wide 拉宽。
+   列表里的每个 suggestion 是一行 checkbox + 关系输入 + 原文引用。 */
+.modal.modal-wide {
+  max-width: 720px;
+  width: 92vw;
+}
+.rel-suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+.rel-suggestion {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--accent-line-soft, rgba(120, 130, 200, 0.12));
+  transition: border-color 0.1s ease, background 0.1s ease;
+}
+.rel-suggestion.checked {
+  border-color: var(--accent, #6a83f0);
+  background: var(--bg-paper-soft, rgba(255, 255, 255, 0.04));
+}
+.rel-suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.rel-suggestion-row {
+  margin-top: 6px;
+  margin-left: 24px;
+}
+.rel-suggestion-row input {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.rel-suggestion-quote {
+  margin-top: 4px;
+  margin-left: 24px;
+  font-style: italic;
+  color: var(--text-muted);
+}

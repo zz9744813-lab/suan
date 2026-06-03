@@ -91,6 +91,10 @@ async def init_db() -> None:
         # Single JSON blob so the role-binding matrix can colour-code
         # risky bindings without us re-running the probe on every load.
         ("model_providers", "last_health_full", "JSON"),
+        # R22: provenance column for auto-extracted foreshadows. Lets the
+        # Study page and the graph materialise endpoint filter "things
+        # this book produced" without scanning the JSON payload blob.
+        ("memory_foreshadows", "source_material_id", "INTEGER"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

@@ -21,7 +21,13 @@ import {
   listStudyMaterials,
   materialiseFromStudy,
 } from "../api";
-import type { GraphEdge, GraphNode, GraphNodeKind, StudyMaterial } from "../types";
+import type {
+  GraphEdge,
+  GraphNode,
+  GraphNodeKind,
+  StudyMaterial,
+  MaterialiseSummary,
+} from "../types";
 import { useProjectStore } from "../stores/projectStore";
 
 const KIND_COLORS: Record<GraphNodeKind, string> = {
@@ -91,6 +97,12 @@ export function GraphPage() {
   const [hover, setHover] = useState<{ kind: "node" | "edge"; data: any } | null>(null);
   const [materials, setMaterials] = useState<StudyMaterial[]>([]);
   const [showMaterialise, setShowMaterialise] = useState(false);
+  // R22: which "kind" to materialise — character / event / behavior / all.
+  // The modal remembers the user's last choice for the next import.
+  const [materialiseKind, setMaterialiseKind] = useState<"all" | "character" | "event" | "behavior">("all");
+  // R22: transient toast shown after a materialise completes.
+  // Auto-clears after 4s so it doesn't pile up.
+  const [materialiseToast, setMaterialiseToast] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const W = 920;
@@ -116,6 +128,14 @@ export function GraphPage() {
   useEffect(() => {
     listStudyMaterials(currentProjectId ?? undefined).then((r) => setMaterials(r ?? []));
   }, [currentProjectId]);
+
+  // R22: auto-clear the import toast after 4s so it doesn't pile up
+  // when the user does several imports in a row.
+  useEffect(() => {
+    if (!materialiseToast) return;
+    const t = setTimeout(() => setMaterialiseToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [materialiseToast]);
 
   const laid = useMemo(() => layoutNodes(nodes, edges, W, H), [nodes, edges]);
   const byId = useMemo(() => {
@@ -147,12 +167,44 @@ export function GraphPage() {
     await refresh();
   };
 
-  const onMaterialise = async (materialId: number) => {
+  const onMaterialise = async (materialId: number, kind: "all" | "character" | "event" | "behavior") => {
     if (currentProjectId == null) return;
-    await materialiseFromStudy(currentProjectId, materialId);
-    await refresh();
-    setShowMaterialise(false);
+    setBusy(true);
+    try {
+      // R22: the backend returns {ok, data, materialise_summary} —
+      // we surface the summary in a toast so the user knows "X 个节点 / Y 条边"
+      // were just created. We also re-fetch the graph to pick up the
+      // new nodes/edges visually.
+      const r: any = await materialiseFromStudy(
+        currentProjectId,
+        materialId,
+        kind,
+        true,  // add_cooccurrence_edges
+      );
+      const sum: MaterialiseSummary | undefined = r?.materialise_summary;
+      setMaterialiseToast(
+        sum
+          ? `导入完成: 新增 ${sum.nodes_created} 节点 / ${sum.edges_created} 边`
+          : "导入完成",
+      );
+      await refresh();
+    } catch (e: any) {
+      setMaterialiseToast(`导入失败: ${e?.message ?? e}`);
+    } finally {
+      setBusy(false);
+      setShowMaterialise(false);
+    }
   };
+
+  // R22: lookup table for source-material titles so the canvas tooltip
+  // can show "来源: 《xxx》" when the user hovers a node. Without
+  // this the only signal is the numeric source_material_id, which
+  // is useless without leaving the page.
+  const materialTitlesById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const mat of materials) m.set(mat.id, mat.title);
+    return m;
+  }, [materials]);
 
   if (currentProjectId == null) {
     return (
@@ -291,6 +343,12 @@ export function GraphPage() {
               <>
                 <b>{(hover.data as GraphNode).name}</b>
                 <div className="muted tiny">{(hover.data as GraphNode).node_kind}</div>
+                {(hover.data as GraphNode).source_material_id != null && (
+                  <div className="muted tiny">
+                    来源: {materialTitlesById.get((hover.data as GraphNode).source_material_id!)
+                       ?? `拆书 #${(hover.data as GraphNode).source_material_id}`}
+                  </div>
+                )}
                 {(hover.data as GraphNode).extra?.role && (
                   <div>role: {(hover.data as GraphNode).extra!.role}</div>
                 )}
@@ -332,18 +390,36 @@ export function GraphPage() {
         <div className="modal-backdrop" onClick={() => setShowMaterialise(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <header>
-              <h3>从拆书材料导入人物</h3>
+              <h3>从拆书材料导入</h3>
               <button onClick={() => setShowMaterialise(false)}>×</button>
             </header>
             <div className="modal-body">
+              {/* R22: 选 kind 决定这次导入什么 — 人物 / 伏笔 / 行为 / 全部。
+                  行为模式会以 node_kind=other 出现在图上, 伏笔会变成
+                  node_kind=event。默认 all 走原有"一键全导入"路径。 */}
+              <div className="row" style={{ marginBottom: 10, gap: 6, flexWrap: "wrap" }}>
+                <span className="muted small">导入范围:</span>
+                {(["all", "character", "event", "behavior"] as const).map((k) => (
+                  <button
+                    key={k}
+                    className={materialiseKind === k ? "primary" : ""}
+                    onClick={() => setMaterialiseKind(k)}
+                    style={{ fontSize: 12 }}
+                  >
+                    {k === "all" ? "全部" : k === "character" ? "人物" : k === "event" ? "伏笔" : "行为"}
+                  </button>
+                ))}
+                <span className="muted tiny">· 人物同时会按章节共现创建「同章节出现」边</span>
+              </div>
               {materials.length === 0 ? (
                 <div className="muted">没有拆书材料。先到「拆书」页添加一份。</div>
               ) : (
                 materials.map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => onMaterialise(m.id)}
+                    onClick={() => onMaterialise(m.id, materialiseKind)}
                     className="row-button"
+                    disabled={busy}
                   >
                     {m.title} · {m.character_count} 人物
                   </button>
@@ -351,6 +427,14 @@ export function GraphPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* R22: 短暂提示条, 显示最近一次导入的 nodes_created / edges_created。
+          用 setTimeout 4s 后清掉, 不堆叠。 */}
+      {materialiseToast && (
+        <div className="graph-toast" onClick={() => setMaterialiseToast(null)}>
+          {materialiseToast}
         </div>
       )}
     </div>

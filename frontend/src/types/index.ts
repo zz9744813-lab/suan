@@ -487,6 +487,121 @@ export type BehaviorPattern = {
   updated_at: string;
 };
 
+// ----- R22: study → graph / behavior / foreshadow linkage -----
+
+// Response from ``POST /api/study/materials/{id}/extract-behaviors``.
+// One LLM call, one or more BehaviorPattern rows persisted with
+// source_material_id so the drafter pulls them by tag.
+export type StudyBehaviorExtractRequest = {
+  max_patterns?: number;
+  force?: boolean;
+  max_chunk_chars?: number;
+  evidence_chapter_count?: number;
+};
+
+export type StudyBehaviorExtractResponse = {
+  material_id: number;
+  patterns_added: number;
+  patterns_skipped: number;
+  pattern_ids: number[];
+  total_patterns_for_material: number;
+  cost_usd: number;
+  duration_ms: number;
+  input_tokens: number;
+  output_tokens: number;
+  sample_names: string[];
+};
+
+// One suggested edge between two characters that co-occur in the
+// same study chapter. The user picks a relation label at apply time
+// (we don't try to infer "师父 vs 同门" from the chapter text).
+export type StudyRelationshipSuggestion = {
+  char_a_id: number;
+  char_a_name: string;
+  char_b_id: number;
+  char_b_name: string;
+  co_chapter_count: number;
+  last_chapter_id: number;
+  last_chapter_no: number;
+  last_chapter_title: string;
+  sample_quote: string;
+};
+
+export type StudyRelationshipsResponse = {
+  material_id: number;
+  chapters_scanned: number;
+  suggestions: StudyRelationshipSuggestion[];
+  total_characters: number;
+  min_co_chapter_count: number;
+};
+
+export type StudyRelationshipApplyRequest = {
+  project_id: number;
+  // Each pair is { char_a_id, char_b_id, relation, weight?, evidence? }.
+  pairs: Array<Record<string, any>>;
+};
+
+export type StudyRelationshipApplyResponse = {
+  project_id: number;
+  edges_added: number;
+  edges_skipped: number;
+  edge_ids: number[];
+};
+
+// One-stop dashboard for a study material. Aggregates the "where
+// did the data go" question so the Study page can render a 4-stat
+// row per book without four round-trips.
+export type StudyMaterialOverview = {
+  material_id: number;
+  title: string;
+  project_id: number | null;
+  chapter_count: number;
+  character_count: number;
+  behavior_count: number;
+  foreshadow_count: number;
+  graph_node_count: number;
+  sample_characters: Array<{
+    id: number;
+    name: string;
+    role: string;
+    tags: string[];
+  }>;
+  sample_behaviors: Array<{
+    id: number;
+    name: string;
+    character_tags: string[];
+    situation_tags: string[];
+  }>;
+  sample_foreshadows: Array<{
+    id: number;
+    name: string;
+    summary: string;
+    planted_chapter: number | null;
+  }>;
+};
+
+// R22 materialise summary surfaced on the graph page. The route
+// returns the standard GraphBundle in `data` plus this in a
+// sibling field; the helper below mirrors that shape.
+export type MaterialiseSummary = {
+  nodes_created: number;
+  edges_created: number;
+};
+
+// Memory-side foreshadow summary, returned by
+// ``GET /api/study/materials/{id}/foreshadows``. Only the columns
+// the Study page actually renders — fuller columns are available
+// on the memory page.
+export type StudyForeshadowSummary = {
+  id: number;
+  name: string;
+  summary: string;
+  planted_chapter: number | null;
+  status: string;
+  importance: number;
+  related_characters: string[];
+};
+
 // ----- Round E: Graph (人物关系图谱) -----
 // Nodes and edges are deliberately lightweight — the canvas in the
 // Graph page is fully client-side, so the backend only persists the

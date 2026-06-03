@@ -75,6 +75,15 @@ class MemoryForeshadow(Base):
     related_characters: Mapped[list[str]] = mapped_column(JSON, default=list)
     related_items: Mapped[list[str]] = mapped_column(JSON, default=list)
     related_main_plot: Mapped[str | None] = mapped_column(String(300), default=None)
+    # R22: provenance. Set when a foreshadow was auto-extracted from a
+    # study material by the bulk event extractor; lets the Study page
+    # "this foreshadow came from 拆书《xxx》" tooltip and lets the graph
+    # materialise endpoint pull the same rows back out as event nodes.
+    # Nullable + ON DELETE SET NULL so dropping a study material doesn't
+    # nuke the project's foreshadow history.
+    source_material_id: Mapped[int | None] = mapped_column(
+        ForeignKey("study_materials.id", ondelete="SET NULL"), index=True, default=None,
+    )
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

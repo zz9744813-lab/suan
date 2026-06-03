@@ -8,28 +8,41 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.agents.base import AgentContext
-from app.agents.study import StudyCharacterAgent, StudyEventAgent
+from app.agents.study import (
+    StudyBehaviorPatternAgent,
+    StudyCharacterAgent,
+    StudyEventAgent,
+)
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import bad_request, not_found
 from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
 from app.models.task import AgentTask
 from app.schemas import (
     APIResponse,
+    BehaviorPatternRead,
     ChapterizeRequest,
+    StudyBehaviorExtractRequest,
+    StudyBehaviorExtractResponse,
     StudyBulkRequest,
     StudyBulkStartResponse,
     StudyChapterRead,
     StudyCharacterCreate,
     StudyCharacterRead,
+    StudyForeshadowSummary,
     StudyMaterialCreate,
     StudyMaterialDetail,
+    StudyMaterialOverview,
     StudyMaterialRead,
     StudyMaterialUpdate,
+    StudyRelationshipApplyRequest,
+    StudyRelationshipApplyResponse,
+    StudyRelationshipsResponse,
+    StudyRelationshipSuggestion,
     StudyRequest,
 )
 from app.services.llm.router import get_llm_router
@@ -1410,6 +1423,10 @@ async def _bulk_process_chapter(
                         status="active",
                         importance=imp,
                         related_characters=related_chars,
+                        # R22: stamp provenance so the Study page and
+                        # the graph materialise endpoint can filter
+                        # "foreshadows from this book" cheaply.
+                        source_material_id=material_id,
                     ))
                     events_added += 1
             # Mark the chapter as studied (timestamp). For
@@ -1423,6 +1440,708 @@ async def _bulk_process_chapter(
         except Exception as exc:  # noqa: BLE001
             await db.rollback()
             return 0, 0, 0, f"chapter {chapter_id}: {exc.__class__.__name__}: {exc}".strip()
+
+
+# -------------------- R22: study → graph / behavior / foreshadow linkage --------------------
+#
+# Round 22 is the "功能联动" cleanup. After 拆书 runs, the data has
+# to flow into:
+#   - the drafter (consumes behavior_patterns) — the
+#     ``StudyBehaviorPatternAgent`` is already coded but no route
+#     invokes it. This adds the route.
+#   - the graph page (consumes graph_nodes + graph_edges) — the
+#     existing materialise endpoint handled characters only. We add
+#     ``kind=event|behavior|all`` and a co-occurrence edge pass.
+#   - the memory page (consumes memory_foreshadows) — auto-extracted
+#     foreshadows now stamp ``source_material_id`` so the Study page
+#     can list "events from this book" without a JSON-payload scan.
+
+
+async def _pick_evidence_chapters_async(
+    db: AsyncSession,
+    material_id: int,
+    chapter_count: int,
+    max_chunk_chars: int,
+) -> list[dict[str, Any]]:
+    """Pick ``chapter_count`` chapters with the most extracted characters.
+
+    The behavior-pattern agent needs *representative* scenes — a 2332-
+    chapter book would overwhelm the prompt if we fed it everything,
+    but the first chapter alone is too narrow. The simplest signal
+    of "interesting" is "the chapter where lots of named characters
+    were seen together" (a heist / council / battle scene), so we
+    rank by StudyCharacter.source_chapter_id and take the top N.
+
+    Returns a list of ``{id, chapter_index, title, text}`` dicts
+    ready to feed the LLM as the ``evidence_chunks`` field.
+    """
+    from collections import Counter
+
+    from app.models.study import StudyChapter as _SCh, StudyCharacter as _SC
+
+    if chapter_count <= 0:
+        return []
+    rows = (
+        await db.execute(
+            select(_SC.source_chapter_id, _SC.name).where(
+                _SC.material_id == material_id,
+                _SC.source_chapter_id.is_not(None),
+            )
+        )
+    ).all()
+    counter: Counter[int] = Counter(r[0] for r in rows if r[0] is not None)
+    if not counter:
+        return []
+    # Most-active first; tie-break by chapter_index (earlier wins).
+    top_ids = [cid for cid, _ in counter.most_common(chapter_count)]
+    if not top_ids:
+        return []
+    chapter_rows = (
+        await db.execute(
+            select(_SCh).where(_SCh.id.in_(top_ids))
+        )
+    ).scalars().all()
+    by_id = {c.id: c for c in chapter_rows}
+    out: list[dict[str, Any]] = []
+    for cid in top_ids:
+        c = by_id.get(cid)
+        if c is None:
+            continue
+        text = (c.content or "")[:max_chunk_chars]
+        out.append({
+            "id": c.id,
+            "chapter_index": c.chapter_index,
+            "title": c.title,
+            "text": text,
+        })
+    return out
+
+
+@router.post(
+    "/materials/{material_id}/extract-behaviors",
+    response_model=APIResponse[StudyBehaviorExtractResponse],
+)
+async def extract_behaviors(
+    material_id: int,
+    body: StudyBehaviorExtractRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[StudyBehaviorExtractResponse]:
+    """R22: extract reusable behavior patterns from a study material.
+
+    One LLM call. The prompt sees the material's character roster
+    plus 2-5 "active" chapter snippets (chapters with the most
+    extracted characters) and returns a JSON list of pattern cards.
+    We persist each one as a ``BehaviorPattern`` row with
+    ``source_material_id`` so the drafter can pull them by tag.
+
+    Idempotency: if ``force=False`` and the material already has
+    patterns, we return the existing ones without calling the LLM.
+    With ``force=True`` we wipe the material's patterns first.
+    """
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    # 1) Idempotency / force re-run
+    existing = (await db.execute(
+        select(BehaviorPattern).where(BehaviorPattern.source_material_id == material_id)
+    )).scalars().all()
+    if existing and not body.force:
+        return {
+            "ok": True,
+            "data": StudyBehaviorExtractResponse(
+                material_id=material_id,
+                patterns_added=0,
+                patterns_skipped=len(existing),
+                pattern_ids=[p.id for p in existing[: body.max_patterns]],
+                total_patterns_for_material=len(existing),
+                cost_usd=0.0,
+                duration_ms=0,
+                input_tokens=0,
+                output_tokens=0,
+                sample_names=[p.name for p in existing[:5]],
+            ),
+        }
+    if existing and body.force:
+        for p in existing:
+            await db.delete(p)
+        await db.flush()
+
+    # 2) Build the evidence payload
+    chars = (await db.execute(
+        select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+    )).scalars().all()
+    if not chars:
+        raise bad_request(
+            "该书还没有抽过人物。先跑一次「抽取人物」，再归纳行为模式。",
+            suggestion="POST /api/study/materials/{id}/study/all with mode=character",
+        )
+    char_summary = "\n".join(
+        f"- {c.name} (role={c.role or '其他'}, tags={', '.join(c.tags or [])})"
+        for c in chars[:80]
+    )
+    evidence_chapters = await _pick_evidence_chapters_async(
+        db,
+        material_id=material_id,
+        chapter_count=body.evidence_chapter_count,
+        max_chunk_chars=body.max_chunk_chars,
+    )
+    if not evidence_chapters:
+        raise bad_request(
+            "找不到可用的章节片段（人物没有 source_chapter_id，可能是手工添加的）。",
+            suggestion="先跑批量抽人物，让每条人物挂上章节来源。",
+        )
+    evidence_block = "\n\n".join(
+        f"### {ch['title'] or '第 ' + str(ch['chapter_index']) + ' 章'}\n{ch['text']}"
+        for ch in evidence_chapters
+    )
+    existing_patterns = (await db.execute(
+        select(BehaviorPattern).order_by(BehaviorPattern.id.desc()).limit(50)
+    )).scalars().all()
+    existing_pattern_block = "\n".join(
+        f"- {p.name} (人物:{', '.join(p.character_tags or [])}; 情境:{', '.join(p.situation_tags or [])})"
+        for p in existing_patterns
+    ) or "（无）"
+
+    # 3) Synthesise a lightweight AgentTask so the AgentStep audit
+    #    trail is consistent with the rest of the system.
+    study_task = AgentTask(
+        project_id=material.project_id or 0,
+        chapter_id=None,
+        task_type="study_behavior_pattern",
+        status="running",
+        priority=50,
+        payload={
+            "material_id": material_id,
+            "max_patterns": body.max_patterns,
+            "evidence_chapter_count": len(evidence_chapters),
+        },
+        started_at=datetime.utcnow(),
+    )
+    db.add(study_task)
+    await db.flush()
+
+    # 4) Run the LLM agent
+    agent = StudyBehaviorPatternAgent(
+        router=get_llm_router(), engine=get_prompt_engine(),
+    )
+    try:
+        result = await agent.run(
+            AgentContext(
+                db=db,
+                task=study_task,
+                project_id=material.project_id or 0,
+                chapter_id=None,
+                inputs={
+                    "evidence_chunks": evidence_block,
+                    "existing_patterns": existing_pattern_block,
+                    "character_roster": char_summary,
+                    "max_patterns": str(body.max_patterns),
+                },
+            )
+        )
+    except Exception as exc:
+        study_task.status = "failed"
+        study_task.error = str(exc)
+        study_task.finished_at = datetime.utcnow()
+        await db.flush()
+        raise
+    study_task.status = "succeeded"
+    study_task.finished_at = datetime.utcnow()
+    study_task.cost_usd = result.cost_usd
+    study_task.input_tokens = result.input_tokens
+    study_task.output_tokens = result.output_tokens
+
+    parsed = result.parsed or {}
+    patterns_in = parsed.get("patterns") or []
+    if not isinstance(patterns_in, list):
+        patterns_in = []
+
+    # 5) Persist. Skip duplicates by (source_material_id, name) so a
+    #    partial re-run with the LLM repeating itself doesn't grow
+    #    the table unboundedly.
+    new_rows: list[BehaviorPattern] = []
+    skipped = 0
+    for item in patterns_in:
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        if len(new_rows) >= body.max_patterns:
+            skipped += 1
+            continue
+        if any(p.name == name for p in existing):
+            skipped += 1
+            continue
+        row = BehaviorPattern(
+            source_material_id=material_id,
+            name=name[:120],
+            character_tags=[str(x).strip() for x in (item.get("character_tags") or []) if str(x).strip()][:8],
+            situation_tags=[str(x).strip() for x in (item.get("situation_tags") or []) if str(x).strip()][:8],
+            typical_behavior=[str(x).strip() for x in (item.get("typical_behavior") or []) if str(x).strip()][:8],
+            dialogue_style=[str(x).strip() for x in (item.get("dialogue_style") or []) if str(x).strip()][:8],
+            scene_function=[str(x).strip() for x in (item.get("scene_function") or []) if str(x).strip()][:8],
+            risks=[str(x).strip() for x in (item.get("risks") or []) if str(x).strip()][:8],
+            recommended_plot_followup=[str(x).strip() for x in (item.get("recommended_plot_followup") or []) if str(x).strip()][:8],
+            evidence=[str(x).strip() for x in (item.get("evidence") or []) if str(x).strip()][:5],
+            confidence=float(item.get("confidence") or 0.5),
+        )
+        db.add(row)
+        new_rows.append(row)
+    await db.flush()
+    return {
+        "ok": True,
+        "data": StudyBehaviorExtractResponse(
+            material_id=material_id,
+            patterns_added=len(new_rows),
+            patterns_skipped=skipped,
+            pattern_ids=[p.id for p in new_rows],
+            total_patterns_for_material=len(existing) + len(new_rows),
+            cost_usd=round(result.cost_usd, 4),
+            duration_ms=result.duration_ms,
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            sample_names=[p.name for p in new_rows[:5]],
+        ),
+    }
+
+
+@router.get(
+    "/materials/{material_id}/behaviors",
+    response_model=APIResponse[list[BehaviorPatternRead]],
+)
+async def list_behaviors(
+    material_id: int, db: AsyncSession = Depends(get_db)
+) -> APIResponse[list[BehaviorPatternRead]]:
+    """R22: behavior patterns produced by this material.
+
+    Empty list is the honest answer when the user hasn't run
+    extract-behaviors yet — the frontend shows "0 条" with a CTA.
+    """
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+    rows = (await db.execute(
+        select(BehaviorPattern)
+        .where(BehaviorPattern.source_material_id == material_id)
+        .order_by(BehaviorPattern.confidence.desc(), BehaviorPattern.id.asc())
+    )).scalars().all()
+    return {"ok": True, "data": [BehaviorPatternRead.model_validate(r) for r in rows]}
+
+
+@router.get(
+    "/materials/{material_id}/foreshadows",
+    response_model=APIResponse[list[StudyForeshadowSummary]],
+)
+async def list_foreshadows(
+    material_id: int, db: AsyncSession = Depends(get_db)
+) -> APIResponse[list[StudyForeshadowSummary]]:
+    """R22: memory_foreshadows stamped with ``source_material_id``.
+
+    The bulk event extractor (R21 / mode=event) sets this column, so
+    the Study page can show "foreshadows from this book" without
+    scanning the foreshadow summary for the book title.
+    """
+    from app.models.memory import MemoryForeshadow
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+    if not material.project_id:
+        # The material isn't bound to a project, so the bulk event
+        # extractor never wrote any foreshadows under this material
+        # (it requires project_id to even kick off).
+        return {"ok": True, "data": []}
+    rows = (await db.execute(
+        select(MemoryForeshadow)
+        .where(
+            MemoryForeshadow.source_material_id == material_id,
+            MemoryForeshadow.project_id == material.project_id,
+        )
+        .order_by(MemoryForeshadow.planted_chapter.asc().nulls_last(), MemoryForeshadow.id.asc())
+    )).scalars().all()
+    return {"ok": True, "data": [
+        StudyForeshadowSummary(
+            id=r.id,
+            name=r.name,
+            summary=r.summary or "",
+            planted_chapter=r.planted_chapter,
+            status=r.status,
+            importance=r.importance,
+            related_characters=r.related_characters or [],
+        )
+        for r in rows
+    ]}
+
+
+@router.get(
+    "/materials/{material_id}/relationships",
+    response_model=APIResponse[StudyRelationshipsResponse],
+)
+async def list_relationship_suggestions(
+    material_id: int, db: AsyncSession = Depends(get_db)
+) -> APIResponse[StudyRelationshipsResponse]:
+    """R22: co-occurrence analysis on the study_characters.
+
+    For every pair of characters that share a source_chapter_id, we
+    suggest an edge. The relation label is left to the user — we
+    don't try to infer "师父 vs 同门" from the chapter text (the
+    cheap model is unreliable for that and the false-positive cost
+    is high). The MVP just emits "同章节出现" as a placeholder; the
+    user replaces it in the apply-modal.
+
+    Output is sorted by (co_chapter_count desc, last_chapter_no desc)
+    so the most-evidenced pairs surface first.
+    """
+    from sqlalchemy import func
+
+    from app.models.study import StudyCharacter as _SC, StudyChapter as _SCh
+
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    # 1) Pull every character with a source chapter. Characters added
+    #    by hand (source_chapter_id is NULL) can't be analysed because
+    #    we have no evidence to point at.
+    char_rows = (await db.execute(
+        select(_SC)
+        .where(_SC.material_id == material_id, _SC.source_chapter_id.is_not(None))
+    )).scalars().all()
+    if not char_rows:
+        return {
+            "ok": True,
+            "data": StudyRelationshipsResponse(
+                material_id=material_id,
+                chapters_scanned=0,
+                suggestions=[],
+                total_characters=0,
+            ),
+        }
+
+    # 2) Bucket by chapter. A chapter with 5 characters produces
+    #    C(5,2) = 10 candidate pairs; we accumulate the count and
+    #    the latest chapter_id/no for each pair.
+    from collections import defaultdict
+
+    chapter_to_chars: dict[int, list[_SC]] = defaultdict(list)
+    for c in char_rows:
+        chapter_to_chars[c.source_chapter_id].append(c)
+
+    pair_acc: dict[tuple[int, int], dict[str, Any]] = {}
+    chapter_ids_seen: set[int] = set()
+    for chap_id, chars_in_chap in chapter_to_chars.items():
+        chapter_ids_seen.add(chap_id)
+        # Cap per-chapter char count — 50 characters in one chapter
+        # would explode to 1225 pairs. We only emit pairs among the
+        # first 20 characters in the chapter (more than enough
+        # signal; the LLM's per-chapter output is also bounded).
+        chars_capped = chars_in_chap[:20]
+        for i, a in enumerate(chars_capped):
+            for b in chars_capped[i + 1:]:
+                # Stable ordering so (A,B) and (B,A) collide on the
+                # same bucket.
+                lo, hi = (a, b) if a.id < b.id else (b, a)
+                key = (lo.id, hi.id)
+                acc = pair_acc.setdefault(key, {
+                    "char_a": lo,
+                    "char_b": hi,
+                    "co_chapter_count": 0,
+                    "last_chapter_id": chap_id,
+                    "last_chapter_no": 0,
+                })
+                acc["co_chapter_count"] += 1
+
+    # 3) Resolve last_chapter_no for the tracked chapter_ids.
+    chap_rows = (await db.execute(
+        select(_SCh).where(_SCh.id.in_(list(chapter_ids_seen)))
+    )).scalars().all()
+    by_chap_id = {c.id: c for c in chap_rows}
+    for acc in pair_acc.values():
+        ch = by_chap_id.get(acc["last_chapter_id"])
+        if ch is not None:
+            acc["last_chapter_no"] = ch.chapter_index
+            acc["last_chapter_title"] = ch.title or ""
+
+    # 4) Sort + format.
+    rows = sorted(
+        pair_acc.values(),
+        key=lambda x: (-x["co_chapter_count"], -x["last_chapter_no"]),
+    )
+    suggestions: list[StudyRelationshipSuggestion] = []
+    for r in rows:
+        # Try to grab a 1-2 sentence quote from the chapter as
+        # evidence. The model that extracted the characters
+        # already saw the text; we just show the first 200 chars
+        # of the chapter so the user has something to evaluate.
+        ch = by_chap_id.get(r["last_chapter_id"])
+        quote = ""
+        if ch is not None and ch.content:
+            txt = ch.content
+            names = [r["char_a"].name, r["char_b"].name]
+            # Look for the first sentence mentioning both names.
+            for sent in re.split(r"[。！？!?\n]", txt):
+                if all(n in sent for n in names) and 8 <= len(sent) <= 200:
+                    quote = sent.strip()
+                    break
+            if not quote:
+                quote = txt[:200].replace("\n", " ").strip()
+        suggestions.append(StudyRelationshipSuggestion(
+            char_a_id=r["char_a"].id,
+            char_a_name=r["char_a"].name,
+            char_b_id=r["char_b"].id,
+            char_b_name=r["char_b"].name,
+            co_chapter_count=r["co_chapter_count"],
+            last_chapter_id=r["last_chapter_id"],
+            last_chapter_no=r["last_chapter_no"],
+            last_chapter_title=r.get("last_chapter_title", ""),
+            sample_quote=quote,
+        ))
+
+    return {
+        "ok": True,
+        "data": StudyRelationshipsResponse(
+            material_id=material_id,
+            chapters_scanned=len(chapter_ids_seen),
+            suggestions=suggestions,
+            total_characters=len(char_rows),
+        ),
+    }
+
+
+@router.post(
+    "/materials/{material_id}/relationships/apply",
+    response_model=APIResponse[StudyRelationshipApplyResponse],
+)
+async def apply_relationship_suggestions(
+    material_id: int,
+    body: StudyRelationshipApplyRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[StudyRelationshipApplyResponse]:
+    """R22: take the user's picked suggestions and create GraphEdges.
+
+    Each ``pair`` in the request body is ``{char_a_id, char_b_id,
+    relation}``. The route looks up the corresponding
+    ``StudyCharacter`` rows, ensures they're materialised as
+    ``GraphNode``s in the target project, and then creates the
+    edge. Idempotent: an existing edge between the same two nodes
+    with the same relation is skipped.
+    """
+    from app.models.study import GraphEdge, GraphNode, StudyCharacter as _SC
+
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    if not body.pairs:
+        return {
+            "ok": True,
+            "data": StudyRelationshipApplyResponse(
+                project_id=body.project_id,
+                edges_added=0,
+                edges_skipped=0,
+                edge_ids=[],
+            ),
+        }
+
+    # Pull the relevant character rows up front so we can both
+    # materialise-and-lookup in one go.
+    char_ids = set()
+    for p in body.pairs:
+        if isinstance(p, dict):
+            if isinstance(p.get("char_a_id"), int):
+                char_ids.add(p["char_a_id"])
+            if isinstance(p.get("char_b_id"), int):
+                char_ids.add(p.get("char_b_id"))  # type: ignore[arg-type]
+    if not char_ids:
+        raise bad_request("pairs 里没有 char_a_id / char_b_id。")
+    chars = (await db.execute(
+        select(_SC).where(_SC.id.in_(list(char_ids)))
+    )).scalars().all()
+    chars_by_id = {c.id: c for c in chars}
+    missing = char_ids - set(chars_by_id.keys())
+    if missing:
+        raise bad_request(f"以下人物 ID 找不到: {sorted(missing)}。")
+
+    # Auto-materialise the characters as GraphNodes (the materialise
+    # logic is small enough to inline — duplicating it here would
+    # just create drift with the original endpoint).
+    existing_nodes = (await db.execute(
+        select(GraphNode).where(
+            GraphNode.project_id == body.project_id,
+            GraphNode.source_material_id == material_id,
+        )
+    )).scalars().all()
+    nodes_by_char_id: dict[int, GraphNode] = {
+        n.ref_study_character_id: n for n in existing_nodes if n.ref_study_character_id is not None
+    }
+    for cid in char_ids:
+        if cid in nodes_by_char_id:
+            continue
+        c = chars_by_id[cid]
+        if c.material_id != material_id:
+            # Defence: don't accept a char from a different book.
+            continue
+        node = GraphNode(
+            project_id=body.project_id,
+            source_material_id=material_id,
+            node_kind="study_character",
+            name=c.name,
+            ref_study_character_id=c.id,
+            extra={
+                "role": c.role,
+                "tags": c.tags or [],
+                "aliases": c.aliases or [],
+            },
+        )
+        db.add(node)
+        await db.flush()
+        nodes_by_char_id[cid] = node
+
+    # Build edges.
+    added = 0
+    skipped = 0
+    edge_ids: list[int] = []
+    existing_edges = (await db.execute(
+        select(GraphEdge).where(GraphEdge.project_id == body.project_id)
+    )).scalars().all()
+    edge_key = {(e.source_node_id, e.target_node_id, e.relation) for e in existing_edges}
+    for p in body.pairs:
+        if not isinstance(p, dict):
+            continue
+        a_id = p.get("char_a_id")
+        b_id = p.get("char_b_id")
+        relation = (p.get("relation") or "同章节出现").strip() or "同章节出现"
+        if not isinstance(a_id, int) or not isinstance(b_id, int):
+            continue
+        a_node = nodes_by_char_id.get(a_id)
+        b_node = nodes_by_char_id.get(b_id)
+        if a_node is None or b_node is None:
+            skipped += 1
+            continue
+        if a_node.id == b_node.id:
+            skipped += 1
+            continue
+        if (a_node.id, b_node.id, relation) in edge_key:
+            skipped += 1
+            continue
+        edge = GraphEdge(
+            project_id=body.project_id,
+            source_node_id=a_node.id,
+            target_node_id=b_node.id,
+            relation=relation[:60],
+            weight=float(p.get("weight") or 0.5),
+            evidence=(p.get("evidence") or "")[:1000] or None,
+        )
+        db.add(edge)
+        await db.flush()
+        edge_key.add((a_node.id, b_node.id, relation))
+        edge_ids.append(edge.id)
+        added += 1
+    return {
+        "ok": True,
+        "data": StudyRelationshipApplyResponse(
+            project_id=body.project_id,
+            edges_added=added,
+            edges_skipped=skipped,
+            edge_ids=edge_ids,
+        ),
+    }
+
+
+@router.get(
+    "/materials/{material_id}/overview",
+    response_model=APIResponse[StudyMaterialOverview],
+)
+async def get_overview(
+    material_id: int, db: AsyncSession = Depends(get_db)
+) -> APIResponse[StudyMaterialOverview]:
+    """R22: one-stop dashboard for a study material.
+
+    Aggregates the "where did my data go" question so the Study
+    page can render a 4-stat row (chapters / characters / behaviors
+    / foreshadows) plus a small sample of each, without four
+    round-trips per material card.
+    """
+    from app.models.memory import MemoryForeshadow
+    from app.models.study import GraphNode as _GN
+
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    # Counts (cheap; each is one COUNT query).
+    n_chars = (await db.execute(
+        select(func.count(StudyCharacter.id)).where(StudyCharacter.material_id == material_id)
+    )).scalar_one()
+    n_behaviors = (await db.execute(
+        select(func.count(BehaviorPattern.id)).where(BehaviorPattern.source_material_id == material_id)
+    )).scalar_one()
+    n_foreshadows = 0
+    if material.project_id:
+        n_foreshadows = (await db.execute(
+            select(func.count(MemoryForeshadow.id)).where(
+                MemoryForeshadow.source_material_id == material_id,
+                MemoryForeshadow.project_id == material.project_id,
+            )
+        )).scalar_one()
+    n_graph_nodes = (await db.execute(
+        select(func.count(_GN.id)).where(_GN.source_material_id == material_id)
+    )).scalar_one()
+
+    # Samples
+    sample_chars = (await db.execute(
+        select(StudyCharacter)
+        .where(StudyCharacter.material_id == material_id)
+        .order_by(StudyCharacter.confidence.desc(), StudyCharacter.id.asc())
+        .limit(5)
+    )).scalars().all()
+    sample_behaviors = (await db.execute(
+        select(BehaviorPattern)
+        .where(BehaviorPattern.source_material_id == material_id)
+        .order_by(BehaviorPattern.confidence.desc(), BehaviorPattern.id.asc())
+        .limit(5)
+    )).scalars().all()
+    sample_foreshadows: list[MemoryForeshadow] = []
+    if material.project_id:
+        sample_foreshadows = (await db.execute(
+            select(MemoryForeshadow)
+            .where(
+                MemoryForeshadow.source_material_id == material_id,
+                MemoryForeshadow.project_id == material.project_id,
+            )
+            .order_by(MemoryForeshadow.planted_chapter.asc().nulls_last(), MemoryForeshadow.id.asc())
+            .limit(5)
+        )).scalars().all()
+
+    return {
+        "ok": True,
+        "data": StudyMaterialOverview(
+            material_id=material_id,
+            title=material.title,
+            project_id=material.project_id,
+            chapter_count=material.chapter_count or 0,
+            character_count=n_chars,
+            behavior_count=n_behaviors,
+            foreshadow_count=n_foreshadows,
+            graph_node_count=n_graph_nodes,
+            sample_characters=[
+                {"id": c.id, "name": c.name, "role": c.role, "tags": c.tags or []}
+                for c in sample_chars
+            ],
+            sample_behaviors=[
+                {"id": p.id, "name": p.name,
+                 "character_tags": p.character_tags or [],
+                 "situation_tags": p.situation_tags or []}
+                for p in sample_behaviors
+            ],
+            sample_foreshadows=[
+                {"id": f.id, "name": f.name, "summary": (f.summary or "")[:120],
+                 "planted_chapter": f.planted_chapter}
+                for f in sample_foreshadows
+            ],
+        ),
+    }
 
 
 def _stub_study_parse(text: str) -> dict[str, Any]:
