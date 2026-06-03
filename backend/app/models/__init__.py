@@ -22,6 +22,7 @@ from app.models.memory import (
 )
 from app.models.chief_agent import ChiefAgentMessage, ChiefAgentSession
 from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
+from app.models.discussion import DiscussionSession, DiscussionTurn
 
 __all__ = [
     "Project",
@@ -48,4 +49,6 @@ __all__ = [
     "StudyChapter",
     "StudyCharacter",
     "BehaviorPattern",
+    "DiscussionSession",
+    "DiscussionTurn",
 ]

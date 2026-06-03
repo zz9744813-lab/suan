@@ -11,6 +11,11 @@ import type {
   ChapterVersion,
   ChiefAgentMessage,
   ChiefAgentSession,
+  DiscussionParticipantKey,
+  DiscussionSession,
+  MemoryCharacter,
+  MemoryForeshadow,
+  MemoryHardFact,
   ModelHealthCheckResult,
   ModelProvider,
   ModelProviderTestResult,
@@ -19,6 +24,7 @@ import type {
   Project,
   PromptTemplate,
   PromptVersion,
+  SearchResult,
   StudyCharacter,
   StudyMaterial,
   StudyMaterialDetail,
@@ -276,3 +282,66 @@ export const updateBehaviorPattern = (id: number, body: Partial<BehaviorPattern>
   api.patch<BehaviorPattern>(`/api/behavior/patterns/${id}`, body);
 export const deleteBehaviorPattern = (id: number) =>
   api.delete<{ deleted: number }>(`/api/behavior/patterns/${id}`);
+
+// ----- Discussion Room -----
+export const runDiscussion = (body: {
+  project_id?: number;
+  topic: string;
+  participants: DiscussionParticipantKey[];
+}) => api.post<DiscussionSession>("/api/discussion/run", body);
+
+export const listDiscussionSessions = (projectId?: number) => {
+  const q = projectId ? `?project_id=${projectId}` : "";
+  return api.get<DiscussionSession[]>(`/api/discussion/sessions${q}`);
+};
+
+export const getDiscussionSession = (id: number) =>
+  api.get<DiscussionSession>(`/api/discussion/sessions/${id}`);
+
+// ----- Memory (Round 9) -----
+export const listCharacters = (projectId: number) =>
+  api.get<MemoryCharacter[]>(`/api/memory/projects/${projectId}/characters`);
+export const createCharacter = (projectId: number, body: {
+  name: string; aliases?: string[]; role?: string;
+  tags?: string[]; base_profile?: Record<string, any>;
+}) => api.post<MemoryCharacter>(`/api/memory/projects/${projectId}/characters`, body);
+export const updateCharacter = (id: number, body: {
+  name?: string; aliases?: string[]; role?: string;
+  tags?: string[]; base_profile?: Record<string, any>;
+}) => api.patch<MemoryCharacter>(`/api/memory/characters/${id}`, body);
+export const deleteCharacter = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/memory/characters/${id}`);
+
+export const listForeshadows = (projectId: number) =>
+  api.get<MemoryForeshadow[]>(`/api/memory/projects/${projectId}/foreshadows`);
+export const createForeshadow = (projectId: number, body: {
+  name: string; summary?: string;
+  planted_chapter?: number; expected_payoff_chapter?: number;
+  importance?: number; related_characters?: string[];
+  related_items?: string[]; related_main_plot?: string;
+}) => api.post<MemoryForeshadow>(`/api/memory/projects/${projectId}/foreshadows`, body);
+export const updateForeshadow = (id: number, body: {
+  status?: "active" | "paid_off" | "dropped";
+  actual_payoff_chapter?: number;
+  importance?: number;
+  name?: string; summary?: string;
+  planted_chapter?: number; expected_payoff_chapter?: number;
+  related_characters?: string[]; related_items?: string[];
+  related_main_plot?: string;
+}) => api.patch<MemoryForeshadow>(`/api/memory/foreshadows/${id}`, body);
+export const deleteForeshadow = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/memory/foreshadows/${id}`);
+
+export const listHardFacts = (projectId: number) =>
+  api.get<MemoryHardFact[]>(`/api/memory/projects/${projectId}/hard-facts`);
+export const createHardFact = (projectId: number, body: {
+  category?: string; fact: string; source_chapter?: number;
+}) => api.post<MemoryHardFact>(`/api/memory/projects/${projectId}/hard-facts`, body);
+export const deleteHardFact = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/memory/hard-facts/${id}`);
+
+// ----- Global Search (Round 11) -----
+export const globalSearch = (q: string, limit = 30) => {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return api.get<SearchResult[]>(`/api/search?${params.toString()}`);
+};

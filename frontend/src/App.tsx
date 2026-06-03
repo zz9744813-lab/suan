@@ -9,6 +9,8 @@ import { TasksPage } from "./pages/TasksPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { StudyPage } from "./pages/StudyPage";
+import { DiscussionPage } from "./pages/DiscussionPage";
+import { MemoryPage } from "./pages/MemoryPage";
 import { NotFound } from "./pages/NotFound";
 
 export default function App() {
@@ -25,6 +27,8 @@ export default function App() {
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/study" element={<StudyPage />} />
+        <Route path="/discussion" element={<DiscussionPage />} />
+        <Route path="/memory" element={<MemoryPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

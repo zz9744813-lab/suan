@@ -392,3 +392,126 @@ export type BehaviorPattern = {
   created_at: string;
   updated_at: string;
 };
+
+// ===== Discussion Room (P0-FEAT-1) =====
+export type DiscussionParticipantKey =
+  | "planner" | "drafter" | "critic" | "continuity" | "memory";
+
+export const DISCUSSION_PARTICIPANTS: { key: DiscussionParticipantKey; label: string; role: string; emoji: string }[] = [
+  { key: "planner",    label: "策划",   role: "Planner",     emoji: "✎" },
+  { key: "drafter",    label: "主笔",   role: "Drafter",     emoji: "✒" },
+  { key: "critic",     label: "审稿",   role: "Critic",      emoji: "⚖" },
+  { key: "continuity", label: "连戏",   role: "Continuity",  emoji: "🔗" },
+  { key: "memory",     label: "记忆官", role: "Memory",      emoji: "📚" },
+];
+
+export type DiscussionTurn = {
+  id: number;
+  turn_no: number;
+  agent_name: string;
+  role_label: string;
+  kind: "participant" | "synthesis";
+  content: string;
+  parsed: {
+    key_points?: string[];
+    concerns?: string[];
+    summary?: string;
+    agreement?: string[];
+    tension?: string[];
+    recommendation?: string;
+    next_actions?: string[];
+  } | null;
+  error: string | null;
+  duration_ms: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  created_at: string;
+};
+
+export type DiscussionSession = {
+  id: number;
+  project_id: number | null;
+  topic: string;
+  participants: string[];
+  status: "running" | "succeeded" | "failed" | "partial";
+  error: string | null;
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  created_at: string;
+  turns: DiscussionTurn[];
+};
+
+// ===== Memory (Round 9) =====
+export type MemoryCharacterState = {
+  id: number;
+  character_id: number;
+  project_id: number;
+  chapter_no: number;
+  current_location: string | null;
+  current_faction: string | null;
+  current_goal: string | null;
+  injury_state: string | null;
+  emotion_state: string | null;
+  secrets: string[];
+  misunderstandings: string[];
+  relationships: Record<string, any>;
+  owned_items: string[];
+  abilities: string[];
+  last_seen_chapter: number | null;
+};
+
+export type MemoryCharacter = {
+  id: number;
+  project_id: number;
+  name: string;
+  aliases: string[];
+  role: string;
+  tags: string[];
+  base_profile: Record<string, any>;
+  latest_state: MemoryCharacterState | null;
+};
+
+export type MemoryForeshadow = {
+  id: number;
+  project_id: number;
+  name: string;
+  summary: string;
+  planted_chapter: number | null;
+  expected_payoff_chapter: number | null;
+  actual_payoff_chapter: number | null;
+  status: "active" | "paid_off" | "dropped";
+  importance: number;
+  related_characters: string[];
+  related_items: string[];
+  related_main_plot: string | null;
+};
+
+export type MemoryHardFact = {
+  id: number;
+  project_id: number;
+  category: string;
+  fact: string;
+  source_chapter: number | null;
+  created_at: string;
+};
+
+// ===== Global Search (Round 11, P0-UI-5) =====
+export type SearchResultType =
+  | "project"
+  | "chapter"
+  | "character"
+  | "foreshadow"
+  | "hard_fact"
+  | "study_material"
+  | "behavior_pattern";
+
+export type SearchResult = {
+  type: SearchResultType;
+  id: number;
+  title: string;
+  snippet: string;
+  link: string;
+  score: number;
+};

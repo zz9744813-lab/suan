@@ -419,6 +419,71 @@ WRITING_PROMPTS: dict[str, dict] = {
             "}\n"
         ),
     },
+    "discussion_participant": {
+        "template_key": "discussion_participant",
+        "name": "讨论室·参与者",
+        "category": "discussion",
+        "role": "DiscussionParticipant",
+        "scope": "global",
+        "genre": None,
+        "description": "Discussion Room 参与者发言模板。同一模板, 不同 role_name 注入角色身份。",
+        "allowed_inputs": ["role_name", "topic", "project_context"],
+        "forbidden_inputs": ["critic_hidden_rubric", "other_agent_private_notes"],
+        "output_schema": "discussion_turn",
+        "can_modify": ["discussion_turn"],
+        "cannot_modify": ["bible", "memory", "prompt_template", "draft_content"],
+        "hard_rules": [
+            "必须站在 {{role_name}} 的专业立场发言, 不要替其他角色说话。",
+            "输出 JSON 必须是合法对象, 包含 perspective / key_points / concerns 三个字段。",
+        ],
+        "body": (
+            "你是 NovelForge 2.0 讨论室的参与者「{{role_name}}」。\n"
+            "讨论室会有多位不同立场的参与者轮流发言, 之后由主 Agent 综合。\n"
+            "你只代表自己的专业视角, 不要试图解决其他参与者的问题。\n\n"
+            "【项目背景】\n{{project_context}}\n\n"
+            "【讨论议题】\n{{topic}}\n\n"
+            "请基于你「{{role_name}}」的视角, 给出 1 段 200~400 字的发言, 并提炼 3~5 个关键观点和 0~3 个担忧。\n"
+            "中文输出, 自然段落, 不要列举式。\n\n"
+            "输出 JSON:\n"
+            "{\n"
+            '  "perspective": "你的完整发言 (200~400 字自然段落)",\n'
+            '  "key_points": ["观点1", "观点2", "观点3"],\n'
+            '  "concerns": ["担忧1"]\n'
+            "}\n"
+        ),
+    },
+    "discussion_synthesis": {
+        "template_key": "discussion_synthesis",
+        "name": "讨论室·综合",
+        "category": "discussion",
+        "role": "DiscussionSynthesizer",
+        "scope": "global",
+        "genre": None,
+        "description": "Discussion Room 主 Agent 综合所有参与者发言, 输出结论。",
+        "allowed_inputs": ["topic", "perspectives_json"],
+        "forbidden_inputs": [],
+        "output_schema": "discussion_synthesis",
+        "can_modify": ["discussion_synthesis"],
+        "cannot_modify": ["bible", "memory", "prompt_template", "draft_content"],
+        "hard_rules": [
+            "必须显式列出每方观点, 不偏袒。",
+            "综合结论必须可执行, 不要写空话。",
+        ],
+        "body": (
+            "你是 NovelForge 2.0 讨论室的主持人 (主 Agent)。\n"
+            "多位参与者已经发言完毕, 你的任务是综合各方观点形成可执行结论。\n\n"
+            "【议题】\n{{topic}}\n\n"
+            "【所有参与者发言 (JSON)】\n{{perspectives_json}}\n\n"
+            "请输出 JSON:\n"
+            "{\n"
+            '  "summary": "一段话概述讨论全貌 (150~250 字)",\n'
+            '  "agreement": ["各方达成一致的几点"],\n'
+            '  "tension": ["各方分歧点, 以及为什么会分歧"],\n'
+            '  "recommendation": "一段 200~300 字的可执行建议, 告诉作者下一步该怎么做",\n'
+            '  "next_actions": ["具体动作 1", "具体动作 2", "具体动作 3"]\n'
+            "}\n"
+        ),
+    },
 }
 
 
