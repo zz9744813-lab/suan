@@ -16,7 +16,7 @@
  * 三个独立的卡片从上到下平铺, 用户得不停滚屏 + 在两个不同的
  * "selectedId" 状态间来回. 现在先选书, 再选章节, 层次清晰.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   listStudyMaterials,
   createStudyMaterial,
@@ -24,17 +24,20 @@ import {
   getStudyMaterial,
   chapterizeStudyMaterial,
   runStudyChapter,
+  runStudyBulk,
   deleteStudyCharacter,
   listBehaviorPatterns,
   createBehaviorPattern,
   deleteBehaviorPattern,
   deleteStudyMaterial,
+  getTask,
 } from "../api";
 import type {
   StudyMaterial,
   StudyMaterialDetail,
   StudyChapter,
   StudyCharacter,
+  StudyBulkPayload,
   BehaviorPattern,
 } from "../types";
 import "./StudyPage.css";
@@ -105,6 +108,15 @@ function BookLibrary() {
   const [newTitle, setNewTitle] = useState("");
   const [newAuthor, setNewAuthor] = useState("");
   const [newText, setNewText] = useState("");
+  // R21: live bulk-study progress. ``bulkProgress`` is keyed by
+  // material_id so the user can run a bulk on book A, expand
+  // book B, and still see book A's bar ticking in the background.
+  // ``bulkTimers`` holds the polling setTimeout handle so the
+  // component can cancel them on unmount.
+  const [bulkProgress, setBulkProgress] = useState<
+    Record<number, StudyBulkPayload & { task_id: number; status: string }>
+  >({});
+  const bulkTimers = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
 
   const refresh = () => {
     listStudyMaterials()
@@ -269,6 +281,95 @@ function BookLibrary() {
     refresh();
   };
 
+  // R21: kick off a background bulk study on every chapter of one
+  // book. The endpoint returns immediately with a task_id; we
+  // poll ``GET /api/tasks/{id}`` every 2.5s and write the
+  // counters into ``bulkProgress`` so the user sees the bar
+  // tick up. When the task reaches a terminal state (succeeded /
+  // failed), we refresh the book detail to pull the freshly
+  // persisted characters / events.
+  const onRunStudyBulk = async (
+    material: StudyMaterial,
+    mode: "character" | "event" | "both",
+    limit: number,
+  ) => {
+    setErrorMsg(null);
+    try {
+      const start = await runStudyBulk(material.id, {
+        mode,
+        limit,
+        max_concurrency: 3,
+        force: true,
+        max_chars: 4000,
+      });
+      setBulkProgress((prev) => ({
+        ...prev,
+        [material.id]: {
+          task_id: start.task_id,
+          material_id: material.id,
+          mode,
+          total_chapters: start.total_chapters,
+          chapters_to_process: start.chapters_to_process,
+          chapters_processed: 0,
+          characters_added: 0,
+          events_added: 0,
+          errors: [],
+          max_concurrency: 3,
+          force: true,
+          max_chars: 4000,
+          status: "running",
+        },
+      }));
+      // Start the polling loop for this material.
+      const tick = async () => {
+        try {
+          const t = await getTask(start.task_id);
+          const payload = (t.payload || {}) as StudyBulkPayload;
+          setBulkProgress((prev) => ({
+            ...prev,
+            [material.id]: {
+              ...payload,
+              task_id: t.id,
+              status: t.status,
+            },
+          }));
+          if (t.status === "succeeded" || t.status === "failed") {
+            // Terminal — refresh book detail to pick up the new
+            // character_count / event_count, and stop polling.
+            bulkTimers.current[material.id] = null;
+            if (expanded === material.id) {
+              const d = await getStudyMaterial(material.id);
+              setDetail(d);
+            }
+            refresh();
+            return;
+          }
+        } catch (e: any) {
+          // Polling error — keep retrying unless the task is
+          // already gone from the server (404 → treat as done).
+          setErrorMsg(`轮询任务失败: ${e?.message ?? e}`);
+        }
+        const handle = setTimeout(tick, 2500);
+        bulkTimers.current[material.id] = handle;
+      };
+      const handle = setTimeout(tick, 1500);
+      bulkTimers.current[material.id] = handle;
+    } catch (e: any) {
+      setErrorMsg(e?.message ?? String(e));
+    }
+  };
+
+  // Cancel any in-flight polling timers when the page unmounts.
+  useEffect(() => {
+    const timers = bulkTimers.current;
+    return () => {
+      for (const k of Object.keys(timers)) {
+        const h = timers[Number(k)];
+        if (h) clearTimeout(h);
+      }
+    };
+  }, []);
+
   return (
     <div className="study-library">
       {errorMsg && (
@@ -373,7 +474,9 @@ function BookLibrary() {
               onChapterize={() => onChapterize(m.id)}
               onDelete={() => onDeleteBook(m)}
               onRunStudy={onRunStudy}
+              onRunStudyBulk={(mode, limit) => onRunStudyBulk(m, mode, limit)}
               onDeleteCharacter={onDeleteCharacter}
+              bulkProgress={bulkProgress[m.id] ?? null}
             />
           ))}
         </div>
@@ -384,7 +487,8 @@ function BookLibrary() {
 
 function BookCard({
   material, expanded, detail, busy,
-  onToggle, onChapterize, onDelete, onRunStudy, onDeleteCharacter,
+  onToggle, onChapterize, onDelete, onRunStudy, onRunStudyBulk, onDeleteCharacter,
+  bulkProgress,
 }: {
   material: StudyMaterial;
   expanded: boolean;
@@ -394,7 +498,9 @@ function BookCard({
   onChapterize: () => void;
   onDelete: () => void;
   onRunStudy: (ch: StudyChapter) => void;
+  onRunStudyBulk: (mode: "character" | "event" | "both", limit: number) => void;
   onDeleteCharacter: (id: number) => void;
+  bulkProgress: (StudyBulkPayload & { task_id: number; status: string }) | null;
 }) {
   // The detail fetch belongs to the EXPANDED book only; if this
   // card isn't the active one, we just show the summary fields
@@ -436,16 +542,54 @@ function BookCard({
 
       {isThis && (
         <div className="study-book-body">
-          <div className="row" style={{ marginBottom: 10, gap: 8 }}>
+          <div className="row" style={{ marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
             <span className="muted small">id={material.id} · {new Date(material.created_at).toLocaleDateString()}</span>
             <span className="spacer" />
             <button onClick={onChapterize} disabled={busy || !material.raw_text_length} title="重新按「第 N 章 / Chapter N」切分正文">
               {busy ? "分章中…" : "重新分章"}
             </button>
+            {/* R21: bulk action row. Two presets so the user can
+                run character extraction across the WHOLE book
+                (default 一次性跑完) or sample a fixed number
+                of chapters first to sanity-check the model +
+                token spend before committing to 2332. The
+                progress bar below ticks up live from the
+                polling task payload. */}
+            <button
+              className="primary"
+              disabled={busy || !!bulkProgress || !material.chapter_count}
+              onClick={() => onRunStudyBulk("character", 0)}
+              title="对全书每一章都跑一次人物抽取(后台批量,可在 Dashboard 看进度)"
+            >
+              {bulkProgress ? "抽取中…" : "批量抽人物"}
+            </button>
+            <button
+              disabled={busy || !!bulkProgress || !material.chapter_count || !material.project_id}
+              onClick={() => onRunStudyBulk("event", 0)}
+              title="对全书每一章跑一次事件抽取(伏笔/转折,需要先把这本书关联到 project_id)"
+            >
+              {bulkProgress ? "抽取中…" : "批量抽事件"}
+            </button>
+            <button
+              disabled={busy || !!bulkProgress || !material.chapter_count}
+              onClick={() => onRunStudyBulk("character", 5)}
+              title="先跑 5 章试一下模型效果,确认 OK 再点上面跑全书"
+            >
+              试抽 5 章
+            </button>
             <button className="danger" onClick={onDelete} disabled={busy}>
               删除
             </button>
           </div>
+
+          {/* R21: live progress bar for the in-flight bulk job on
+              this book. We pull the per-chapter counters from the
+              polled AgentTask.payload. Stays visible after the
+              task finishes so the user can see "finished, 3 chars
+              added" before they scroll the page. */}
+          {bulkProgress && (
+            <BulkProgressBar payload={bulkProgress} />
+          )}
 
           {d?.error && (
             <div className="error small" style={{ marginBottom: 8 }}>
@@ -475,6 +619,57 @@ function BookCard({
               busy={busy}
             />
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// R21: live progress bar for an in-flight bulk study job.
+// Shows "已处理 X / Y" + the per-mode counters (chars added /
+// events added) and a horizontal fill bar. The bar is
+// percentage-based off ``chapters_processed / chapters_to_process``;
+// if the backend somehow reports a denominator of 0 we fall
+// through to ``0%`` (defensive — should never happen in practice).
+function BulkProgressBar({
+  payload,
+}: {
+  payload: StudyBulkPayload & { task_id: number; status: string };
+}) {
+  const total = Math.max(payload.chapters_to_process, 1);
+  const pct = Math.min(100, Math.round((payload.chapters_processed / total) * 100));
+  const isRunning = payload.status === "running" || payload.status === "pending";
+  const isError = payload.status === "failed";
+  const modeLabel: Record<string, string> = {
+    character: "人物",
+    event: "事件",
+    both: "人物+事件",
+  };
+  return (
+    <div className={`bulk-progress ${isError ? "error" : isRunning ? "running" : "done"}`} style={{ marginBottom: 10 }}>
+      <div className="row" style={{ gap: 10, fontSize: 12, marginBottom: 4 }}>
+        <span>
+          <b>{modeLabel[payload.mode] ?? payload.mode}</b>
+          {" · 已处理 "}
+          <b>{payload.chapters_processed}</b> / {payload.chapters_to_process} 章
+        </span>
+        <span className="muted">· +{payload.characters_added} 人物 · +{payload.events_added} 事件</span>
+        <span className="muted">· task #{payload.task_id}</span>
+        <span className="spacer" />
+        <span className={`pill tiny ${isError ? "error" : isRunning ? "warn" : "ok"}`}>{payload.status}</span>
+      </div>
+      <div className="bulk-progress-track">
+        <div
+          className="bulk-progress-fill"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {payload.errors && payload.errors.length > 0 && (
+        <div className="muted small" style={{ marginTop: 4 }}>
+          错误 {payload.errors.length} 条（仅显示前 3 条）：
+          <ul style={{ margin: "4px 0 0 18px" }}>
+            {payload.errors.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
         </div>
       )}
     </div>

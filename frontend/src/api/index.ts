@@ -32,6 +32,8 @@ import type {
   StudyMaterial,
   StudyMaterialDetail,
   StudyChapter,
+  StudyBulkRequestBody,
+  StudyBulkStart,
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
@@ -262,6 +264,15 @@ export const deleteStudyCharacter = (materialId: number, characterId: number) =>
   api.delete<{ deleted: number }>(`/api/study/materials/${materialId}/characters/${characterId}`);
 export const runStudyChapter = (materialId: number, body: { chapter_id: number; max_chars?: number }) =>
   api.post<StudyCharacter[]>(`/api/study/materials/${materialId}/study`, body);
+// R21: bulk study — kicks off a background task and returns
+// immediately with a ``task_id``. The caller polls
+// ``GET /api/tasks/{task_id}`` to watch progress. Use
+// ``mode='character'`` for the per-chapter character extraction
+// (matches the "抽取人物" button), ``mode='event'`` for
+// foreshadows (requires the book to be bound to a project), or
+// ``mode='both'`` to run both in one pass.
+export const runStudyBulk = (materialId: number, body: StudyBulkRequestBody = {}) =>
+  api.post<StudyBulkStart>(`/api/study/materials/${materialId}/study/all`, body);
 // Multipart upload (FormData). The client takes a Blob/File directly.
 export const uploadStudyMaterial = (form: FormData) =>
   api.post<StudyMaterial>("/api/study/materials/upload", form);

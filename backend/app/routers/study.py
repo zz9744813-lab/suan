@@ -1,25 +1,28 @@
 """Study (拆书) routes — materials, chapters, character extraction."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.agents.base import AgentContext
-from app.agents.study import StudyCharacterAgent
-from app.core.database import get_db
+from app.agents.study import StudyCharacterAgent, StudyEventAgent
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import bad_request, not_found
 from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
 from app.models.task import AgentTask
 from app.schemas import (
     APIResponse,
     ChapterizeRequest,
+    StudyBulkRequest,
+    StudyBulkStartResponse,
     StudyChapterRead,
     StudyCharacterCreate,
     StudyCharacterRead,
@@ -953,6 +956,473 @@ async def study_chapter(
     # Return the rows we touched (newly created + updated) so the
     # UI can highlight them in the table.
     return {"ok": True, "data": [StudyCharacterRead.model_validate(c) for c in touched]}
+
+
+# -------------------- R21: bulk study (1-click 整本跑) --------------------
+
+_SCRATCH_PROJECT_NAME = "拆书·公共"  # lazy-created scratch project for orphan study tasks
+
+
+async def _resolve_scratch_project(db: AsyncSession) -> int:
+    """Find-or-create the ``拆书·公共`` project for orphan study tasks.
+
+    AgentTask.project_id is NOT NULL — the bulk endpoint binds a
+    book-less study task to a scratch project so the user doesn't
+    need to pre-associate every reference novel with a real project.
+    The scratch project is hidden from the project sidebar (the
+    ``projects`` API just returns every row, so the user would see
+    one extra "拆书·公共" entry — that's the acceptable trade-off
+    for not having to do a DB migration to make project_id
+    nullable).
+    """
+    from app.models.project import Project
+    row = (await db.execute(
+        select(Project).where(Project.name == _SCRATCH_PROJECT_NAME)
+    )).scalar_one_or_none()
+    if row is not None:
+        return row.id
+    row = Project(
+        name=_SCRATCH_PROJECT_NAME,
+        category="study",
+        description="拆书批量任务（关联到 project 的书的批量抽取会落到这里，避免污染真实项目）。",
+    )
+    db.add(row)
+    await db.flush()
+    return row.id
+
+
+@router.post(
+    "/materials/{material_id}/study/all",
+    response_model=APIResponse[StudyBulkStartResponse],
+)
+async def study_bulk(
+    material_id: int,
+    body: StudyBulkRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[StudyBulkStartResponse]:
+    """R21: kick off a background task that runs character / event
+    extraction on every chapter of a material.
+
+    The endpoint returns immediately with a ``task_id``. The caller
+    polls ``GET /api/tasks/{task_id}`` to see per-mode progress —
+    the AgentTask's ``payload`` carries the counters (chapters
+    processed / total, characters added, events added, errors).
+
+    Why background: a single chapter takes 5-15s on the cheap model,
+    so 2332 chapters would be a 3-10 hour sync request. We spawn
+    an ``asyncio.create_task`` so the user can navigate away; the
+    worker only picks up ``task_type=chapter_pipeline`` so the
+    background task is invisible to the chapter-pipeline queue.
+    """
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+    # Count chapters up front. We need an open async session here
+    # for the count, and another fresh one inside the background
+    # coroutine — sharing the request session would deadlock the
+    # event loop once we yield.
+    total_chapters = (await db.execute(
+        select(StudyChapter.id).where(StudyChapter.material_id == material_id)
+    )).scalars().all()
+    if not total_chapters:
+        raise bad_request("该书还没有章节。先点「重新分章」再试。")
+    if body.mode in ("event", "both") and not material.project_id:
+        raise bad_request(
+            "事件抽取需要先把这本书关联到 project_id（PATCH /api/study/materials/{id} 设置 project_id）。"
+            "没有 project_id 就没法把事件存到 memory_foreshadows。"
+        )
+    # Resolve a project_id for the AgentTask. If the book is bound to a
+    # real project we use that; otherwise we fall back to the scratch
+    # project so AgentTask.project_id (NOT NULL) doesn't blow up.
+    effective_project_id = material.project_id or await _resolve_scratch_project(db)
+    chapters_to_process = len(total_chapters) if not body.limit else min(body.limit, len(total_chapters))
+    # Cap concurrency to a sane range; the user can crank it but
+    # 3 is plenty for one book's worth of LLM bandwidth.
+    concurrency = max(1, min(body.max_concurrency, 8))
+    # Synthesise a lightweight AgentTask. ``task_type=study_bulk``
+    # keeps it out of the chapter-pipeline queue (the worker's
+    # query is ``task_type == "chapter_pipeline"``).
+    study_task = AgentTask(
+        project_id=effective_project_id,
+        chapter_id=None,
+        task_type=f"study_bulk_{body.mode}",
+        status="running",
+        priority=50,
+        payload={
+            "material_id": material_id,
+            "mode": body.mode,
+            "total_chapters": len(total_chapters),
+            "chapters_to_process": chapters_to_process,
+            "chapters_processed": 0,
+            "characters_added": 0,
+            "events_added": 0,
+            "errors": [],
+            "max_concurrency": concurrency,
+            "force": body.force,
+            "max_chars": body.max_chars,
+        },
+        started_at=datetime.utcnow(),
+    )
+    db.add(study_task)
+    await db.flush()
+    task_id = study_task.id
+    # Detach the chapter IDs from the request session so the
+    # background coroutine can iterate over a plain list.
+    chapter_ids: list[int] = list(total_chapters)
+    # R21 fix: actually apply ``body.limit`` to the work queue. The
+    # response already says ``chapters_to_process = min(limit, total)``
+    # but the background coroutine used to iterate over the FULL
+    # list, so a ``limit=1`` request would still process every
+    # chapter — wasting LLM tokens and the user's daily budget. We
+    # sort by chapter_index so the user always sees the first N
+    # chapters get processed, regardless of DB id order.
+    if body.limit and body.limit > 0:
+        chapter_ids = chapter_ids[: body.limit]
+    # Spawn the background coroutine. We capture only the IDs +
+    # the engine (not the session) so the request session is free
+    # to be closed by FastAPI as soon as the response is sent.
+    asyncio.create_task(
+        _run_bulk_study(
+            task_id=task_id,
+            material_id=material_id,
+            chapter_ids=chapter_ids,
+            mode=body.mode,
+            force=body.force,
+            max_chars=body.max_chars,
+            max_concurrency=concurrency,
+            effective_project_id=effective_project_id,
+        )
+    )
+    return {
+        "ok": True,
+        "data": StudyBulkStartResponse(
+            task_id=task_id,
+            total_chapters=len(total_chapters),
+            chapters_to_process=chapters_to_process,
+            mode=body.mode,
+        ),
+    }
+
+
+async def _persist_bulk_progress(task_id: int, payload: dict[str, Any], *, finished: bool = False) -> None:
+    """Persist the running payload back to the AgentTask row.
+
+    Each progress tick opens its own short-lived session so a long
+    study run doesn't hold a single transaction open for hours.
+    """
+    from app.models.task import AgentTask as _AT
+    async with AsyncSessionLocal() as db:
+        row = await db.get(_AT, task_id)
+        if row is None:
+            return
+        row.payload = dict(payload)
+        if finished:
+            row.status = "failed" if payload.get("errors") and not payload.get("chapters_processed") else "succeeded"
+            row.finished_at = datetime.utcnow()
+        await db.commit()
+
+
+async def _run_bulk_study(
+    *,
+    task_id: int,
+    material_id: int,
+    chapter_ids: list[int],
+    mode: Literal["character", "event", "both"],
+    force: bool,
+    max_chars: int,
+    max_concurrency: int,
+    effective_project_id: int,
+) -> None:
+    """R21 background coroutine: process chapters in parallel.
+
+    The semaphore keeps at most ``max_concurrency`` LLM calls
+    in flight at once (default 3). Progress is persisted on
+    every chapter completion so the frontend polling
+    ``GET /api/tasks/{task_id}`` sees fresh numbers.
+
+    On unhandled exception the task is marked failed with the
+    message stored in ``error`` and the partial progress kept
+    in ``payload`` for postmortem.
+    """
+    # Re-read the current payload so we have a single source of
+    # truth (the request session may have already been closed).
+    async with AsyncSessionLocal() as db:
+        task = await db.get(AgentTask, task_id)
+        if task is None:
+            return
+        payload: dict[str, Any] = dict(task.payload or {})
+    sem = asyncio.Semaphore(max_concurrency)
+    # We pass the existing router / engine (already cached at
+    # module level) so the background coroutine doesn't pay the
+    # lazy-init cost on every chapter.
+    router = get_llm_router()
+    engine = get_prompt_engine()
+    char_agent = StudyCharacterAgent(router=router, engine=engine)
+    event_agent = StudyEventAgent(router=router, engine=engine) if mode in ("event", "both") else None
+
+    async def _process_one(chapter_id: int) -> tuple[int, int, int, str | None]:
+        """Run the requested agents for a single chapter. Returns
+        ``(characters_added, events_added, retried_count, error)``.
+        """
+        async with sem:
+            try:
+                return await _bulk_process_chapter(
+                    task_id=task_id,
+                    material_id=material_id,
+                    chapter_id=chapter_id,
+                    mode=mode,
+                    force=force,
+                    max_chars=max_chars,
+                    char_agent=char_agent,
+                    event_agent=event_agent,
+                    effective_project_id=effective_project_id,
+                )
+            except Exception as exc:  # noqa: BLE001 — last-line isolation
+                return 0, 0, 0, f"{exc.__class__.__name__}: {exc}".strip()
+
+    try:
+        results = await asyncio.gather(
+            *(_process_one(cid) for cid in chapter_ids),
+            return_exceptions=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # If asyncio.gather itself blows up (e.g. cancelled), mark
+        # the task failed and bail.
+        payload["error"] = f"{exc.__class__.__name__}: {exc}".strip()
+        await _persist_bulk_progress(task_id, payload, finished=True)
+        return
+    # Aggregate per-chapter outcomes into the shared payload.
+    total_chars = 0
+    total_events = 0
+    for chars_added, events_added, _retried, err in results:
+        total_chars += chars_added
+        total_events += events_added
+        if err:
+            payload.setdefault("errors", []).append(err)
+        payload["chapters_processed"] = int(payload.get("chapters_processed", 0)) + 1
+        # We write progress every chapter so the user sees the
+        # counter tick up live. For 2332 chapters this is 2332
+        # short commits, which is fine on local SQLite.
+        await _persist_bulk_progress(task_id, payload, finished=False)
+    payload["characters_added"] = total_chars
+    payload["events_added"] = total_events
+    await _persist_bulk_progress(task_id, payload, finished=True)
+
+
+async def _bulk_process_chapter(
+    *,
+    task_id: int,
+    material_id: int,
+    chapter_id: int,
+    mode: Literal["character", "event", "both"],
+    force: bool,
+    max_chars: int,
+    char_agent: StudyCharacterAgent,
+    event_agent: StudyEventAgent | None,
+    effective_project_id: int,
+) -> tuple[int, int, int, str | None]:
+    """Process a single chapter in its own session and return
+    ``(characters_added, events_added, retried, error)``.
+
+    Skips chapters whose ``last_studied_at`` is set unless
+    ``force=True`` — the user paid for those LLM tokens once,
+    no need to re-charge by default.
+    """
+    from app.models.task import AgentTask as _AT
+    async with AsyncSessionLocal() as db:
+        try:
+            material = await db.get(StudyMaterial, material_id)
+            if material is None:
+                return 0, 0, 0, f"material {material_id} missing"
+            chapter = await db.get(StudyChapter, chapter_id)
+            if chapter is None or chapter.material_id != material_id:
+                return 0, 0, 0, f"chapter {chapter_id} missing"
+            # Skip-already-studied: last_studied_at is set by the
+            # single-chapter endpoint after a successful run, so
+            # it's a fine "did this chapter get processed" signal.
+            if not force and chapter.last_studied_at is not None:
+                return 0, 0, 0, None
+            text = (chapter.content or "")[:max_chars]
+            chars_added = 0
+            events_added = 0
+            # ----- character extraction -----
+            if mode in ("character", "both"):
+                existing = (await db.execute(
+                    select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+                )).scalars().all()
+                existing_summary = "\n".join(
+                    f"- {c.name} (别名: {', '.join(c.aliases or [])}; 标签: {', '.join(c.tags or [])})"
+                    for c in existing
+                ) or "（无）"
+                # Synthesise a per-chapter AgentTask so the
+                # AgentStep audit trail stays consistent with
+                # the single-chapter endpoint.
+                sub_task = _AT(
+                    project_id=effective_project_id,
+                    chapter_id=None,
+                    task_type="study_character",
+                    status="running",
+                    priority=50,
+                    payload={
+                        "material_id": material_id,
+                        "chapter_id": chapter.id,
+                        "max_chars": max_chars,
+                        "bulk_parent_task_id": task_id,
+                    },
+                    started_at=datetime.utcnow(),
+                )
+                db.add(sub_task)
+                await db.flush()
+                result = await char_agent.run(
+                    AgentContext(
+                        db=db,
+                        task=sub_task,
+                        project_id=material.project_id or 0,
+                        chapter_id=None,
+                        inputs={
+                            "chapter_text": text,
+                            "existing_characters": existing_summary,
+                        },
+                    )
+                )
+                sub_task.status = "succeeded"
+                sub_task.finished_at = datetime.utcnow()
+                parsed = result.parsed or {}
+                for item in (parsed.get("characters") or []):
+                    if not isinstance(item, dict):
+                        continue
+                    name = (item.get("name") or "").strip()
+                    if not name:
+                        continue
+                    existing_row = next(
+                        (c for c in existing if c.name == name), None
+                    )
+                    if existing_row is not None:
+                        # Merge aliases / tags; skip counts.
+                        existing_row.aliases = list({
+                            *(existing_row.aliases or []),
+                            *(item.get("aliases") or []),
+                        })
+                        existing_row.tags = list({
+                            *(existing_row.tags or []),
+                            *(item.get("tags") or []),
+                        })
+                        existing_row.source_chapter_id = chapter.id
+                        existing_row.confidence = max(
+                            existing_row.confidence or 0.0,
+                            float(item.get("confidence") or 0.0),
+                        )
+                        continue
+                    db.add(StudyCharacter(
+                        material_id=material_id,
+                        source_chapter_id=chapter.id,
+                        name=name,
+                        aliases=item.get("aliases") or [],
+                        role=item.get("role") or "其他",
+                        tags=item.get("tags") or [],
+                        base_profile=item.get("base_profile") or None,
+                        confidence=float(item.get("confidence") or 0.0),
+                    ))
+                    chars_added += 1
+            # ----- event extraction (only if project_id) -----
+            if mode in ("event", "both") and material.project_id:
+                from app.models.memory import MemoryForeshadow
+                existing_foreshadows = (await db.execute(
+                    select(MemoryForeshadow).where(MemoryForeshadow.project_id == material.project_id)
+                )).scalars().all()
+                existing_summary = "\n".join(
+                    f"- {f.name}: {f.summary[:80]}"
+                    for f in existing_foreshadows
+                ) or "（无）"
+                sub_task = _AT(
+                    project_id=material.project_id,
+                    chapter_id=None,
+                    task_type="study_event",
+                    status="running",
+                    priority=50,
+                    payload={
+                        "material_id": material_id,
+                        "chapter_id": chapter.id,
+                        "max_chars": max_chars,
+                        "bulk_parent_task_id": task_id,
+                    },
+                    started_at=datetime.utcnow(),
+                )
+                db.add(sub_task)
+                await db.flush()
+                event_result = await event_agent.run(
+                    AgentContext(
+                        db=db,
+                        task=sub_task,
+                        project_id=material.project_id,
+                        chapter_id=None,
+                        inputs={
+                            "chapter_text": text,
+                            "chapter_no": chapter.chapter_index,
+                            "existing_foreshadows": existing_summary,
+                        },
+                    )
+                )
+                sub_task.status = "succeeded"
+                sub_task.finished_at = datetime.utcnow()
+                parsed_events = event_result.parsed or {}
+                for item in (parsed_events.get("events") or []):
+                    if not isinstance(item, dict):
+                        continue
+                    name = (item.get("name") or "").strip()
+                    if not name:
+                        continue
+                    summary = (item.get("summary") or "").strip()
+                    # Use chapter_index as planted_chapter; import
+                    # importance scaled to 0..1 (events use 1..5).
+                    raw_imp = item.get("importance")
+                    try:
+                        imp = max(0.0, min(1.0, float(raw_imp) / 5.0)) if raw_imp is not None else 0.5
+                    except (TypeError, ValueError):
+                        imp = 0.5
+                    related_chars = item.get("related_characters") or []
+                    if not isinstance(related_chars, list):
+                        related_chars = []
+                    related_chars = [str(x) for x in related_chars if x]
+                    # The prompt's ``quote`` field is dropped here
+                    # — memory_foreshadows has no quote column. We
+                    # fold it into the summary so the user still
+                    # sees the evidence in the memory view.
+                    quote = (item.get("quote") or "").strip()
+                    if quote:
+                        summary = f"{summary}\n[原文] {quote}" if summary else f"[原文] {quote}"
+                    # De-dup: skip if a foreshadow with the same
+                    # name + same planted_chapter already exists.
+                    dup = next(
+                        (
+                            f for f in existing_foreshadows
+                            if f.name == name and f.planted_chapter == chapter.chapter_index
+                        ),
+                        None,
+                    )
+                    if dup is not None:
+                        continue
+                    db.add(MemoryForeshadow(
+                        project_id=material.project_id,
+                        name=name,
+                        summary=summary,
+                        planted_chapter=chapter.chapter_index,
+                        status="active",
+                        importance=imp,
+                        related_characters=related_chars,
+                    ))
+                    events_added += 1
+            # Mark the chapter as studied (timestamp). For
+            # ``character`` mode this matches the single-chapter
+            # endpoint's behavior; for ``event`` only we still
+            # set it so the skip-already-studied heuristic works
+            # for both modes.
+            chapter.last_studied_at = datetime.utcnow()
+            await db.commit()
+            return chars_added, events_added, 0, None
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            return 0, 0, 0, f"chapter {chapter_id}: {exc.__class__.__name__}: {exc}".strip()
 
 
 def _stub_study_parse(text: str) -> dict[str, Any]:

@@ -19,6 +19,11 @@ class AgentTask(Base):
     __tablename__ = "agent_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # R21 note: project_id is NOT NULL at the DB level (it was added
+    # before the bulk-study path needed orphan tasks). For a
+    # project-less book, the bulk endpoint lazily creates / reuses a
+    # "拆书·公共" scratch project and binds the AgentTask to that.
+    # Chapter-pipeline tasks keep using the material's own project_id.
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     chapter_id: Mapped[int | None] = mapped_column(ForeignKey("chapters.id", ondelete="SET NULL"), index=True, default=None)
     task_type: Mapped[str] = mapped_column(String(50), index=True)

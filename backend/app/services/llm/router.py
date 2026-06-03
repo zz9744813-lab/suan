@@ -64,24 +64,42 @@ class LLMRouter:
                 temperature=result.temperature,
                 max_tokens=result.max_tokens,
             )
-        # fallback: first enabled provider with a default model
-        # Same fix: ``.scalars().first()`` to avoid MultipleResultsFound
-        # when the user has more than one provider enabled, AND to
-        # return a model instance (not a Row tuple) so attribute
-        # access works on ``first.default_model`` below. ORDER BY id
-        # keeps the pick stable across calls.
-        first = (
-            await db.execute(
-                select(ModelProvider)
-                .where(ModelProvider.enabled.is_(True))
-                .order_by(ModelProvider.id.asc())
-                .limit(1)
+        # fallback: first enabled provider with a default model.
+        #
+        # R21 fix: skip ``mock://`` providers in the fallback pick.
+        # ``base_url='mock://'`` is reserved for the built-in stub that
+        # ships with ``app.seed`` so the UI / pipeline are runnable
+        # out-of-the-box without an API key. If a role has no explicit
+        # assignment (e.g. the newly-added ``StudyAgent`` that lands
+        # in Round P15), the fallback used to pick the stub and
+        # return canned placeholder JSON (e.g. the ``_MOCK_STUDY``
+        # envelope with ``book_title / world_rules / character_archetypes``)
+        # which the downstream ``StudyCharacterAgent`` happily
+        # accepted as a valid response, leaving the user staring at
+        # ``characters_added=0`` for 2332 chapters. The mock provider
+        # is still useful for explicit role bindings (e.g. the seed
+        # binds every role to ``stub`` so the demo data set works
+        # without a real key) — we only refuse to fall through to
+        # it from the no-binding path.
+        stmt_first = (
+            select(ModelProvider)
+            .where(
+                ModelProvider.enabled.is_(True),
+                ~ModelProvider.base_url.like("mock://%"),
             )
-        ).scalars().first()
+            .order_by(ModelProvider.id.asc())
+            .limit(1)
+        )
+        first = (await db.execute(stmt_first)).scalars().first()
         if first is None:
+            # All enabled providers are mock. That means the user
+            # hasn't added a real provider yet — surface the same
+            # "no real provider" error as before rather than
+            # silently returning mock stubs that look like real
+            # work but contain none of the user's text.
             raise bad_request(
-                "尚未配置任何已启用的模型 Provider",
-                suggestion="请先在「模型配置」页添加 Provider 并启用。",
+                "StudyAgent / 该角色没有专属模型绑定，且当前没有真实可用的 Provider（只启用了 mock 占位）",
+                suggestion="请在「模型配置」页添加一个真实 Provider（OpenAI / whitedream / 任何 OpenAI 兼容代理），并把该角色绑定到该 Provider 的模型。",
             )
         if not first.default_model:
             raise bad_request(

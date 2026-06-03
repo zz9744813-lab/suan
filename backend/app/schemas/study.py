@@ -136,6 +136,46 @@ class StudyRequest(BaseModel):
     max_chars: int = 8000
 
 
+class StudyBulkRequest(BaseModel):
+    """R21: bulk character / event extraction across ALL chapters of a
+    material.
+
+    The endpoint spawns a background task and returns immediately. The
+    caller polls ``GET /api/tasks/{task_id}`` to see progress — the
+    AgentTask's ``payload`` carries the per-mode counters
+    (chapters_processed / chapters_total / characters_added /
+    events_added / errors).
+    """
+    # What to extract. ``character`` is the cheap default; ``event``
+    # requires the material to be associated with a project_id (so the
+    # extracted foreshadows have a home in memory_foreshadows).
+    # ``both`` runs both in one pass per chapter.
+    mode: Literal["character", "event", "both"] = "character"
+    # Cap on chapters to process this round; 0 = no cap (default).
+    # The frontend uses this to process e.g. 50 chapters at a time
+    # so the user can throttle long books like 蛊真人 (2332 节).
+    limit: int = 0
+    # In-flight parallel LLM calls per chapter. 3 is a sweet spot
+    # — the cheap model gives ~18 tok/s, so 3 in flight roughly
+    # saturates one chapter's worth of LLM bandwidth.
+    max_concurrency: int = 3
+    # Re-run extraction on chapters that already have last_studied_at.
+    # Default False so a re-click doesn't double-charge LLM tokens.
+    force: bool = False
+    # Per-chapter cap on the prompt length, same semantics as
+    # ``StudyRequest.max_chars``.
+    max_chars: int = 8000
+
+
+class StudyBulkStartResponse(BaseModel):
+    """R21: the immediate response from ``POST .../study/all``."""
+    task_id: int
+    total_chapters: int
+    chapters_to_process: int
+    mode: str
+    message: str = "后台处理中。可轮询 /api/tasks/{task_id} 看进度。"
+
+
 # -------------------- BehaviorPattern --------------------
 
 class BehaviorPatternRead(BaseModel):

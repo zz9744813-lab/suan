@@ -255,3 +255,42 @@
   word-wrap: break-word;
   font-family: var(--font-mono, monospace);
 }
+
+/* R21: bulk study progress bar (in the book card body).
+   Single-row track with a fill that animates to width% on every
+   poll tick. We colour the track edge based on the
+   running / done / error state so a failing task is obvious
+   at a glance. The fill colour is the same accent as other
+   primary buttons so it lines up with the design system. */
+.bulk-progress {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-soft, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--accent-line-soft, rgba(120, 130, 200, 0.15));
+}
+.bulk-progress.running {
+  border-color: var(--accent, #6a83f0);
+}
+.bulk-progress.done {
+  border-color: var(--ok, #4caf50);
+}
+.bulk-progress.error {
+  border-color: var(--error, #e15a5a);
+}
+.bulk-progress-track {
+  height: 6px;
+  background: var(--bg-base, rgba(0, 0, 0, 0.08));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bulk-progress-fill {
+  height: 100%;
+  background: var(--accent, #6a83f0);
+  transition: width 0.3s ease-out;
+}
+.bulk-progress.done .bulk-progress-fill {
+  background: var(--ok, #4caf50);
+}
+.bulk-progress.error .bulk-progress-fill {
+  background: var(--error, #e15a5a);
+}

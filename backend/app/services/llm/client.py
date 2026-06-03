@@ -945,11 +945,9 @@ _MOCK_CHIEF = """{
 }"""
 
 _MOCK_STUDY = """{
-  "book_title": "示例拆书",
-  "world_rules": ["修炼以灵根为根", "宗门有外门内门之别"],
-  "character_archetypes": [{"name": "废脉主角", "tags": ["隐忍", "成长"], "description": "天生废脉却暗藏奇物"}],
-  "scene_kits": [{"name": "宗门除名", "scenes": ["大殿宣告", "弟子目送"]}],
-  "behavior_patterns": [{"tag": "逆境觉醒", "when": "被宗门抛弃", "then": "偶得异宝"}]
+  "characters": [],
+  "study_note": "Mock 占位返回。生产请在「模型配置」把 StudyAgent 角色绑定到真实 Provider，否则会一直返回空 list。",
+  "mock": true
 }"""
 
 _MOCK_BEHAVIOR = """{

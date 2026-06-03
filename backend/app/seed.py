@@ -23,6 +23,20 @@ DEFAULT_ROLE_ASSIGNMENTS: list[tuple[str, str, str, float, int]] = [
     ("Continuity", "stub", "stub-fast", 0.3, 1200),
     ("MemoryUpdate", "stub", "stub-fast", 0.2, 1500),
     ("Learning", "stub", "stub-fast", 0.4, 1200),
+    # R21: the Study (拆书) agents — StudyCharacterAgent /
+    # StudyEventAgent / StudyBehaviorPatternAgent — all share the
+    # ``role='StudyAgent'`` label, so one seed entry covers all
+    # three. Without an explicit binding, ``LLMRouter.resolve``
+    # falls back to the first enabled provider; if that provider
+    # is the built-in stub (``mock://local``) the StudyCharacter
+    # call would return the canned ``_MOCK_STUDY`` envelope
+    # (book_title / world_rules / character_archetypes) which has
+    # the WRONG JSON shape and silently 0's the user. The
+    # router-level fix in ``app/services/llm/router.py`` now
+    # refuses to fall through to ``mock://``, but seeding this row
+    # keeps the no-network demo path consistent with the other
+    # roles — the user can rebind to a real provider from the UI.
+    ("StudyAgent", "stub", "stub-fast", 0.0, 2500),
 ]
 
 

@@ -430,6 +430,46 @@ export type StudyCharacter = {
   created_at: string;
 };
 
+// R21: bulk study kick-off + live progress payloads. The
+// `POST /api/study/materials/{id}/study/all` endpoint returns
+// ``StudyBulkStart`` immediately; the caller polls
+// ``GET /api/tasks/{task_id}`` and reads ``AgentTask.payload`` to
+// see the per-chapter counters.
+export type StudyBulkStart = {
+  task_id: number;
+  total_chapters: number;
+  chapters_to_process: number;
+  mode: "character" | "event" | "both";
+  message?: string;
+};
+
+export type StudyBulkRequestBody = {
+  mode?: "character" | "event" | "both";
+  // 0 = no cap; otherwise process at most N chapters in this batch.
+  limit?: number;
+  // Up to 8 concurrent LLM calls. 3 is a sane default.
+  max_concurrency?: number;
+  // Re-extract chapters that already have last_studied_at.
+  force?: boolean;
+  // Per-chapter prompt cap, same semantics as runStudyChapter.
+  max_chars?: number;
+};
+
+// R21: payload field on AgentTask for in-flight bulk study jobs.
+export type StudyBulkPayload = {
+  material_id: number;
+  mode: "character" | "event" | "both";
+  total_chapters: number;
+  chapters_to_process: number;
+  chapters_processed: number;
+  characters_added: number;
+  events_added: number;
+  errors: string[];
+  max_concurrency: number;
+  force: boolean;
+  max_chars: number;
+};
+
 export type BehaviorPattern = {
   id: number;
   source_material_id: number | null;
