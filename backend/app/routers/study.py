@@ -443,6 +443,24 @@ def _extract_text_from_upload(filename: str, content: bytes) -> str:
 
 
 def _parse_txt(content: bytes) -> str:
+    """Decode bytes as UTF-8 and strip a leading BOM if present.
+
+    A BOM is invisible to the chapter regex (``^\\s*第``) but the
+    ``\\ufeff`` byte is a *non-whitespace* character — so when the
+    user uploads a TXT that was saved from 记事本 / Notepad the
+    first chapter silently goes missing and the splitter falls back
+    to "全文" with one chunk instead of N. Stripping the BOM here
+    keeps the regex honest and the user gets the chapters they
+    expect. Same trick for UTF-16 LE/BE in case the file was saved
+    as Unicode.
+    """
+    if content.startswith(b"\xef\xbb\xbf"):
+        content = content[3:]
+    elif content.startswith(b"\xff\xfe") or content.startswith(b"\xfe\xff"):
+        try:
+            return content.decode("utf-16", errors="replace").lstrip("\ufeff")
+        except Exception:
+            return content.decode("utf-8", errors="replace")
     return content.decode("utf-8", errors="replace")
 
 

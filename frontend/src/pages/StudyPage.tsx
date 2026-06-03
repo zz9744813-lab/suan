@@ -20,7 +20,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   listStudyMaterials,
   createStudyMaterial,
-  uploadStudyMaterial,
   uploadStudyMaterialsBatch,
   getStudyMaterial,
   chapterizeStudyMaterial,
@@ -39,6 +38,11 @@ import type {
   BehaviorPattern,
 } from "../types";
 import "./StudyPage.css";
+
+// R19: batch upload caps at 5 books. Frontend mirrors the backend
+// cap so the user gets a clean error toast instead of a silent
+// 截取 + confusion.
+const MAX_BATCH_FILES = 5;
 
 const ROLES = ["主角", "女主", "男配", "女配", "反派", "师父", "工具人", "势力代表", "其他"];
 const SAMPLE_TAGS = ["公开羞辱", "宗门抛弃", "偶得异宝", "高人指点", "废柴逆袭", "日常", "危机"];
@@ -168,44 +172,42 @@ function BookLibrary() {
   };
 
   const onUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+    let files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
+    // R19: enforce the 5-file cap on the client too. Anything past 5
+    // is silently dropped by the browser's <input multiple> on some
+    // platforms, but we want a clear signal.
+    if (files.length > MAX_BATCH_FILES) {
+      setErrorMsg(`一次最多 ${MAX_BATCH_FILES} 本书,收到 ${files.length} 本,已截取前 ${MAX_BATCH_FILES} 本。`);
+      files = files.slice(0, MAX_BATCH_FILES);
+    } else {
+      setErrorMsg(null);
+    }
     setBusy(true);
-    setErrorMsg(null);
     try {
-      if (files.length === 1) {
-        // Single-file path: keep the same UX (auto-expand the new book).
-        const file = files[0];
-        const stem = file.name.replace(/\.[^.]+$/, "");
-        const m = await uploadStudyMaterial((() => {
-          const fd = new FormData();
-          fd.append("title", stem);
-          fd.append("file", file);
-          return fd;
-        })());
-        refresh();
-        setExpanded(m.id);
-      } else {
-        // R19: multi-file path. Backend caps at 5 and auto-chapterizes
-        // each. We surface per-file failures so a bad EPUB doesn't
-        // hide a successful TXT upload next to it.
-        if (files.length > 5) {
-          setErrorMsg(`一次最多 5 本书,收到 ${files.length} 本,已截取前 5 本。`);
-        }
-        const fd = new FormData();
-        for (const f of files.slice(0, 5)) {
-          fd.append("files", f);
-        }
-        const results = await uploadStudyMaterialsBatch(fd);
-        const failed = results.filter((r) => !r.ok);
-        if (failed.length > 0) {
-          setErrorMsg(
-            `已上传 ${results.length - failed.length}/${results.length} 本;` +
-            `失败: ${failed.map((f) => f.filename ?? "?").join(", ")}`,
-          );
-        }
-        refresh();
+      // R19: single code path for both 1 and N files. The batch
+      // endpoint auto-chapterizes each upload in-place, so the user
+      // lands on a populated library without an extra click.
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const results = await uploadStudyMaterialsBatch(fd);
+      const failed = results.filter((r) => !r.ok);
+      const ok = results.filter((r) => r.ok) as Array<{ ok: true; data: StudyMaterial }>;
+      if (failed.length > 0) {
+        // Surface a per-failure message but don't blow away the
+        // successful uploads' visibility.
+        const msgs = failed
+          .map((f) => `${f.filename ?? "?"}: ${f.error}`)
+          .join("\n");
+        setErrorMsg(
+          `已上传 ${ok.length}/${results.length} 本,失败 ${failed.length} 本:\n${msgs}`,
+        );
       }
+      refresh();
+      // Auto-expand the first successful book so the user sees the
+      // chapter tree without a second click — that's the whole
+      // point of "上传后就自动拆的" (user feedback R19).
+      if (ok.length > 0) setExpanded(ok[0].data.id);
     } catch (e: any) {
       setErrorMsg(e?.message ?? String(e));
     } finally {
@@ -295,7 +297,7 @@ function BookLibrary() {
             onChange={onUpload}
             style={{ display: "none" }}
           />
-          {busy ? "上传中…" : `📤 上传 (${ACCEPTED_LABEL}, ≤5 本)`}
+          {busy ? "上传中…" : `📤 上传 (${ACCEPTED_LABEL}, ≤${MAX_BATCH_FILES} 本 · 自动分章)`}
         </label>
         <button
           className={showNew ? "" : "primary"}
@@ -437,7 +439,7 @@ function BookCard({
           <div className="row" style={{ marginBottom: 10, gap: 8 }}>
             <span className="muted small">id={material.id} · {new Date(material.created_at).toLocaleDateString()}</span>
             <span className="spacer" />
-            <button onClick={onChapterize} disabled={busy || !material.raw_text_length}>
+            <button onClick={onChapterize} disabled={busy || !material.raw_text_length} title="重新按「第 N 章 / Chapter N」切分正文">
               {busy ? "分章中…" : "重新分章"}
             </button>
             <button className="danger" onClick={onDelete} disabled={busy}>
@@ -454,8 +456,13 @@ function BookCard({
           {!d ? (
             <div className="muted small">加载中…</div>
           ) : d.chapters.length === 0 ? (
-            <div className="muted small">
-              还没有章节。点「重新分章」自动切分正文（支持「第 N 章」和「Chapter N」两种格式）。
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <span className="muted small">
+                还没有章节。点「自动分章」切分正文（支持「第 N 章」和「Chapter N」）。
+              </span>
+              <button onClick={onChapterize} disabled={busy || !material.raw_text_length}>
+                {busy ? "分章中…" : "自动分章"}
+              </button>
             </div>
           ) : (
             <ChapterTree
