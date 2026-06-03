@@ -10,6 +10,8 @@ from app.schemas.project import (
     OutlineRead,
     ProjectCreate,
     ProjectRead,
+    ProjectReorderItem,
+    ProjectReorderRequest,
     ProjectUpdate,
 )
 from app.schemas.task import (
@@ -60,6 +62,8 @@ __all__ = [
     "OutlineRead",
     "ProjectCreate",
     "ProjectRead",
+    "ProjectReorderItem",
+    "ProjectReorderRequest",
     "ProjectUpdate",
     "AgentEventRead",
     "AgentStepRead",

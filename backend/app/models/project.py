@@ -28,6 +28,17 @@ class Project(Base):
     target_chapter_count: Mapped[int] = mapped_column(Integer, default=2000)
     description: Mapped[str | None] = mapped_column(Text, default=None)
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # Round 2 (P0-UI-2 / P0-UI-3) — project grouping, sort, pin, MRU.
+    # category is the user-visible bucket key in the ProjectNav
+    # (defaults to ``genre`` so existing projects get auto-grouped).
+    # sort_order drives the order within a category; pinned items
+    # float to the top regardless of sort_order. last_opened_at is
+    # the MRU timestamp the chief-agent panel uses to suggest
+    # recently-touched projects.
+    category: Mapped[str | None] = mapped_column(String(80), default=None)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    pinned: Mapped[bool] = mapped_column(default=False)
+    last_opened_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

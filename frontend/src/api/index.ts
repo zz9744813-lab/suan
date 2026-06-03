@@ -31,6 +31,23 @@ export const updateProject = (id: number, body: Partial<Project>) =>
 export const deleteProject = (id: number) =>
   api.delete<{ deleted: number }>(`/api/projects/${id}`);
 
+// Round 2: bulk reorder endpoint used by the drag-and-drop ProjectNav.
+// Body matches the backend ``ProjectReorderRequest`` schema.
+export type ProjectReorderItem = {
+  project_id: number;
+  sort_order: number;
+  category?: string | null;
+  pinned?: boolean;
+};
+export const reorderProjects = (items: ProjectReorderItem[]) =>
+  api.post<{ updated: number }>("/api/projects/reorder", { items });
+
+// Round 2: convenience — fire-and-forget PATCH that just bumps the
+// project's last_opened_at. Used by the ProjectNav so the chief
+// panel can show recently-touched projects without a separate poll.
+export const touchProject = (id: number) =>
+  api.patch<Project>(`/api/projects/${id}`, { touch_last_opened: true });
+
 // ----- bible / outlines / chapters -----
 export const getBible = (projectId: number) =>
   api.get<Bible>(`/api/projects/${projectId}/bible`);

@@ -9,6 +9,14 @@ export type Project = {
   id: number;
   name: string;
   genre: string;
+  // Round 2: category is the grouping key the ProjectNav uses (falls
+  // back to genre when null). sort_order orders within a group;
+  // pinned floats the project above non-pinned peers. last_opened_at
+  // powers the MRU badge in the chief panel.
+  category: string | null;
+  sort_order: number;
+  pinned: boolean;
+  last_opened_at: string | null;
   target_word_count: number;
   target_chapter_count: number;
   description: string | null;

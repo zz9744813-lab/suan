@@ -3,7 +3,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   getBible, updateBible, listOutlines, createOutline, bulkCreateOutlines,
   listChapters, createChapter, getProject, getPolicy, updatePolicy,
-  createTask, workerStart, listTasks, deleteProject,
+  createTask, workerStart, listTasks, deleteProject, updateProject,
 } from "../api";
 import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask } from "../types";
 import { useProjectStore } from "../stores/projectStore";
@@ -96,7 +96,15 @@ export function ProjectPage() {
 
         <div style={{ padding: "0 24px 24px" }}>
           {tab === "overview" && (
-            <OverviewTab project={project} chapters={chapters} tasks={tasks} />
+            <OverviewTab
+              project={project}
+              chapters={chapters}
+              tasks={tasks}
+              onSaveMeta={async (patch) => {
+                const updated = await updateProject(projectId, patch);
+                setProject(updated);
+              }}
+            />
           )}
           {tab === "bible" && (
             <BibleTab bible={bible} onSave={async (b) => {
@@ -140,7 +148,12 @@ export function ProjectPage() {
   );
 }
 
-function OverviewTab({ project, chapters, tasks }: { project: Project; chapters: Chapter[]; tasks: AgentTask[] }) {
+function OverviewTab({ project, chapters, tasks, onSaveMeta }: {
+  project: Project;
+  chapters: Chapter[];
+  tasks: AgentTask[];
+  onSaveMeta: (patch: Partial<Project>) => Promise<void>;
+}) {
   const done = chapters.filter((c) => c.status === "done").length;
   const reviewing = chapters.filter((c) => c.status === "needs_review").length;
   const totalWords = chapters.reduce((s, c) => s + c.actual_word_count, 0);
@@ -161,6 +174,41 @@ function OverviewTab({ project, chapters, tasks }: { project: Project; chapters:
         <h3>总进度</h3>
         <div className="progress"><div className="fill" style={{ width: `${progressPct}%` }} /></div>
         <div className="muted tiny" style={{ marginTop: 6 }}>{progressPct.toFixed(1)}% · 目标 {project.target_word_count.toLocaleString()} 字 / {project.target_chapter_count} 章</div>
+      </div>
+
+      {/* Round 2: sidebar grouping metadata — edit the bucket this
+          project belongs to, or pin it to the top of the ProjectNav. */}
+      <div className="card">
+        <h3>侧边栏分组</h3>
+        <p className="muted small" style={{ marginTop: -6, marginBottom: 10 }}>
+          「分类」决定左侧项目栏的项目归到哪个分组；「置顶」会把它浮在所有分组之上。
+        </p>
+        <div className="row gap-3" style={{ alignItems: "center" }}>
+          <div style={{ flex: 1 }}>
+            <label>分类</label>
+            <input
+              defaultValue={project.category ?? ""}
+              placeholder={`留空则使用类型「${project.genre}」`}
+              onBlur={(e) => {
+                const next = e.target.value.trim() || null;
+                if (next !== (project.category ?? null)) {
+                  onSaveMeta({ category: next }).catch((err: any) => alert(err.message));
+                }
+              }}
+            />
+          </div>
+          <div>
+            <label className="row" style={{ marginBottom: 0, whiteSpace: "nowrap" }}>
+              <input
+                type="checkbox"
+                defaultChecked={project.pinned}
+                style={{ width: "auto" }}
+                onChange={(e) => onSaveMeta({ pinned: e.target.checked }).catch((err: any) => alert(err.message))}
+              />
+              <span style={{ marginLeft: 6 }}>📌 置顶</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <div className="card">

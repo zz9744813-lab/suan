@@ -207,6 +207,114 @@
   background: var(--accent-gold-dim);
   transition: width 0.4s;
 }
+
+/* Round 2: P0-UI-2 (grouping) + P0-UI-3 (drag-drop). ProjectNav now
+   owns the expanded list body — search, group buckets, and
+   @dnd-kit-driven rows. The .projectnav-item class is still
+   used (the SortableProjectItem wraps it), only the surrounding
+   scaffolding changes. */
+.projectnav-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.projectnav-search {
+  position: relative;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+.projectnav-search input {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 24px 6px 10px;
+  border-radius: 3px;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.projectnav-search input:focus {
+  border-color: var(--accent-gold-dim);
+}
+.projectnav-search-clear {
+  position: absolute;
+  right: 16px; top: 50%;
+  transform: translateY(calc(-50% - 3px));
+  width: 18px; height: 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.projectnav-search-clear:hover { color: var(--accent-gold); }
+
+.projectnav-groups {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 6px 4px;
+}
+.projectnav-group {
+  margin-bottom: 4px;
+}
+.projectnav-group-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: none;
+  cursor: pointer;
+  border-radius: 3px;
+  gap: 6px;
+}
+.projectnav-group-head:hover { color: var(--text-secondary); background: var(--bg-elevated); }
+.projectnav-group-caret { font-size: 9px; width: 10px; }
+.projectnav-group-label { flex: 1; text-align: left; font-weight: 500; }
+.projectnav-group-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 8px;
+  min-width: 18px;
+  text-align: center;
+}
+.projectnav-group .projectnav-list {
+  padding: 0;
+  margin: 0;
+  flex: none;
+}
+.projectnav-item-wrap {
+  margin-bottom: 4px;
+  border-radius: 4px;
+  /* The drag listeners spread on this element so the whole row is
+     grabbable. A subtle inset border shows on hover. */
+  border: 1px solid transparent;
+  transition: border-color 0.12s, background 0.12s;
+  touch-action: none; /* required by @dnd-kit PointerSensor */
+}
+.projectnav-item-wrap:hover { border-color: var(--accent-line); }
+.projectnav-item-wrap.dragging { opacity: 0.6; }
+.projectnav-item-wrap .projectnav-item {
+  margin-bottom: 0;
+  cursor: grab;
+}
+.projectnav-item-wrap.dragging .projectnav-item { cursor: grabbing; }
+.projectnav-pin {
+  margin-right: 4px;
+  font-size: 11px;
+  filter: saturate(0.8);
+}
 .projectnav-footer {
   border-top: 1px solid var(--accent-line);
   padding: 8px 14px;

@@ -1,6 +1,8 @@
 """Project / Bible / outline routes."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +23,7 @@ from app.schemas import (
     OutlineRead,
     ProjectCreate,
     ProjectRead,
+    ProjectReorderRequest,
     ProjectUpdate,
     WorkerPolicyRead,
     WorkerPolicyUpdate,
@@ -30,32 +33,57 @@ from app.schemas import (
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
+async def _project_to_read(db: AsyncSession, p: Project) -> ProjectRead:
+    """Hydrate the computed fields (chapter_count / total_words) and
+    copy the Round-2 grouping fields onto a ``ProjectRead``. Kept
+    in one place so list / get / create / update all stay in sync.
+    """
+    chap_count = (await db.execute(
+        select(Chapter).where(Chapter.project_id == p.id)
+    )).scalars().all()
+    total_words = sum(c.actual_word_count for c in chap_count)
+    return ProjectRead(
+        id=p.id, name=p.name, genre=p.genre,
+        category=p.category,
+        sort_order=p.sort_order,
+        pinned=p.pinned,
+        last_opened_at=p.last_opened_at,
+        target_word_count=p.target_word_count,
+        target_chapter_count=p.target_chapter_count,
+        description=p.description, status=p.status,
+        created_at=p.created_at, updated_at=p.updated_at,
+        chapter_count=len(chap_count), total_words=total_words,
+    )
+
+
 @router.get("", response_model=APIResponse[list[ProjectRead]])
 async def list_projects(db: AsyncSession = Depends(get_db)) -> APIResponse[list[ProjectRead]]:
-    rows = (await db.execute(select(Project).order_by(Project.id.desc()))).scalars().all()
-    items: list[ProjectRead] = []
-    for p in rows:
-        chap_count = (await db.execute(
-            select(Chapter).where(Chapter.project_id == p.id)
-        )).scalars().all()
-        total_words = sum(c.actual_word_count for c in chap_count)
-        items.append(ProjectRead(
-            id=p.id, name=p.name, genre=p.genre,
-            target_word_count=p.target_word_count,
-            target_chapter_count=p.target_chapter_count,
-            description=p.description, status=p.status,
-            created_at=p.created_at, updated_at=p.updated_at,
-            chapter_count=len(chap_count), total_words=total_words,
-        ))
-    return {"ok": True, "data": items}
+    # Round 2: order by pinned DESC, then sort_order ASC, then id ASC.
+    # Pinned projects float to the top regardless of bucket; within a
+    # bucket, sort_order controls the user's preferred order; id
+    # breaks ties for projects that haven't been touched yet.
+    rows = (await db.execute(
+        select(Project).order_by(
+            Project.pinned.desc(),
+            Project.sort_order.asc(),
+            Project.id.asc(),
+        )
+    )).scalars().all()
+    return {"ok": True, "data": [await _project_to_read(db, p) for p in rows]}
 
 
 @router.post("", response_model=APIResponse[ProjectRead])
 async def create_project(
     body: ProjectCreate, db: AsyncSession = Depends(get_db)
 ) -> APIResponse[ProjectRead]:
+    # Round 2: if the form didn't supply a category, fall back to
+    # the genre so the new project lands in the right bucket by
+    # default.
+    category = body.category or body.genre
     p = Project(
         name=body.name, genre=body.genre,
+        category=category,
+        pinned=body.pinned,
         target_word_count=body.target_word_count,
         target_chapter_count=body.target_chapter_count,
         description=body.description,
@@ -70,14 +98,7 @@ async def create_project(
         "protagonist": "（待设定）",
     }))
     await db.flush()
-    return {"ok": True, "data": ProjectRead(
-        id=p.id, name=p.name, genre=p.genre,
-        target_word_count=p.target_word_count,
-        target_chapter_count=p.target_chapter_count,
-        description=p.description, status=p.status,
-        created_at=p.created_at, updated_at=p.updated_at,
-        chapter_count=0, total_words=0,
-    )}
+    return {"ok": True, "data": await _project_to_read(db, p)}
 
 
 @router.get("/{project_id}", response_model=APIResponse[ProjectRead])
@@ -87,18 +108,13 @@ async def get_project(
     p = await db.get(Project, project_id)
     if p is None:
         raise not_found("Project", project_id)
-    chap_count = (await db.execute(
-        select(Chapter).where(Chapter.project_id == p.id)
-    )).scalars().all()
-    total_words = sum(c.actual_word_count for c in chap_count)
-    return {"ok": True, "data": ProjectRead(
-        id=p.id, name=p.name, genre=p.genre,
-        target_word_count=p.target_word_count,
-        target_chapter_count=p.target_chapter_count,
-        description=p.description, status=p.status,
-        created_at=p.created_at, updated_at=p.updated_at,
-        chapter_count=len(chap_count), total_words=total_words,
-    )}
+    # Round 2: every successful read of a project counts as an
+    # "open" and stamps ``last_opened_at``. Cheap (one datetime
+    # assignment + flush) and gives the chief panel / search a
+    # real MRU signal without the frontend having to PATCH.
+    p.last_opened_at = datetime.utcnow()
+    await db.flush()
+    return {"ok": True, "data": await _project_to_read(db, p)}
 
 
 @router.patch("/{project_id}", response_model=APIResponse[ProjectRead])
@@ -108,16 +124,49 @@ async def update_project(
     p = await db.get(Project, project_id)
     if p is None:
         raise not_found("Project", project_id)
-    for k, v in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    # Round 2: ``touch_last_opened`` is a convenience flag — the
+    # client just sends ``{ "touch_last_opened": true }`` whenever
+    # the user opens the project, and the router stamps the row.
+    if data.pop("touch_last_opened", False):
+        p.last_opened_at = datetime.utcnow()
+    for k, v in data.items():
         setattr(p, k, v)
     await db.flush()
-    return {"ok": True, "data": ProjectRead(
-        id=p.id, name=p.name, genre=p.genre,
-        target_word_count=p.target_word_count,
-        target_chapter_count=p.target_chapter_count,
-        description=p.description, status=p.status,
-        created_at=p.created_at, updated_at=p.updated_at,
-    )}
+    return {"ok": True, "data": await _project_to_read(db, p)}
+
+
+@router.post("/reorder", response_model=APIResponse[dict])
+async def reorder_projects(
+    body: ProjectReorderRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse[dict]:
+    """Bulk-update sort_order / category / pinned for the items the
+    drag-and-drop frontend just rearranged. Each item only carries
+    the fields it needs; missing fields keep their existing values
+    (so moving an item within a bucket can omit ``category`` and
+    just change ``sort_order``).
+
+    Idempotent: re-running with the same payload is a no-op.
+    """
+    if not body.items:
+        return {"ok": True, "data": {"updated": 0}}
+    ids = [item.project_id for item in body.items]
+    rows = (await db.execute(
+        select(Project).where(Project.id.in_(ids))
+    )).scalars().all()
+    by_id = {p.id: p for p in rows}
+    updated = 0
+    for item in body.items:
+        p = by_id.get(item.project_id)
+        if p is None:
+            continue
+        p.sort_order = item.sort_order
+        if item.category is not None:
+            p.category = item.category
+        p.pinned = item.pinned
+        updated += 1
+    await db.flush()
+    return {"ok": True, "data": {"updated": updated}}
 
 
 @router.delete("/{project_id}", response_model=APIResponse[dict])

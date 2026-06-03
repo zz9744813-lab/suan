@@ -6,6 +6,7 @@ import { useWorkerStore } from "../stores/workerStore";
 import { useChiefStore } from "../stores/chiefStore";
 import { useLayoutStore } from "../stores/layoutStore";
 import { ChiefAgentPanel } from "./ChiefAgentPanel";
+import { ProjectNav } from "./project/ProjectNav";
 import "./AppShell.css";
 
 type Props = { children: ReactNode };
@@ -128,35 +129,10 @@ export function AppShell({ children }: Props) {
 
           {projectNavMode === "expanded" ? (
             <>
-              <div className="projectnav-list">
-                {projects.length === 0 ? (
-                  <div className="projectnav-empty">
-                    还没有项目。<br />
-                    <NavLink to="/projects" className="gold">新建一个</NavLink>
-                  </div>
-                ) : (
-                  projects.map((p) => (
-                    <button
-                      key={p.id}
-                      className={`projectnav-item ${p.id === currentProjectId ? "active" : ""}`}
-                      onClick={() => selectProject(p.id)}
-                      title={p.name}
-                    >
-                      <div className="projectnav-item-name ellipsis">{p.name}</div>
-                      <div className="projectnav-item-meta">
-                        <span className="badge gold tiny">{p.genre}</span>
-                        <span className="tiny muted">{p.chapter_count}章 · {formatNumber(p.total_words)}字</span>
-                      </div>
-                      <div className="projectnav-item-bar">
-                        <div
-                          className="projectnav-item-bar-fill"
-                          style={{ width: `${Math.min(100, (p.total_words / p.target_word_count) * 100)}%` }}
-                        />
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
+              {/* Round 2: ProjectNav owns the project list (grouped,
+                  searchable, drag-to-reorder). The footer with the
+                  project's word/chapter targets stays in AppShell. */}
+              <ProjectNav />
               {currentProject && (
                 <div className="projectnav-footer">
                   <div className="row small">

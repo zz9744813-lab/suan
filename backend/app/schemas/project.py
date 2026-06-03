@@ -13,6 +13,11 @@ class ProjectCreate(BaseModel):
     target_word_count: int = Field(default=3_000_000, ge=10_000)
     target_chapter_count: int = Field(default=2000, ge=10)
     description: str | None = None
+    # Round 2 (P0-UI-2): let the create form start with a category
+    # so the project lands in the right group on day one. Optional —
+    # the router falls back to ``genre`` when omitted.
+    category: str | None = None
+    pinned: bool = False
 
 
 class ProjectUpdate(BaseModel):
@@ -22,6 +27,13 @@ class ProjectUpdate(BaseModel):
     target_chapter_count: int | None = None
     description: str | None = None
     status: str | None = None
+    # Round 2: PATCH supports category, pinned, sort_order, and an
+    # explicit ``last_opened_at`` touch (the router stamps it to
+    # ``utcnow`` when the client just sets ``touch_last_opened=True``).
+    category: str | None = None
+    pinned: bool | None = None
+    sort_order: int | None = None
+    touch_last_opened: bool | None = None
 
 
 class ProjectRead(BaseModel):
@@ -30,6 +42,14 @@ class ProjectRead(BaseModel):
     id: int
     name: str
     genre: str
+    # Round 2: ``category`` is the grouping key the ProjectNav uses
+    # (genre when category is null). ``sort_order`` orders within a
+    # group; ``pinned`` floats the project above non-pinned peers;
+    # ``last_opened_at`` powers the MRU badge in the chief panel.
+    category: str | None = None
+    sort_order: int = 0
+    pinned: bool = False
+    last_opened_at: datetime | None = None
     target_word_count: int
     target_chapter_count: int
     description: str | None
@@ -38,6 +58,19 @@ class ProjectRead(BaseModel):
     updated_at: datetime
     chapter_count: int = 0
     total_words: int = 0
+
+
+class ProjectReorderItem(BaseModel):
+    """One entry in a ``POST /projects/reorder`` payload."""
+    project_id: int
+    sort_order: int = 0
+    category: str | None = None
+    pinned: bool = False
+
+
+class ProjectReorderRequest(BaseModel):
+    """Batch update used by the drag-and-drop frontend."""
+    items: list[ProjectReorderItem]
 
 
 class BibleRead(BaseModel):
