@@ -37,9 +37,9 @@ export function AppShell({ children }: Props) {
   const projectNavMode = useLayoutStore((s) => s.projectNavMode);
   const chiefPanelMode = useLayoutStore((s) => s.chiefPanelMode);
   const setChiefPanelMode = useLayoutStore((s) => s.setChiefPanelMode);
-  const setProjectNavMode = useLayoutStore((s) => s.setProjectNavMode);
   const cycleProjectNav = useLayoutStore((s) => s.cycleProjectNav);
   const cycleChiefPanel = useLayoutStore((s) => s.cycleChiefPanel);
+  const theme = useLayoutStore((s) => s.theme);
 
   const location = useLocation();
   // R15 / P0-CHIEF-1: ChiefAgent is now globally available on every
@@ -55,6 +55,14 @@ export function AppShell({ children }: Props) {
   useEffect(() => {
     chiefReset();
   }, [currentProjectId, chiefReset]);
+
+  // R17: mirror the theme onto <html data-theme> so the
+  // :root[data-theme="dark"] overrides in tokens.css take effect.
+  // main.tsx already does this for the first paint to avoid FOUC;
+  // this effect keeps it in sync after the user toggles.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
@@ -155,20 +163,6 @@ export function AppShell({ children }: Props) {
           aria-label="恢复总编面板"
         >
           总
-        </button>
-      )}
-
-      {/* R16 / P0-UI-8: project nav is hidden by default. Show a
-          small affordance so users who want the inline list can
-          toggle it on. Mirrors the chief-recover-fab pattern. */}
-      {projectNavMode === "hidden" && (
-        <button
-          className="projectnav-recover-fab"
-          onClick={() => setProjectNavMode("expanded")}
-          title="展开项目侧边栏"
-          aria-label="展开项目侧边栏"
-        >
-          ☰ 项目
         </button>
       )}
 

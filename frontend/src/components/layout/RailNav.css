@@ -77,19 +77,30 @@
   border-radius: 0 2px 2px 0;
 }
 
-.rail-recover {
+/* R17: light/dark theme toggle. Sits in the rail just above the
+   worker state dot. Visual matches the old .rail-recover slot so
+   the rail's bottom area doesn't shift around. */
+.rail-theme-toggle {
   width: 36px;
   height: 36px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.10);
   background: rgba(255, 255, 255, 0.04);
   color: var(--nav-ink);
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 1;
   cursor: pointer;
   margin: 6px 0;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, transform 0.12s ease;
 }
-.rail-recover:hover { background: rgba(63, 124, 255, 0.20); }
+.rail-theme-toggle:hover {
+  background: rgba(63, 124, 255, 0.20);
+  transform: scale(1.05);
+}
 
 .rail-dot {
   width: 8px;

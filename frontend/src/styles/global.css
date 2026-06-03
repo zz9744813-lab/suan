@@ -222,8 +222,8 @@ code, .mono { font-family: var(--font-mono); }
   background-image: repeating-linear-gradient(
     transparent 0,
     transparent 41px,
-    rgba(39, 52, 75, 0.05) 41px,
-    rgba(39, 52, 75, 0.05) 42px
+    var(--accent-line-soft) 41px,
+    var(--accent-line-soft) 42px
   );
   min-height: 400px;
   border: 1px solid var(--accent-line);
@@ -340,7 +340,7 @@ table tbody tr.clickable { cursor: pointer; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--accent-line); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(39, 52, 75, 0.30); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* chief panel — DARK side panel. Inherits the dark navy bg from the
    rail. Uses light text. The card "body" inside chief messages gets a
@@ -592,7 +592,7 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 18, 0.55);
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(2px);
   z-index: 1000;
   display: flex;

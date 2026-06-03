@@ -40,8 +40,11 @@ const LEARN_ITEMS: Item[] = [
 ];
 
 export function RailNav() {
-  const projectNavMode = useLayoutStore((s) => s.projectNavMode);
-  const setProjectNavMode = useLayoutStore((s) => s.setProjectNavMode);
+  // R17: theme switch (light/dark) is owned by the layout store
+  // and persisted to localStorage. The button here sits where the
+  // old "recover project nav" affordance used to live.
+  const theme = useLayoutStore((s) => s.theme);
+  const setTheme = useLayoutStore((s) => s.setTheme);
 
   // Touch the project store so the projectNav inside this rail (well,
   // the sibling project library) stays in sync. Worker state is what
@@ -61,16 +64,14 @@ export function RailNav() {
 
       <div className="rail-spacer" />
 
-      {projectNavMode === "hidden" && (
-        <button
-          className="rail-recover"
-          onClick={() => setProjectNavMode("expanded")}
-          title="恢复项目栏"
-          aria-label="恢复项目栏"
-        >
-          ≡
-        </button>
-      )}
+      <button
+        className="rail-theme-toggle"
+        onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+        title={theme === "dark" ? "切换到日间模式" : "切换到夜间模式"}
+        aria-label={theme === "dark" ? "切换到日间模式" : "切换到夜间模式"}
+      >
+        {theme === "dark" ? "☀" : "☾"}
+      </button>
 
       <div
         className={`rail-dot rail-dot-${stateColor(workerState)}`}
