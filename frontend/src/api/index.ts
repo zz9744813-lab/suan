@@ -17,6 +17,7 @@ import type {
   Project,
   PromptTemplate,
   PromptVersion,
+  TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
 } from "../types";
@@ -102,12 +103,22 @@ export const createTask = (body: Partial<AgentTask>) =>
 export const getTask = (id: number) => api.get<AgentTask>(`/api/tasks/${id}`);
 export const cancelTask = (id: number) =>
   api.post<AgentTask>(`/api/tasks/${id}/cancel`);
-export const retryTask = (id: number) =>
-  api.post<AgentTask>(`/api/tasks/${id}/retry`);
+// Round 3 / P1-FUNC-2: configurable retry. Mode defaults to
+// ``full``; ``from_failed_step`` requires ``from_step``.
+export type RetryMode = "full" | "from_failed_step" | "critic_only" | "continue_with_fallback";
+export const retryTask = (
+  id: number,
+  body: { mode?: RetryMode; from_step?: string; reuse_previous_outputs?: boolean } = {},
+) => api.post<AgentTask>(`/api/tasks/${id}/retry`, body);
 export const taskSteps = (id: number) =>
   api.get<AgentStep[]>(`/api/tasks/${id}/steps`);
 export const taskEvents = (id: number) =>
   api.get<AgentEvent[]>(`/api/tasks/${id}/events`);
+// Round 3 / P1-FUNC-1: structured failure diagnosis (rail +
+// suggestions + impact). Used by the dashboard's CurrentPipelinePanel
+// and FailureDiagnosisCard.
+export const getTaskDiagnosis = (id: number) =>
+  api.get<TaskDiagnosis>(`/api/tasks/${id}/diagnosis`);
 
 export const workerStatus = () => api.get<WorkerStatus>("/api/worker/status");
 export const workerStart = () => api.post<any>("/api/worker/start");

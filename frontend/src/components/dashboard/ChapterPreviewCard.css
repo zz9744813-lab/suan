@@ -1,0 +1,29 @@
+/* ChapterPreviewCard — most recent chapter's first 600 chars. */
+.preview-card { display: flex; flex-direction: column; }
+.preview-headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+.preview-title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 500;
+}
+.preview-body {
+  margin: 0;
+  padding: 12px 18px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  max-height: 240px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  background:
+    linear-gradient(180deg, var(--bg-panel) 0%, var(--bg-panel) 70%, var(--bg-rail) 100%);
+}
+.preview-loading { padding: 24px 18px; }
+.preview-empty { padding: 24px 18px; }

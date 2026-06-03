@@ -22,13 +22,35 @@
 
 .dashboard { overflow-y: auto; height: 100%; }
 
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+/* Round 3 layout: the dashboard body is a stack of rows; each row
+   is a 2-col grid (1:1 on wide screens, 1:1 collapses to stacked
+   below 1100px). The status bar above spans full width. */
+.dashboard-body {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  padding: 20px 32px;
+  padding: 16px 24px 24px;
 }
-@media (max-width: 1300px) { .dashboard-grid { grid-template-columns: repeat(2, 1fr); } }
+.dashboard-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+}
+.dashboard-row > * { min-width: 0; min-height: 0; }
+@media (max-width: 1200px) {
+  .dashboard-row { grid-template-columns: 1fr; }
+}
+
+.dashboard-failure-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.dashboard-failure-body {
+  padding: 14px 18px 16px;
+  overflow-y: auto;
+}
 
 .kpi-card {
   background: var(--bg-panel);

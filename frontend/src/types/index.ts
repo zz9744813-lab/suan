@@ -252,3 +252,48 @@ export type AgentEvent = {
   data: Record<string, any> | null;
   created_at: string;
 };
+
+// Round 3 / P1-FUNC-1: structured task diagnosis. The backend
+// flattens the chapter pipeline's AgentStep rows into a fixed 8-row
+// rail (context_compile -> plan -> draft -> review -> rewrite ->
+// continuity -> memory_update -> learning) and adds typed
+// suggestions the UI can render as action buttons.
+export type TaskDiagnosisStep = {
+  step_name: string;
+  label: string;
+  status: string;          // succeeded / failed / pending / skipped
+  agent_name: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number;
+  cost_usd: number;
+  score: number | null;    // critic total, if any
+  error_message: string | null;
+};
+
+export type TaskDiagnosisSuggestion = {
+  type: "safe_retry" | "from_failed_step" | "continue_with_fallback"
+      | "switch_model" | "view_step" | "open_models";
+  label: string;
+  description: string;
+  risk: "low" | "medium" | "high";
+  params: Record<string, any>;
+};
+
+export type TaskDiagnosis = {
+  task_id: number;
+  project_id: number;
+  chapter_id: number | null;
+  task_type: string;
+  status: string;
+  error_type: string;
+  error_message: string;
+  failed_agent: string | null;
+  failed_step: string | null;
+  impact: string[];
+  suggestions: TaskDiagnosisSuggestion[];
+  raw_output_preview: string | null;
+  prompt_preview: string | null;
+  steps: TaskDiagnosisStep[];
+  retry_count: number;
+};

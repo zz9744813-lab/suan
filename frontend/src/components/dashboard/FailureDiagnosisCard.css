@@ -1,0 +1,123 @@
+/* FailureDiagnosisCard — readable, actionable failure card. */
+.failure-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.failure-headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.failure-task-id { color: var(--text-primary); }
+
+.failure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--accent-line-soft);
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+@media (max-width: 900px) { .failure-grid { grid-template-columns: repeat(2, 1fr); } }
+.failure-cell { min-width: 0; }
+.failure-cell-label { margin-bottom: 2px; }
+.failure-cell-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.failure-section { display: flex; flex-direction: column; gap: 4px; }
+.failure-section-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.failure-summary { cursor: pointer; user-select: none; }
+
+.failure-impact { display: flex; gap: 6px; flex-wrap: wrap; }
+.failure-impact-chip {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(239, 107, 91, 0.08);
+  border: 1px solid rgba(239, 107, 91, 0.25);
+  color: var(--state-error);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.failure-pre {
+  margin: 6px 0 0;
+  background: var(--bg-base);
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.failure-pre.faint { color: var(--text-muted); }
+
+.failure-suggestions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (max-width: 900px) { .failure-suggestions { grid-template-columns: 1fr; } }
+.failure-suggestion-button {
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+  transition: all 0.12s;
+}
+.failure-suggestion-button:hover {
+  background: rgba(201, 162, 91, 0.08);
+  border-color: var(--accent-gold-dim);
+}
+.failure-suggestion-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.fsg-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 500;
+}
+.fsg-risk {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-muted);
+}
+.fsg-risk.risk-low { color: var(--state-ok); }
+.fsg-risk.risk-medium { color: var(--state-warn); }
+.fsg-risk.risk-high { color: var(--state-error); }
+.fsg-desc { line-height: 1.45; }
+
+.failure-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.failure-actions a.button { text-decoration: none; }

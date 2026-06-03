@@ -1,0 +1,105 @@
+/* AgentStepRail — one chapter pipeline's 8 stops, visualised. */
+.agent-rail {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+.agent-rail-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 4px 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.agent-rail-step.clickable { cursor: pointer; border-radius: 4px; }
+.agent-rail-step.clickable:hover { background: var(--bg-elevated); }
+
+.agent-rail-dot {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--accent-line);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+  position: relative;
+}
+.agent-rail-glyph { line-height: 1; }
+
+.agent-rail-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.agent-rail-label { font-size: 11px; color: var(--text-primary); font-weight: 500; }
+.agent-rail-meta { font-size: 10px; color: var(--text-muted); }
+
+.agent-rail-connector {
+  position: absolute;
+  right: 0; top: 50%;
+  width: 12px; height: 1px;
+  background: var(--accent-line);
+  transform: translateY(-50%);
+}
+
+/* Status colours */
+.agent-rail-step.status-succeeded .agent-rail-dot {
+  background: rgba(120, 199, 122, 0.16);
+  border-color: rgba(120, 199, 122, 0.5);
+  color: var(--state-ok);
+}
+.agent-rail-step.status-succeeded .agent-rail-meta { color: var(--state-ok); }
+.agent-rail-step.status-succeeded ~ .agent-rail-step .agent-rail-connector,
+.agent-rail-step.status-succeeded .agent-rail-connector {
+  background: rgba(120, 199, 122, 0.4);
+}
+
+.agent-rail-step.status-failed .agent-rail-dot {
+  background: rgba(239, 107, 91, 0.18);
+  border-color: var(--state-error);
+  color: var(--state-error);
+  box-shadow: 0 0 0 2px rgba(239, 107, 91, 0.12);
+}
+.agent-rail-step.status-failed .agent-rail-meta { color: var(--state-error); }
+.agent-rail-step.status-failed .agent-rail-connector { background: var(--state-error); }
+
+.agent-rail-step.status-running .agent-rail-dot {
+  background: rgba(214, 166, 78, 0.18);
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  animation: agent-rail-pulse 1.4s ease-in-out infinite;
+}
+@keyframes agent-rail-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(214, 166, 78, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(214, 166, 78, 0); }
+}
+
+.agent-rail-step.status-skipped .agent-rail-dot {
+  background: var(--bg-base);
+  border-style: dashed;
+  border-color: var(--accent-line-soft);
+  color: var(--text-faint);
+}
+.agent-rail-step.status-skipped .agent-rail-label { color: var(--text-faint); }
+.agent-rail-step.status-skipped .agent-rail-meta { color: var(--text-faint); }
+
+.agent-rail-step.status-pending .agent-rail-dot {
+  background: var(--bg-elevated);
+  color: var(--text-faint);
+}
+.agent-rail-step.status-pending .agent-rail-label { color: var(--text-faint); }
+.agent-rail-step.status-pending .agent-rail-meta { color: var(--text-faint); }
+
+/* Compact: just dots, no text. Useful in compact mode. */
+.agent-rail-compact .agent-rail-text { display: none; }
+.agent-rail-compact .agent-rail-step { padding: 4px 12px 4px 4px; }

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,3 +121,90 @@ class WorkerPolicyRead(BaseModel):
     discussion_policy: str
     max_discussion_per_day: int
     max_cost_per_discussion: float
+
+
+# ----- Round 3 / P1-FUNC-1: task diagnosis -----
+
+# Pipeline order (matches ChapterPipeline). The UI uses this to show
+# a 1-1 mapping between ``step_name`` and a human-friendly label, and
+# to compute the list of steps that were *skipped* because an earlier
+# one failed.
+PIPELINE_STEP_ORDER: tuple[str, ...] = (
+    "context_compile",
+    "plan",
+    "draft",
+    "review",
+    "rewrite",
+    "continuity",
+    "memory_update",
+    "learning",
+)
+
+STEP_LABELS: dict[str, str] = {
+    "context_compile": "上下文组装",
+    "plan": "Planner 大纲",
+    "draft": "Drafter 写稿",
+    "review": "Critic 评审",
+    "rewrite": "Rewriter 改稿",
+    "continuity": "Continuity 连贯性",
+    "memory_update": "MemoryUpdate 记忆",
+    "learning": "Learning 反思",
+}
+
+
+class TaskDiagnosisStep(BaseModel):
+    """One row in the AgentStepRail / diagnosis timeline."""
+    step_name: str
+    label: str
+    status: str  # pending / running / succeeded / failed / skipped
+    agent_name: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int = 0
+    cost_usd: float = 0.0
+    score: int | None = None  # critic score, if any
+    error_message: str | None = None
+
+
+class TaskDiagnosisSuggestion(BaseModel):
+    """An actionable next step surfaced in the FailureDiagnosisCard."""
+    type: Literal[
+        "safe_retry",          # retry the failed step only
+        "from_failed_step",    # retry everything from the failed step
+        "continue_with_fallback",  # use fallback critic report, continue
+        "switch_model",        # edit role binding, then retry
+        "view_step",           # jump to the chapter's step timeline
+        "open_models",         # jump to the model config page
+    ]
+    label: str
+    description: str
+    risk: Literal["low", "medium", "high"] = "low"
+    # ``params`` carries whatever the action needs to round-trip to
+    # the backend (e.g. ``task_id`` for the retry endpoint).
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskDiagnosisRead(BaseModel):
+    """Structured failure analysis. P1-FUNC-1 in the spec."""
+    task_id: int
+    project_id: int
+    chapter_id: int | None
+    task_type: str
+    status: str
+    error_type: str  # e.g. "JSON_PARSE_FAILED" / "TIMEOUT" / ...
+    error_message: str
+    failed_agent: str | None
+    failed_step: str | None
+    impact: list[str]            # human-readable list of skipped steps
+    suggestions: list[TaskDiagnosisSuggestion]
+    raw_output_preview: str | None
+    prompt_preview: str | None
+    steps: list[TaskDiagnosisStep]
+    retry_count: int
+
+
+class TaskRetryRequest(BaseModel):
+    """Body for ``POST /api/tasks/{task_id}/retry`` (P1-FUNC-2)."""
+    mode: Literal["full", "from_failed_step", "critic_only", "continue_with_fallback"] = "full"
+    from_step: str | None = None  # required when mode == "from_failed_step"
+    reuse_previous_outputs: bool = True
