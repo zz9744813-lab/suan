@@ -6,12 +6,15 @@ import {
 } from "../api";
 import type { Chapter, ChapterVersion, AgentStep } from "../types";
 import { useProjectStore } from "../stores/projectStore";
+import { ChapterCompare } from "../components/chapter/ChapterCompare";
+import "../components/chapter/ChapterCompare.css";
 
 const TABS = [
   { key: "manuscript", label: "正文" },
-  { key: "versions", label: "版本" },
-  { key: "timeline", label: "时间线" },
-  { key: "context", label: "上下文" },
+  { key: "compare",    label: "对比" },
+  { key: "versions",   label: "版本" },
+  { key: "timeline",   label: "时间线" },
+  { key: "context",    label: "上下文" },
 ];
 
 export function ChapterDetail() {
@@ -24,7 +27,7 @@ export function ChapterDetail() {
   const [versions, setVersions] = useState<ChapterVersion[]>([]);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [activeVersion, setActiveVersion] = useState<ChapterVersion | null>(null);
-  const [tab, setTab] = useState<"manuscript" | "versions" | "timeline" | "context">("manuscript");
+  const [tab, setTab] = useState<"manuscript" | "compare" | "versions" | "timeline" | "context">("manuscript");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -98,6 +101,8 @@ export function ChapterDetail() {
               <div className="manuscript">{contentText}</div>
             </div>
           )}
+
+          {tab === "compare" && <ChapterCompare versions={versions} />}
 
           {tab === "versions" && (
             <div className="card">

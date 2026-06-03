@@ -1,0 +1,239 @@
+/* ChapterCompare — 章节版本对比视图
+ *
+ * 三种模式共用一套 toolbar 样式; side-by-side 是默认。
+ *   高度: 对比面板撑满父容器(章节页用了 grid auto 1fr)
+ *   滚动: 横向用面板自带 scroll, 纵向同步(避免反馈循环用 syncing ref)
+ *   diff 高亮: 同=中性灰, 加=绿, 删=红 + 删除线
+ */
+.compare-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0 24px 24px;
+}
+
+.compare-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  flex-shrink: 0;
+}
+
+.compare-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.compare-picker label {
+  color: var(--text-muted, #8a96a8);
+  font-size: 12px;
+}
+.compare-picker select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  min-width: 200px;
+}
+
+.compare-mode {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.compare-mode button {
+  border: 0;
+  border-right: 1px solid var(--accent-line);
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-muted, #8a96a8);
+}
+.compare-mode button:last-child { border-right: 0; }
+.compare-mode button.active {
+  background: var(--bg-paper-soft);
+  color: var(--accent-gold);
+}
+
+.compare-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.compare-stats .sep {
+  width: 1px;
+  height: 12px;
+  background: var(--accent-line);
+  margin: 0 4px;
+}
+.compare-stat-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid;
+}
+.compare-stat-pill.add {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.3);
+}
+.compare-stat-pill.del {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+/* ---- side-by-side + raw 共用 ---- */
+.compare-sbs, .compare-raw {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-paper);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.compare-raw {
+  /* raw 也用同样的网格(2x1)但内部两列没 diff 高亮 */
+}
+
+.compare-pane-header {
+  padding: 8px 12px;
+  background: var(--bg-paper-soft);
+  border-bottom: 1px solid var(--accent-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.compare-pane-title {
+  color: var(--text-muted, #8a96a8);
+  font-family: var(--font-mono);
+}
+
+.compare-panes {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.compare-pane {
+  overflow: auto;
+  padding: 12px 16px;
+  font-family: var(--font-serif, "Source Serif Pro", "Noto Serif SC", Georgia, serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--ink);
+}
+
+.compare-divider {
+  background: var(--accent-line);
+}
+
+/* ---- DiffRow ---- */
+.compare-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 2px;
+  min-height: 1.85em;
+  align-items: flex-start;
+}
+.compare-row.same {
+  color: var(--ink-soft, #4a5868);
+}
+.compare-row.del {
+  background: rgba(248, 113, 113, 0.12);
+  color: #b94a4a;
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 113, 113, 0.6);
+}
+.compare-row.add {
+  background: rgba(74, 222, 128, 0.12);
+  color: #2f7a3e;
+}
+.compare-row.empty {
+  background: transparent;
+}
+
+.compare-marker {
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text-muted, #8a96a8);
+}
+.compare-marker.del { color: #f87171; }
+.compare-marker.add { color: #4ade80; }
+
+.compare-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- Unified ---- */
+.compare-unified {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px;
+  font-family: var(--font-serif, "Source Serif Pro", "Noto Serif SC", Georgia, serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--ink);
+  background: var(--bg-paper);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+}
+.unified-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  margin-bottom: 2px;
+}
+.unified-row.same { color: var(--ink-soft, #4a5868); }
+.unified-row.del {
+  background: rgba(248, 113, 113, 0.12);
+  color: #b94a4a;
+  text-decoration: line-through;
+}
+.unified-row.add {
+  background: rgba(74, 222, 128, 0.12);
+  color: #2f7a3e;
+}
+.unified-marker {
+  flex-shrink: 0;
+  width: 1em;
+  font-family: var(--font-mono);
+  color: var(--text-muted, #8a96a8);
+  text-align: center;
+}
+.unified-row.del .unified-marker { color: #f87171; }
+.unified-row.add .unified-marker { color: #4ade80; }
+
+/* ---- Raw 模式 ---- */
+.compare-raw-text {
+  margin: 0;
+  font-family: var(--font-serif, "Source Serif Pro", "Noto Serif SC", Georgia, serif);
+  font-size: 14px;
+  line-height: 1.85;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
