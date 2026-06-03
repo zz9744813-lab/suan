@@ -19,10 +19,17 @@
     minmax(0, 1fr)
     var(--chief-width);
   grid-template-rows: 1fr var(--statusbar-height);
+  /* R12.1 / P0-UI-7 fix: row 2 needs the statusbar to span ALL 4
+   * columns, not just 3. The old grid had "status statusbar statusbar
+   * statusbar" but no element uses grid-area: status, so the first
+   * cell was empty and the statusbar only stretched across
+   * columns 2-4 (an invisible 56px gap on the left). */
   grid-template-areas:
     "rail projectnav main chief"
-    "status statusbar statusbar statusbar";
+    "statusbar statusbar statusbar statusbar";
   height: 100vh;
+  width: 100%;
+  min-height: 100vh;
   background: var(--bg-base);
   transition: grid-template-columns 0.18s ease;
 }
