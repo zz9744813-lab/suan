@@ -460,3 +460,127 @@ table tbody tr.clickable { cursor: pointer; }
 .subheader h2 { font-size: 16px; font-weight: 500; margin: 0; }
 .subheader .meta { color: var(--text-muted); font-size: 12px; }
 .subheader .actions { margin-left: auto; display: flex; gap: 8px; }
+
+/* ---------- Round 1 additions: provider cards + role matrix ---------- */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.provider-card {
+  background: var(--bg-card);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.12s;
+}
+.provider-card:hover { border-color: var(--accent-gold-dim); }
+.provider-card.disabled { opacity: 0.7; }
+.provider-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.provider-card-name {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--accent-gold);
+}
+.provider-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.provider-card-body .kv {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.provider-card-body .kv .k {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.provider-card-body .kv .v {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.provider-card-foot {
+  display: flex;
+  gap: 6px;
+  border-top: 1px solid var(--accent-line-soft);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+.provider-card-test {
+  border-top: 1px solid var(--accent-line-soft);
+  padding-top: 10px;
+  font-size: 12px;
+}
+
+.role-matrix { width: 100%; border-collapse: separate; border-spacing: 0; }
+.role-matrix th, .role-matrix td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--accent-line-soft);
+  font-size: 12px;
+}
+.role-matrix th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.role-matrix tbody tr:hover { background: rgba(201, 162, 91, 0.04); }
+.role-matrix select, .role-matrix input {
+  width: 100%;
+  font-size: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  color: var(--text-primary);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+
+.error-card {
+  border-color: var(--state-error);
+  background: rgba(201, 112, 112, 0.08);
+}
+.error-pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid var(--accent-line-soft);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.key-edit-block {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 4px;
+}
+button.link {
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-line);
+  text-underline-offset: 3px;
+  padding: 0;
+}
+button.link:hover { color: var(--accent-gold); }

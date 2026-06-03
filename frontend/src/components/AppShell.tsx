@@ -4,6 +4,7 @@ import { useSSE } from "../hooks/useSSE";
 import { useProjectStore } from "../stores/projectStore";
 import { useWorkerStore } from "../stores/workerStore";
 import { useChiefStore } from "../stores/chiefStore";
+import { useLayoutStore } from "../stores/layoutStore";
 import { ChiefAgentPanel } from "./ChiefAgentPanel";
 import "./AppShell.css";
 
@@ -16,6 +17,10 @@ type Props = { children: ReactNode };
 //   │  56px        │  260px     │  flex          │  380px    │
 //   └───────────────────────────────────────────────────────┘
 //   [Status bar — 28px]
+//
+// P0-UI-1 + P0-UI-4: each side panel has three modes (expanded /
+// compact / hidden), persisted in localStorage. CSS variables drive
+// the actual widths — see AppShell.css for the grid math.
 export function AppShell({ children }: Props) {
   useSSE();
   const refreshProjects = useProjectStore((s) => s.refresh);
@@ -30,9 +35,21 @@ export function AppShell({ children }: Props) {
   const lastError = useWorkerStore((s) => s.status?.last_error ?? null);
 
   const chiefReset = useChiefStore((s) => s.reset);
+
+  const projectNavMode = useLayoutStore((s) => s.projectNavMode);
+  const chiefPanelMode = useLayoutStore((s) => s.chiefPanelMode);
+  const cycleProjectNav = useLayoutStore((s) => s.cycleProjectNav);
+  const cycleChiefPanel = useLayoutStore((s) => s.cycleChiefPanel);
+  const setProjectNavMode = useLayoutStore((s) => s.setProjectNavMode);
+  const setChiefPanelMode = useLayoutStore((s) => s.setChiefPanelMode);
+
   const location = useLocation();
-  const isChiefVisible = location.pathname.startsWith("/dashboard")
-    || location.pathname.startsWith("/projects");
+  const chiefIsForced = !location.pathname.startsWith("/dashboard")
+    && !location.pathname.startsWith("/projects");
+  // The chief panel is route-gated: on /tasks, /worker, /models, /prompts
+  // we hide it entirely. On /dashboard and /projects it follows the
+  // user's mode choice.
+  const chiefMode = chiefIsForced ? "hidden" : chiefPanelMode;
 
   useEffect(() => {
     refreshProjects();
@@ -50,8 +67,15 @@ export function AppShell({ children }: Props) {
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
+  // Build the className stack that drives the CSS grid widths.
+  const shellClass = [
+    "shell",
+    `projectnav-${projectNavMode}`,
+    `chief-${chiefMode}`,
+  ].join(" ");
+
   return (
-    <div className="shell">
+    <div className={shellClass}>
       {/* === Rail (leftmost, 56px) === */}
       <nav className="rail">
         <div className="rail-brand" title="NovelForge 2.0">NF</div>
@@ -64,59 +88,119 @@ export function AppShell({ children }: Props) {
         <RailItem to="/prompts" label="Prompt" icon="✎" />
         <RailItem to="/models" label="模型" icon="◈" />
         <div className="rail-spacer" />
+        {/* ProjectNav recover button — only when fully hidden */}
+        {projectNavMode === "hidden" && (
+          <button
+            className="rail-recover"
+            onClick={() => setProjectNavMode("expanded")}
+            title="恢复项目栏"
+            aria-label="恢复项目栏"
+          >
+            ≡
+          </button>
+        )}
         <div className={`rail-dot rail-dot-${stateColor(workerState)}`} title={`Worker: ${workerState}`} />
       </nav>
 
-      {/* === ProjectNav (260px) === */}
-      <aside className="projectnav">
-        <div className="projectnav-header">
-          <span className="projectnav-title">项目</span>
-          <NavLink to="/projects" className="projectnav-add" title="管理项目">+</NavLink>
-        </div>
-        <div className="projectnav-list">
-          {projects.length === 0 ? (
-            <div className="projectnav-empty">
-              还没有项目。<br />
-              <NavLink to="/projects" className="gold">新建一个</NavLink>
-            </div>
-          ) : (
-            projects.map((p) => (
-              <button
-                key={p.id}
-                className={`projectnav-item ${p.id === currentProjectId ? "active" : ""}`}
-                onClick={() => selectProject(p.id)}
-              >
-                <div className="projectnav-item-name ellipsis">{p.name}</div>
-                <div className="projectnav-item-meta">
-                  <span className="badge gold tiny">{p.genre}</span>
-                  <span className="tiny muted">{p.chapter_count}章 · {formatNumber(p.total_words)}字</span>
-                </div>
-                <div className="projectnav-item-bar">
-                  <div
-                    className="projectnav-item-bar-fill"
-                    style={{ width: `${Math.min(100, (p.total_words / p.target_word_count) * 100)}%` }}
-                  />
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-        {currentProject && (
-          <div className="projectnav-footer">
-            <div className="row small">
-              <span className="muted">目标</span>
-              <span className="spacer" />
-              <span className="mono">{formatNumber(currentProject.target_word_count)}字 / {currentProject.target_chapter_count}章</span>
-            </div>
+      {/* === ProjectNav === */}
+      {projectNavMode !== "hidden" && (
+        <aside className="projectnav">
+          <div className="projectnav-header">
+            <span className="projectnav-title">项目</span>
+            {projectNavMode === "expanded" && (
+              <NavLink to="/projects" className="projectnav-add" title="管理项目">+</NavLink>
+            )}
+            <button
+              className="projectnav-toggle"
+              onClick={cycleProjectNav}
+              title={
+                projectNavMode === "expanded"
+                  ? "折叠为窄栏"
+                  : projectNavMode === "compact"
+                    ? "完全隐藏"
+                    : "展开"
+              }
+              aria-label="切换项目栏显示"
+            >
+              {projectNavMode === "expanded" ? "◀" : projectNavMode === "compact" ? "▶" : "≡"}
+            </button>
           </div>
-        )}
-      </aside>
+
+          {projectNavMode === "expanded" ? (
+            <>
+              <div className="projectnav-list">
+                {projects.length === 0 ? (
+                  <div className="projectnav-empty">
+                    还没有项目。<br />
+                    <NavLink to="/projects" className="gold">新建一个</NavLink>
+                  </div>
+                ) : (
+                  projects.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`projectnav-item ${p.id === currentProjectId ? "active" : ""}`}
+                      onClick={() => selectProject(p.id)}
+                      title={p.name}
+                    >
+                      <div className="projectnav-item-name ellipsis">{p.name}</div>
+                      <div className="projectnav-item-meta">
+                        <span className="badge gold tiny">{p.genre}</span>
+                        <span className="tiny muted">{p.chapter_count}章 · {formatNumber(p.total_words)}字</span>
+                      </div>
+                      <div className="projectnav-item-bar">
+                        <div
+                          className="projectnav-item-bar-fill"
+                          style={{ width: `${Math.min(100, (p.total_words / p.target_word_count) * 100)}%` }}
+                        />
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+              {currentProject && (
+                <div className="projectnav-footer">
+                  <div className="row small">
+                    <span className="muted">目标</span>
+                    <span className="spacer" />
+                    <span className="mono">{formatNumber(currentProject.target_word_count)}字 / {currentProject.target_chapter_count}章</span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            /* compact mode: vertical icon strip of projects, status dot only */
+            <div className="projectnav-compact-list">
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  className={`projectnav-compact-item ${p.id === currentProjectId ? "active" : ""}`}
+                  onClick={() => selectProject(p.id)}
+                  title={`${p.name} · ${p.genre}`}
+                  aria-label={p.name}
+                >
+                  <span className="projectnav-compact-initial">{p.name.slice(0, 1)}</span>
+                  <span className={`projectnav-compact-dot projectnav-compact-dot-${stateColor(p.status)}`} />
+                </button>
+              ))}
+              {projects.length === 0 && (
+                <div className="projectnav-compact-empty muted">+</div>
+              )}
+            </div>
+          )}
+        </aside>
+      )}
 
       {/* === Main content === */}
       <main className="main">{children}</main>
 
-      {/* === ChiefAgent (380px, right) === */}
-      {isChiefVisible && <ChiefAgentPanel projectId={currentProjectId} />}
+      {/* === ChiefAgent (right) === */}
+      {chiefMode !== "hidden" && (
+        <ChiefAgentPanel
+          projectId={currentProjectId}
+          mode={chiefMode}
+          onCycle={cycleChiefPanel}
+        />
+      )}
 
       {/* === StatusBar (28px) === */}
       <footer className="statusbar">

@@ -1,12 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useChiefStore } from "../stores/chiefStore";
-import { confirmChiefAction, createChiefSession, listChiefSessions } from "../api";
+import {
+  confirmChiefAction,
+  createChiefSession,
+  listChiefSessions,
+} from "../api";
+import type { PanelMode } from "../stores/layoutStore";
 
-type Props = { projectId: number | null };
+type Props = {
+  projectId: number | null;
+  mode: PanelMode;
+  onCycle: () => void;
+};
 
-// 右侧常驻的总编调度面板（spec §5.4 / §17.1）
+// 右侧总编调度面板（spec §5.4 / §17.1）
 // 形态：会话列表 + 当前消息流 + 输入框 + 操作卡片
-export function ChiefAgentPanel({ projectId }: Props) {
+// P0-UI-4: 支持 expanded / compact 两种渲染模式。
+// hidden 模式下 AppShell 不会渲染本组件。
+export function ChiefAgentPanel({ projectId, mode, onCycle }: Props) {
   const session = useChiefStore((s) => s.session);
   const messages = useChiefStore((s) => s.messages);
   const streaming = useChiefStore((s) => s.streaming);
@@ -18,14 +29,16 @@ export function ChiefAgentPanel({ projectId }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (mode === "expanded" && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, streaming]);
+  }, [messages, streaming, mode]);
 
   useEffect(() => {
-    listChiefSessions(projectId ?? undefined).then(setSessionList).catch(() => {});
-  }, [projectId, session]);
+    if (mode === "expanded") {
+      listChiefSessions(projectId ?? undefined).then(setSessionList).catch(() => {});
+    }
+  }, [projectId, session, mode]);
 
   const onSend = async () => {
     const text = input.trim();
@@ -64,6 +77,47 @@ export function ChiefAgentPanel({ projectId }: Props) {
     }
   };
 
+  // Compact mode: just an avatar + status dot + expand button.
+  if (mode === "compact") {
+    return (
+      <aside className="chief-panel chief-compact">
+        <button
+          className="chief-compact-expand"
+          onClick={onCycle}
+          title="展开总编面板"
+          aria-label="展开总编面板"
+        >
+          <div className="chief-avatar small">总</div>
+          <div className="chief-compact-stack">
+            <div className="chief-compact-label">总编</div>
+            <div className={`chief-compact-dot chief-compact-dot-${streaming ? "warn" : session ? "ok" : "info"}`} />
+          </div>
+        </button>
+      </aside>
+    );
+  }
+
+  // Quick-command shortcuts — surfaced when there's no active
+  // conversation so the panel isn't a blank box. Each item routes
+  // through the normal send() path so the same LLM-driven actions
+  // pipeline runs (P0-UI-4 验收标准 3, 4).
+  const QUICK_COMMANDS = [
+    { label: "诊断最近失败", message: "诊断最近一次失败的 Task，并告诉我应该先修什么。" },
+    { label: "继续写下一章", message: "Worker 暂停时，帮我在当前项目里创建下一章任务并继续。" },
+    { label: "检查模型配置", message: "检查当前所有模型 Provider 的健康度，并指出 Critic 风险。" },
+    { label: "生成后续 10 章大纲", message: "基于当前项目已有大纲和最近章节走向，再生成 10 章后续大纲。" },
+    { label: "总结当前项目状态", message: "总结当前项目的状态、字数、章节进度和 Worker 状态。" },
+    { label: "查询拆书行为模式", message: "在拆书行为模式里，查找「热血主角 + 亲友受辱」的典型行为。" },
+  ];
+
+  const onQuick = (message: string) => {
+    setInput(message);
+    // submit on the next tick so the input state is reflected
+    setTimeout(() => {
+      onSend();
+    }, 0);
+  };
+
   return (
     <aside className="chief-panel">
       <div className="chief-header">
@@ -74,6 +128,14 @@ export function ChiefAgentPanel({ projectId }: Props) {
         </div>
         <span className="spacer" />
         <button className="new-btn" onClick={onNewSession}>+ 新会话</button>
+        <button
+          className="chief-cycle-btn"
+          onClick={onCycle}
+          title="折叠为窄栏"
+          aria-label="折叠总编面板"
+        >
+          ▶
+        </button>
       </div>
 
       <div className="chief-sessions-bar">
@@ -102,10 +164,23 @@ export function ChiefAgentPanel({ projectId }: Props) {
 
       <div className="chief-messages" ref={scrollRef}>
         {messages.length === 0 && !streaming && (
-          <div className="page-empty" style={{ padding: 40 }}>
-            <div className="big">总编</div>
-            <div>我可以帮你调度 Worker、检查设定、或者就项目状态答疑。</div>
-            <div className="muted tiny" style={{ marginTop: 8 }}>试试问：「现在写到第几章了？」</div>
+          <div className="chief-quickstart">
+            <div className="chief-quickstart-head">
+              <div className="big">总编</div>
+              <div className="muted small">没有会话时，可以直接选一个常用动作：</div>
+            </div>
+            <div className="chief-quickstart-grid">
+              {QUICK_COMMANDS.map((q) => (
+                <button
+                  key={q.label}
+                  className="chief-quickstart-item"
+                  onClick={() => onQuick(q.message)}
+                  title={q.message}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m) => (

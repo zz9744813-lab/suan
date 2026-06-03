@@ -176,7 +176,12 @@ export type ModelProvider = {
   id: number;
   name: string;
   base_url: string;
+  // P0-6 fix: the backend never returns the full key. ``api_key`` is
+  // a short masked preview (e.g. "sk-6…7dbe") and ``has_api_key`` is
+  // the boolean the UI uses to decide whether to show the "已配置"
+  // hint vs an empty input box.
   api_key: string;
+  has_api_key: boolean;
   default_model: string;
   model_list: string[];
   enabled: boolean;

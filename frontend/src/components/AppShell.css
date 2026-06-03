@@ -1,12 +1,46 @@
+/* ==========================================================================
+   AppShell — 4-zone responsive grid
+   --------------------------------------------------------------------------
+   Widths are CSS variables so a single class change
+   (.projectnav-compact | .projectnav-hidden | .chief-compact |
+   .chief-hidden) reflows the entire grid. The default (.shell) leaves
+   the spec'd widths in place.
+   ========================================================================== */
 .shell {
+  --rail-width: var(--size-rail, 56px);
+  --projectnav-width: 260px;
+  --chief-width: 380px;
+  --statusbar-height: var(--size-statusbar, 28px);
+
   display: grid;
-  grid-template-columns: var(--size-rail) var(--size-projectnav) 1fr var(--size-chief);
-  grid-template-rows: 1fr var(--size-statusbar);
+  grid-template-columns:
+    var(--rail-width)
+    var(--projectnav-width)
+    minmax(0, 1fr)
+    var(--chief-width);
+  grid-template-rows: 1fr var(--statusbar-height);
   grid-template-areas:
     "rail projectnav main chief"
     "status statusbar statusbar statusbar";
   height: 100vh;
   background: var(--bg-base);
+  transition: grid-template-columns 0.18s ease;
+}
+
+/* projectnav modes */
+.shell.projectnav-compact {
+  --projectnav-width: 64px;
+}
+.shell.projectnav-hidden {
+  --projectnav-width: 0px;
+}
+
+/* chief panel modes */
+.shell.chief-compact {
+  --chief-width: 64px;
+}
+.shell.chief-hidden {
+  --chief-width: 0px;
 }
 
 /* === Rail === */
@@ -19,6 +53,7 @@
   align-items: center;
   padding: 8px 0;
   gap: 2px;
+  overflow: hidden;
 }
 .rail-brand {
   width: 36px; height: 36px;
@@ -61,6 +96,18 @@
 .rail-dot-error { background: var(--state-error); }
 .rail-dot-info { background: var(--text-muted); }
 
+.rail-recover {
+  width: 36px; height: 36px;
+  border-radius: 4px;
+  border: 1px solid var(--accent-line);
+  background: var(--bg-elevated);
+  color: var(--accent-gold);
+  font-size: 16px;
+  cursor: pointer;
+  margin: 6px 0;
+}
+.rail-recover:hover { background: rgba(201, 162, 91, 0.12); }
+
 /* === ProjectNav === */
 .projectnav {
   grid-area: projectnav;
@@ -69,13 +116,15 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 .projectnav-header {
   height: var(--size-header);
   display: flex;
   align-items: center;
-  padding: 0 14px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--accent-line);
+  gap: 6px;
 }
 .projectnav-title {
   font-size: 13px;
@@ -93,6 +142,19 @@
   border-radius: 3px;
 }
 .projectnav-add:hover { background: var(--bg-elevated); color: var(--accent-gold); }
+.projectnav-toggle {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.projectnav-toggle:hover { background: var(--bg-elevated); color: var(--accent-gold); }
+
 .projectnav-list {
   flex: 1;
   overflow-y: auto;
@@ -152,6 +214,53 @@
   color: var(--text-muted);
 }
 
+/* compact: just a vertical strip of first-letter avatars with status dot */
+.projectnav-compact-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.projectnav-compact-item {
+  position: relative;
+  width: 40px; height: 40px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+.projectnav-compact-item:hover { background: var(--bg-elevated); }
+.projectnav-compact-item.active {
+  background: rgba(201, 162, 91, 0.08);
+  border-color: rgba(201, 162, 91, 0.25);
+  color: var(--accent-gold);
+}
+.projectnav-compact-initial { font-family: var(--font-serif); }
+.projectnav-compact-dot {
+  position: absolute;
+  bottom: 4px; right: 4px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+}
+.projectnav-compact-dot-ok { background: var(--state-ok); }
+.projectnav-compact-dot-warn { background: var(--state-warn); }
+.projectnav-compact-dot-error { background: var(--state-error); }
+.projectnav-compact-dot-info { background: var(--text-muted); }
+.projectnav-compact-empty {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  border-radius: 4px;
+  border: 1px dashed var(--accent-line);
+}
+
 /* === Main === */
 .main {
   grid-area: main;
@@ -165,7 +274,7 @@
 /* === StatusBar === */
 .statusbar {
   grid-area: statusbar;
-  height: var(--size-statusbar);
+  height: var(--statusbar-height);
   background: var(--bg-rail);
   border-top: 1px solid var(--accent-line);
   display: flex;
@@ -186,7 +295,10 @@
 .status-sep { color: var(--accent-line); }
 
 @media (max-width: 1100px) {
-  .shell { grid-template-columns: var(--size-rail) 1fr; grid-template-areas: "rail main" "statusbar statusbar"; }
+  .shell {
+    grid-template-columns: var(--rail-width) 1fr;
+    grid-template-areas: "rail main" "statusbar statusbar";
+  }
   .projectnav, .chief-panel { display: none; }
 }
 
@@ -200,6 +312,34 @@
   overflow: hidden;
   min-width: 0;
 }
+.chief-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 6px;
+}
+.chief-compact-expand {
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  padding: 6px 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 44px;
+}
+.chief-compact-expand:hover { background: var(--bg-elevated); color: var(--accent-gold); }
+.chief-compact-stack { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.chief-compact-label { font-size: 10px; }
+.chief-compact-dot { width: 6px; height: 6px; border-radius: 50%; }
+.chief-compact-dot-ok { background: var(--state-ok); }
+.chief-compact-dot-warn { background: var(--state-warn); }
+.chief-compact-dot-info { background: var(--text-muted); }
+
 .chief-header {
   height: var(--size-header);
   display: flex;
@@ -213,7 +353,9 @@
   background: linear-gradient(135deg, var(--accent-gold) 0%, var(--accent-gold-dim) 100%);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-serif); font-size: 14px; color: #1a1206; font-weight: 600;
+  flex-shrink: 0;
 }
+.chief-avatar.small { width: 26px; height: 26px; font-size: 12px; }
 .chief-title { font-size: 13px; }
 .chief-role { font-size: 11px; color: var(--text-muted); }
 .chief-sessions-bar {
@@ -221,6 +363,7 @@
   display: flex; align-items: center; gap: 8px;
   font-size: 11px; color: var(--text-muted);
   border-bottom: 1px solid var(--accent-line-soft);
+  overflow-x: auto;
 }
 .chief-sessions-bar .new-btn {
   margin-left: auto;
@@ -233,6 +376,17 @@
   cursor: pointer;
 }
 .chief-sessions-bar .new-btn:hover { background: var(--bg-elevated); }
+.chief-cycle-btn {
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.chief-cycle-btn:hover { background: var(--bg-elevated); color: var(--accent-gold); }
+
 .chief-messages {
   flex: 1; overflow: auto; padding: 16px;
   display: flex; flex-direction: column; gap: 14px;
@@ -266,3 +420,33 @@
   display: flex; gap: 8px;
 }
 .chief-input input { flex: 1; }
+
+/* P0-UI-4: Quick-start grid shown when no messages exist yet. */
+.chief-quickstart {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chief-quickstart-head { display: flex; flex-direction: column; gap: 4px; }
+.chief-quickstart-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.chief-quickstart-item {
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.12s;
+}
+.chief-quickstart-item:hover {
+  background: rgba(201, 162, 91, 0.08);
+  border-color: var(--accent-gold-dim);
+  color: var(--accent-gold);
+}

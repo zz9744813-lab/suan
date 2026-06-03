@@ -101,3 +101,59 @@
 .event-msg { color: var(--text-secondary); flex: 1; }
 .event-type-error { color: var(--state-error); border-color: rgba(201, 112, 112, 0.3); }
 .event-type-warn { color: var(--state-warn); border-color: rgba(212, 168, 90, 0.3); }
+
+/* ---------- Round 1: FailureDiagnosisCard (P1-UI-7) ---------- */
+.failure-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.failure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--accent-line-soft);
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+.failure-cell .k { margin-bottom: 4px; }
+.failure-cell .v { font-size: 13px; }
+.failure-section { display: flex; flex-direction: column; gap: 4px; }
+.failure-summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  user-select: none;
+}
+.failure-pre {
+  margin: 6px 0 0;
+  background: var(--bg-base);
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.failure-pre.faint { color: var(--text-muted); }
+.failure-suggestion {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(212, 168, 90, 0.08);
+  border-left: 2px solid var(--state-warn);
+  padding: 8px 10px;
+  border-radius: 2px;
+}
+.failure-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.failure-actions a.button {
+  text-decoration: none;
+}
