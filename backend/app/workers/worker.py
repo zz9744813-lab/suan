@@ -46,7 +46,30 @@ class WorkerController:
             self._stop.clear()
             self._pause_event.set()
             self._task = asyncio.create_task(self._run_forever(), name="novelforge-worker")
+        # R12.1 / P0-WORKER-1 fix: clear stale failure state from a
+        # previous run before the new loop starts. Otherwise the UI
+        # keeps showing "consecutive_failures=N", "current_task_id=X"
+        # and the last error from a run that may have happened hours
+        # (or days) ago, even though the user just clicked 启动 on a
+        # fresh process. See worker log around 2026-06-03 00:48 for
+        # the historical failure that prompted this fix.
+        await self._clear_stale_failure_state()
         await event_bus.publish(Event(event_type="worker.started", payload={}))
+
+    async def _clear_stale_failure_state(self) -> None:
+        """Reset WorkerStatus fields that track the PREVIOUS run.
+
+        Only runs on start(), never on resume() — pause/resume are
+        mid-run state transitions and we don't want to wipe evidence
+        of an in-flight problem.
+        """
+        async with session_scope() as db:
+            ws = await self._get_or_create_status(db)
+            ws.consecutive_failures = 0
+            ws.current_task_id = None
+            ws.last_error = None
+            ws.state = "running"
+            ws.last_heartbeat_at = datetime.utcnow()
 
     async def pause(self) -> None:
         self._pause_event.clear()
