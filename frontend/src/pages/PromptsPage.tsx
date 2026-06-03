@@ -3,12 +3,14 @@ import {
   listPromptTemplates, listPromptVersions, createPromptVersion, activatePromptVersion,
 } from "../api";
 import type { PromptTemplate, PromptVersion } from "../types";
+import { PromptVersionViewer } from "../components/prompts/PromptVersionViewer";
 
 export function PromptsPage() {
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [active, setActive] = useState<PromptTemplate | null>(null);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [editing, setEditing] = useState<{ body: string; note: string; activate: boolean } | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { listPromptTemplates().then(setTemplates).catch(() => {}); }, []);
@@ -18,6 +20,7 @@ export function PromptsPage() {
     const v = await listPromptVersions(t.id);
     setVersions(v);
     setEditing(null);
+    setSelectedVersionId(null);
   };
 
   const onSaveNewVersion = async () => {
@@ -31,6 +34,7 @@ export function PromptsPage() {
       });
       setVersions([v, ...versions]);
       setEditing(null);
+      setSelectedVersionId(v.id);
     } catch (e: any) { alert(e.message); }
     finally { setBusy(false); }
   };
@@ -46,6 +50,9 @@ export function PromptsPage() {
   for (const t of templates) {
     (byCategory[t.category] ??= []).push(t);
   }
+
+  const selectedVersion = versions.find((v) => v.id === selectedVersionId) ?? null;
+  const activeVersion = versions.find((v) => v.status === "active") ?? null;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100%", minHeight: 0 }}>
@@ -80,7 +87,7 @@ export function PromptsPage() {
             <div>选择左侧任意模板查看版本、起草新版本、或激活某个版本。</div>
           </div>
         ) : (
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="page-header">
               <div>
                 <h1>{active.name}</h1>
@@ -113,7 +120,14 @@ export function PromptsPage() {
             )}
 
             <div className="card">
-              <h3>版本历史 ({versions.length})</h3>
+              <h3>
+                版本历史 ({versions.length})
+                {selectedVersion && (
+                  <span className="muted small" style={{ marginLeft: 12, fontWeight: 400 }}>
+                    · 已选 v{selectedVersion.version} {selectedVersion.status === "active" && "· 当前激活"}
+                  </span>
+                )}
+              </h3>
               {versions.length === 0 ? (
                 <div className="muted">还没有版本。</div>
               ) : (
@@ -123,12 +137,19 @@ export function PromptsPage() {
                   </thead>
                   <tbody>
                     {versions.map((v) => (
-                      <tr key={v.id}>
+                      <tr
+                        key={v.id}
+                        onClick={() => setSelectedVersionId(v.id)}
+                        style={{
+                          cursor: "pointer",
+                          background: selectedVersionId === v.id ? "rgba(201, 162, 91, 0.1)" : undefined,
+                        }}
+                      >
                         <td className="mono">v{v.version}</td>
                         <td><span className={`pill ${v.status === "active" ? "succeeded" : v.status === "candidate" ? "pending" : "stopped"}`}>{v.status}</span></td>
                         <td className="muted small">{v.change_note ?? "—"}</td>
                         <td className="mono muted tiny">通过率 {(v.test_pass_rate * 100).toFixed(1)}% · 调用 {v.usage_count}</td>
-                        <td>
+                        <td onClick={(e) => e.stopPropagation()}>
                           {v.status !== "active" && (
                             <button onClick={() => onActivate(v.id)}>激活</button>
                           )}
@@ -138,7 +159,20 @@ export function PromptsPage() {
                   </tbody>
                 </table>
               )}
+              {versions.length > 0 && !selectedVersion && (
+                <div className="muted small" style={{ marginTop: 8 }}>
+                  👆 点表格里任一行查看该版本正文,或与当前激活版本对比。
+                </div>
+              )}
             </div>
+
+            {selectedVersion && (
+              <PromptVersionViewer
+                version={selectedVersion}
+                activeVersion={activeVersion}
+                onClose={() => setSelectedVersionId(null)}
+              />
+            )}
 
             {editing && (
               <div className="card">
