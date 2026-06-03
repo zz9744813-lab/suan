@@ -134,10 +134,21 @@ mock LLM:
 
 ## 下一步
 
-- [ ] Memory Agent(角色、硬事实、伏笔)的增量化写入
-- [ ] 拆书 / 行为模式卡(Study / BehaviorPattern Agent)UI
+- [x] ~~Memory Agent(角色、硬事实、伏笔)的增量化写入~~ (Round 9, 知识库 UI + 8 个写接口)
+- [x] ~~拆书 / 行为模式卡(Study / BehaviorPattern Agent)UI~~ (Round 5)
 - [ ] 知识图谱(GraphRAG)页
-- [ ] 讨论室(DiscussionRoom)多人轮换
-- [ ] Frontend:章节对比视图(左稿纸 / 右建议)
-- [ ] Docker compose(PostgreSQL + 后端 + 前端 nginx)
+- [x] ~~讨论室(DiscussionRoom)多人轮换~~ (Round 7)
+- [x] ~~章节对比视图(左稿纸 / 右建议)~~ (Round 6)
+- [x] ~~Docker compose(PostgreSQL + 后端 + 前端 nginx)~~ (Round 8, SQLite 默认, Postgres 可切)
 - [ ] 多用户与权限
+
+## Docker 部署
+
+```bash
+cp .env.example .env   # 改 NOVELFORGE_API_KEY
+docker compose up -d --build
+# 浏览器打开 http://localhost:8080
+```
+
+数据存于 named volume `novelforge_data`,删除用 `docker compose down -v`。
+SQLite 适合单作者 / 小团队;想换 Postgres 改 `.env` 的 `DATABASE_URL` 即可,后端代码无依赖。

@@ -43,9 +43,14 @@ from app.schemas.prompt import (
     PromptVersionUpdate,
 )
 from app.schemas.memory import (
+    MemoryCharacterCreate,
     MemoryCharacterRead,
     MemoryCharacterStateRead,
+    MemoryCharacterUpdate,
+    MemoryForeshadowCreate,
     MemoryForeshadowRead,
+    MemoryForeshadowUpdate,
+    MemoryHardFactCreate,
     MemoryHardFactRead,
 )
 from app.schemas.chief_agent import (
@@ -111,6 +116,11 @@ __all__ = [
     "MemoryCharacterStateRead",
     "MemoryForeshadowRead",
     "MemoryHardFactRead",
+    "MemoryCharacterCreate",
+    "MemoryCharacterUpdate",
+    "MemoryForeshadowCreate",
+    "MemoryForeshadowUpdate",
+    "MemoryHardFactCreate",
     "ChiefAgentAction",
     "ChiefAgentChatRequest",
     "ChiefAgentMessageRead",
