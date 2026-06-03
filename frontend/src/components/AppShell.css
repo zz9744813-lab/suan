@@ -317,10 +317,34 @@
 .main {
   grid-area: main;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  /* R11 (P0-UI-5): grid with explicit rows so the search bar takes
+   * its content height and the page content gets exactly the
+   * remaining vertical space. Children that use ``height: 100%``
+   * will resolve to 100% of row 2 (the 1fr track) and not the
+   * whole .main height, which is what they need. */
+  display: grid;
+  grid-template-rows: auto 1fr;
   background: var(--bg-base);
   min-width: 0;
+}
+
+/* R11 (P0-UI-5): global search bar pinned at the top of the main
+ * column. Row 1 of the .main grid. */
+.main-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--accent-line);
+  position: relative;
+  z-index: 50;
+}
+
+/* Page content (the {children} of <main>) takes row 2. */
+.main > *:not(.main-topbar) {
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* === StatusBar === */

@@ -9,6 +9,7 @@ import { ChiefAgentPanel } from "./ChiefAgentPanel";
 import { ProjectNav } from "./project/ProjectNav";
 import { RailNav } from "./layout/RailNav";
 import { BottomStatusBar } from "./layout/BottomStatusBar";
+import { GlobalSearch } from "./layout/GlobalSearch";
 import { formatThousands } from "../lib/format";
 import "./AppShell.css";
 
@@ -121,7 +122,12 @@ export function AppShell({ children }: Props) {
         </aside>
       )}
 
-      <main className="main">{children}</main>
+      <main className="main">
+        <div className="main-topbar">
+          <GlobalSearch />
+        </div>
+        {children}
+      </main>
 
       {chiefMode !== "hidden" && (
         <ChiefAgentPanel
