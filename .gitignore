@@ -1,0 +1,96 @@
+# ── secrets / local config ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.yaml
+
+# ── python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── node / vite / frontend ──────────────────────────────────
+node_modules/
+.vite/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+.yarn/
+yarn-error.log
+npm-debug.log*
+
+# ── database / sqlite (NEVER commit DB) ─────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# ── logs / runtime ──────────────────────────────────────────
+*.log
+logs/
+data/logs/
+data/storage/
+backend_run.log
+worker.log
+uvicorn.log
+
+# ── test artifacts (response dumps, json snapshots) ─────────
+*_response.txt
+*_test.txt
+planner_template_dump.txt
+drafter_template.txt
+rewriter_template.txt
+actual_planner_prompt.txt
+actual_planner_response.txt
+deepseek_planner.txt
+drafter_response.txt
+rewriter_response.txt
+planner_response.txt
+llm_test*.txt
+task*_*.txt
+final*.txt
+p10.json
+queue_resp.json
+s38.json
+steps37.json
+ws.json
+p10.json
+*_steps.json
+
+# ── editor / os junk ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── dev-only scripts (kept under test_*.py, this excludes the
+#    diagnostic one-off dumps) ───────────────────────────────
+p10.json
