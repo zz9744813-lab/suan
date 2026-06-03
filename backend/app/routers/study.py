@@ -38,15 +38,17 @@ router = APIRouter(prefix="/study", tags=["study"])
 
 # -------------------- chapterize helpers --------------------
 
-# Chinese: "第N章" with optional whitespace between EVERY token.
-# The old regex was `^\s*第([零〇...0-9]+)章[...]*(.{0,80})` which
-# required the digit to be glued to 「第」 with no whitespace — the
-# common case is "第 1 章 起点" (space after 第) and that never
-# matched, so every upload fell back to the single-chapter "全文"
-# path. The fix: optional \s* between 第, the number, 章, and the
-# title.
+# Chinese: "第N章 / 第N节 / 第N卷 / 第N回" with optional whitespace
+# between every token. The original regex only matched "第N章", which
+# left popular web novels (e.g. 蛊真人 uses "第NNN节：xxx") falling
+# through to the single-chapter "全文" fallback.
+#
+# We capture the suffix char in group 2 so ``_chunks_from_matches``
+# can echo it back in the title — "第 12 节" is meaningfully
+# different from "第 12 章" and the user can see at a glance which
+# a given book uses.
 _CN_CHAPTER_RE = re.compile(
-    r"^\s*第\s*([零〇一二三四五六七八九十百千万0-9]+)\s*章[\s　\.：:—\-]*(.{0,80})$",
+    r"^\s*第\s*([零〇一二三四五六七八九十百千万0-9]+)\s*([章节卷回])[\s　\.：:—\-]*(.{0,80})$",
     re.MULTILINE,
 )
 # English: "Chapter 1" / "Chapter 1: Foo" / "CHAPTER ONE" / "Chapter One"
@@ -151,11 +153,15 @@ def _chunks_from_matches(
                 first_real_index = 1
         else:
             first_real_index = 1
-        # Title: capture group 1 is the number, group 2 is the optional
-        # name. We also include the original header line in the content
-        # so the user can see the full chapter start.
+        # Title: capture group 1 is the number, group 2 is the
+        # suffix char (章/节/卷/回) — we echo that back in the
+        # title so the user can see which book convention this is,
+        # group 3 is the optional chapter name. We also include
+        # the original header line in the content so the user can
+        # see the full chapter start.
         num = m.group(1)
-        title = (m.group(2) or "").strip()
+        suffix = m.group(2) or "章"
+        title = (m.group(3) or "").strip()
         if cn_mode:
             try:
                 num_int = _cn_to_int(num)
@@ -169,7 +175,7 @@ def _chunks_from_matches(
         # Cap the title length.
         if len(title) > 60:
             title = title[:60] + "…"
-        full_title = f"第 {num_int} 章" + (f" · {title}" if title else "")
+        full_title = f"第 {num_int} {suffix}" + (f" · {title}" if title else "")
         # Prepend the original header line so the chunk is searchable.
         full_body = (m.group(0).rstrip() + "\n" + body).strip()
         out.append((first_real_index + (num_int - 1 if i > 0 or first_real_index == 1 else 0), full_title, full_body))
@@ -687,6 +693,12 @@ async def chapterize_material(
     for c in list(row.chapters):
         await db.delete(c)
     await db.flush()
+    # R20 fix: count the new chapters in a local var instead of
+    # ``len(row.chapters)`` — after ``selectinload`` the relationship
+    # collection still holds the deleted-but-not-evicted old entries,
+    # so ``len(row.chapters)`` was returning 2× (old + new). Tracking
+    # the loop count ourselves sidesteps the stale-collection bug.
+    created = 0
     for idx, title, content in chunks:
         if len(content) < body.min_chapter_chars:
             # Skip tiny fragments — they're likely false positives.
@@ -697,10 +709,21 @@ async def chapterize_material(
             content=content,
             char_count=len(content),
         ))
-    row.chapter_count = len(row.chapters)
+        created += 1
+    row.chapter_count = created
     row.status = "ready"
     row.error = None
     await db.flush()
+    # R20 fix: ``row.chapters`` is a relationship collection that was
+    # ``selectinload``-ed at the top, then the wipe loop marked old
+    # entries for deletion. The collection still holds those deleted
+    # references until the session expires them. We could refresh
+    # the attribute (one extra SELECT for 2K+ chapters), or we can
+    # just return an empty chapters list in the response — the user
+    # pulls the fresh list from ``/api/study/materials/{id}/chapters``
+    # anyway. We choose the empty-list path: cheaper, and the
+    # response carries the summary fields (chapter_count, status) the
+    # UI actually needs to confirm the chapterize succeeded.
     return {"ok": True, "data": StudyMaterialDetail(
         id=row.id, project_id=row.project_id, title=row.title, author=row.author,
         source=row.source, status=row.status, error=row.error,
@@ -708,7 +731,7 @@ async def chapterize_material(
         raw_text_length=len(row.raw_text or ""), extra=row.extra,
         created_at=row.created_at, updated_at=row.updated_at,
         raw_text="",
-        chapters=[StudyChapterRead.model_validate(c) for c in row.chapters],
+        chapters=[],
         characters=[StudyCharacterRead.model_validate(c) for c in row.characters],
     )}
 

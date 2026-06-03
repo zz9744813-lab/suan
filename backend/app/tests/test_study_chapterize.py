@@ -88,6 +88,68 @@ def test_utf16_le_bom():
     assert "第 1 章" in text or "第 1 章 起点" in text, f"UTF-16 LE not decoded: {text[:20]!r}"
 
 
+def test_chinese_section_splitter():
+    """R20 fix: 蛊真人 and many web novels use ``第NNN节：xxx``
+    instead of ``第N章``. The regex now accepts [章节卷回] as
+    the suffix char. Make sure ``_split_chapters`` produces N
+    chunks for a 3-节 sample and that the suffix is echoed back
+    in the title (so the user can see the book convention at a
+    glance, not just the chapter number)."""
+    text = (
+        "第001节：纵身亡魔心仍不悔\n" + ("字" * 300) + "\n\n"
+        "第002节：逆光阴五百年觉悟\n" + ("字" * 300) + "\n\n"
+        "第003节：请一边玩蛋去\n" + ("字" * 300)
+    )
+    chunks = _split_chapters(text, pattern="chinese")
+    assert len(chunks) == 3, f"expected 3 chapters, got {len(chunks)}: {[t for _, t, _ in chunks]}"
+    titles = [t for _, t, _ in chunks]
+    # Suffix must be 节, not 章, so the user can see the book's
+    # convention from the chapter tree.
+    assert all("节" in t for t in titles), f"titles should use 节 suffix, got {titles}"
+    assert "纵身亡魔心仍不悔" in titles[0]
+    assert "逆光阴五百年觉悟" in titles[1]
+    assert "请一边玩蛋去" in titles[2]
+
+
+def test_chinese_volume_and_hui():
+    """R20 fix: ``第N卷`` (used in 修仙 / 玄幻 multi-volume works)
+    and ``第N回`` (used in some 日轻 translations) should also
+    match. Cover both in one test so a future change that drops
+    one of the suffix chars is caught."""
+    text = (
+        "第1卷 天元崛起\n" + ("字" * 300) + "\n\n"
+        "第1回 异世界召唤\n" + ("字" * 300) + "\n\n"
+        "第2回 圣剑之谜\n" + ("字" * 300)
+    )
+    matches = list(_CN_CHAPTER_RE.finditer(text))
+    assert len(matches) == 3, f"expected 3 matches, got {len(matches)}"
+    sufs = [m.group(2) for m in matches]
+    assert sufs == ["卷", "回", "回"], f"expected [卷, 回, 回], got {sufs}"
+    # Splitter produces 3 chunks with the right suffix in each title.
+    chunks = _split_chapters(text, pattern="chinese")
+    assert len(chunks) == 3
+    titles = [t for _, t, _ in chunks]
+    assert "卷" in titles[0]
+    assert titles[1].endswith("回 · 异世界召唤") or "回" in titles[1]
+
+
+def test_chinese_mixed_chapter_and_section():
+    """R20 fix: some books mix 章 and 节 (章 for major arcs, 节
+    for sub-arcs). Make sure both kinds are detected and the
+    suffix is preserved per-chunk."""
+    text = (
+        "第1章 开篇\n" + ("字" * 250) + "\n\n"
+        "第1节 起始\n" + ("字" * 250) + "\n\n"
+        "第2节 转折\n" + ("字" * 250)
+    )
+    chunks = _split_chapters(text, pattern="chinese")
+    assert len(chunks) == 3, f"expected 3 chunks, got {len(chunks)}"
+    titles = [t for _, t, _ in chunks]
+    assert "第 1 章" in titles[0]
+    assert "第 1 节" in titles[1]
+    assert "第 2 节" in titles[2]
+
+
 if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")
@@ -97,6 +159,9 @@ if __name__ == "__main__":
         test_chinese_chapter_with_space,
         test_chinese_chapter_no_space,
         test_utf16_le_bom,
+        test_chinese_section_splitter,
+        test_chinese_volume_and_hui,
+        test_chinese_mixed_chapter_and_section,
     ]
     failed = 0
     for t in tests:
