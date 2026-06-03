@@ -1,0 +1,74 @@
+/* =========================================================================
+   NovelForge 2.0 — Concept B design tokens
+   ------------------------------------------------------------------------
+   Cold efficient workbench palette (Linear / Vercel / Raycast direction).
+   Main work area is LIGHT, side panels (rail, chief) stay DARK for
+   contrast. Primary accent is blue → violet gradient. Status colors are
+   semantic green / orange / red.
+
+   All variable names are KEPT from the prior dark-editorial scheme so
+   existing component CSS (e.g. ``var(--accent-gold)``) recolors in place.
+   ========================================================================= */
+
+:root {
+  /* ---- backgrounds (light main + dark rail) ---- */
+  --bg-base: #f4f7fb;            /* main canvas — light cool grey */
+  --bg-rail: #101827;            /* left rail — deep navy */
+  --bg-panel: #ffffff;           /* side panel surface — white */
+  --bg-elevated: #ffffff;        /* elevated card surface */
+  --bg-card: #ffffff;            /* default card */
+  --bg-paper: #fbfcfd;           /* manuscript / reading surface */
+  --bg-paper-soft: #f0f4f8;
+
+  /* ---- lines / dividers ---- */
+  --accent-line: rgba(39, 52, 75, 0.10);
+  --accent-line-soft: rgba(39, 52, 75, 0.05);
+
+  /* ---- text (dark on light main, used as ink elsewhere) ---- */
+  --text-primary: #18202d;       /* main ink */
+  --text-secondary: #4a5868;     /* secondary ink */
+  --text-muted: #8a96a8;         /* tertiary ink */
+  --ink: #18202d;                /* reading text on paper */
+  --ink-soft: #4a5868;           /* secondary reading text */
+
+  /* ---- accent (replaces the old gold: now blue→violet) ---- */
+  --accent-gold: #3f7cff;        /* primary blue */
+  --accent-gold-soft: #6f97ff;   /* lighter blue */
+  --accent-gold-dim: #255cf4;    /* deep blue */
+  --accent-violet: #7b61ff;      /* gradient partner */
+  --accent-cyan: #23b7d8;        /* info accent */
+
+  /* ---- semantic state colors ---- */
+  --state-ok: #20b486;           /* green — running / succeeded */
+  --state-warn: #f59e0b;         /* orange — paused / warning */
+  --state-error: #ee4d5a;        /* red — failed / error */
+  --state-info: #3f7cff;         /* blue — info / selected */
+
+  /* ---- nav panel (dark) ---- */
+  --nav-bg: #101827;             /* left rail */
+  --nav-bg2: #172033;            /* right chief panel */
+  --nav-ink: #d9e5f6;            /* text on dark panels */
+  --nav-muted: #8090a8;          /* muted text on dark panels */
+
+  /* ---- sizes (unchanged) ---- */
+  --size-rail: 56px;
+  --size-projectnav: 260px;
+  --size-chief: 380px;
+  --size-statusbar: 28px;
+  --size-header: 44px;
+
+  /* ---- radius / shadow / fonts ---- */
+  --radius: 6px;
+  --radius-lg: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(15, 23, 39, 0.04), 0 4px 16px rgba(15, 23, 39, 0.06);
+  --shadow2: 0 8px 24px rgba(15, 23, 39, 0.10);
+
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: "Source Serif Pro", "Noto Serif SC", Georgia, serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+
+  /* ---- primary button gradient (blue→violet) ---- */
+  --grad-primary: linear-gradient(135deg, #3f7cff 0%, #7b61ff 100%);
+  --grad-primary-hover: linear-gradient(135deg, #4a87ff 0%, #876eff 100%);
+}

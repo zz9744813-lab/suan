@@ -1,0 +1,124 @@
+/* RailNav — leftmost 56px dark vertical nav.
+   Concept B: deep navy background, white-on-blue active state.
+   Lives in components/layout/ but the visual rules stay in
+   AppShell.css for now (the AppShell grid still owns the .rail
+   area shape). */
+
+.rail {
+  background: var(--nav-bg);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.rail-brand {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 16px;
+  color: #ffffff;
+  background: var(--grad-primary);
+  border: 0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  user-select: none;
+  letter-spacing: -0.02em;
+}
+
+.rail-spacer { flex: 1; }
+
+.rail-divider {
+  width: 24px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 8px 0;
+}
+
+.rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  color: var(--nav-muted);
+  text-decoration: none;
+  font-size: 11px;
+  gap: 2px;
+  transition: all 0.12s;
+  position: relative;
+}
+.rail-item-icon { font-size: 18px; line-height: 1; }
+.rail-item-label { font-size: 10px; }
+.rail-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--nav-ink); }
+.rail-item.active {
+  color: #ffffff;
+  background: rgba(63, 124, 255, 0.30);
+}
+.rail-item.active::before {
+  /* Subtle blue accent strip on the left edge of the active item. */
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--grad-primary);
+  border-radius: 0 2px 2px 0;
+}
+
+.rail-recover {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--nav-ink);
+  font-size: 16px;
+  cursor: pointer;
+  margin: 6px 0;
+  padding: 0;
+}
+.rail-recover:hover { background: rgba(63, 124, 255, 0.20); }
+
+.rail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin: 8px 0;
+  position: relative;
+}
+.rail-dot-ok {
+  background: var(--state-ok);
+  box-shadow: 0 0 6px var(--state-ok);
+}
+.rail-dot-warn { background: var(--state-warn); }
+.rail-dot-error { background: var(--state-error); }
+.rail-dot-info { background: var(--nav-muted); }
+
+.rail-dot-tooltip {
+  position: absolute;
+  left: calc(100% + 12px);
+  bottom: 0;
+  background: var(--nav-bg2);
+  color: var(--nav-ink);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rail-dot:hover .rail-dot-tooltip { opacity: 1; }

@@ -7,21 +7,21 @@ import { useChiefStore } from "../stores/chiefStore";
 import { useLayoutStore } from "../stores/layoutStore";
 import { ChiefAgentPanel } from "./ChiefAgentPanel";
 import { ProjectNav } from "./project/ProjectNav";
+import { RailNav } from "./layout/RailNav";
+import { BottomStatusBar } from "./layout/BottomStatusBar";
+import { formatThousands } from "../lib/format";
 import "./AppShell.css";
 
 type Props = { children: ReactNode };
 
-// 4-zone layout per UI/UX spec:
-//   ┌──[Rail]──[ProjectNav]──[Main content]──[ChiefAgent]──┐
-//   │              │            │                │           │
-//   │  icon nav    │  list      │  pages         │  right    │
-//   │  56px        │  260px     │  flex          │  380px    │
-//   └───────────────────────────────────────────────────────┘
-//   [Status bar — 28px]
+// R6 + R7: 4-zone responsive grid with three-mode side panels.
+//   ┌──[RailNav]──[ProjectNav]──[Main]──[ChiefPanel]──┐
+//   └──────────────[BottomStatusBar]──────────────────┘
 //
-// P0-UI-1 + P0-UI-4: each side panel has three modes (expanded /
-// compact / hidden), persisted in localStorage. CSS variables drive
-// the actual widths — see AppShell.css for the grid math.
+// R6 introduced the Concept B color tokens (light main, dark rail).
+// R7 extracted the rail + status bar into their own components;
+// AppShell now only handles the grid + project library + chief panel
+// mounting.
 export function AppShell({ children }: Props) {
   useSSE();
   const refreshProjects = useProjectStore((s) => s.refresh);
@@ -30,10 +30,6 @@ export function AppShell({ children }: Props) {
   const selectProject = useProjectStore((s) => s.selectProject);
 
   const startWorkerPolling = useWorkerStore((s) => s.startPolling);
-  const workerState = useWorkerStore((s) => s.status?.state ?? "idle");
-  const todayWords = useWorkerStore((s) => s.status?.today_words ?? 0);
-  const todayCost = useWorkerStore((s) => s.status?.today_cost_usd ?? 0);
-  const lastError = useWorkerStore((s) => s.status?.last_error ?? null);
 
   const chiefReset = useChiefStore((s) => s.reset);
 
@@ -41,34 +37,23 @@ export function AppShell({ children }: Props) {
   const chiefPanelMode = useLayoutStore((s) => s.chiefPanelMode);
   const cycleProjectNav = useLayoutStore((s) => s.cycleProjectNav);
   const cycleChiefPanel = useLayoutStore((s) => s.cycleChiefPanel);
-  const setProjectNavMode = useLayoutStore((s) => s.setProjectNavMode);
-  const setChiefPanelMode = useLayoutStore((s) => s.setChiefPanelMode);
 
   const location = useLocation();
   const chiefIsForced = !location.pathname.startsWith("/dashboard")
     && !location.pathname.startsWith("/projects");
-  // The chief panel is route-gated: on /tasks, /worker, /models, /prompts
-  // we hide it entirely. On /dashboard and /projects it follows the
-  // user's mode choice.
+  // The chief panel is route-gated: on /tasks, /worker, /models,
+  // /prompts, /study we hide it entirely. On /dashboard and /projects
+  // it follows the user's mode choice.
   const chiefMode = chiefIsForced ? "hidden" : chiefPanelMode;
 
+  useEffect(() => { refreshProjects(); }, [refreshProjects]);
+  useEffect(() => { startWorkerPolling(); }, [startWorkerPolling]);
   useEffect(() => {
-    refreshProjects();
-  }, [refreshProjects]);
-
-  useEffect(() => {
-    startWorkerPolling();
-  }, [startWorkerPolling]);
-
-  useEffect(() => {
-    // Reset chief session when the project changes so the panel pulls a
-    // fresh conversation.
     chiefReset();
   }, [currentProjectId, chiefReset]);
 
   const currentProject = projects.find((p) => p.id === currentProjectId);
 
-  // Build the className stack that drives the CSS grid widths.
   const shellClass = [
     "shell",
     `projectnav-${projectNavMode}`,
@@ -77,34 +62,8 @@ export function AppShell({ children }: Props) {
 
   return (
     <div className={shellClass}>
-      {/* === Rail (leftmost, 56px) === */}
-      <nav className="rail">
-        <div className="rail-brand" title="NovelForge 2.0">NF</div>
-        <div className="rail-spacer" />
-        <RailItem to="/dashboard" label="工作台" icon="◧" />
-        <RailItem to="/projects" label="项目" icon="≡" />
-        <RailItem to="/tasks" label="任务" icon="▤" />
-        <RailItem to="/worker" label="Worker" icon="▶" />
-        <div className="rail-divider" />
-        <RailItem to="/prompts" label="Prompt" icon="✎" />
-        <RailItem to="/models" label="模型" icon="◈" />
-        <RailItem to="/study" label="拆书" icon="☷" />
-        <div className="rail-spacer" />
-        {/* ProjectNav recover button — only when fully hidden */}
-        {projectNavMode === "hidden" && (
-          <button
-            className="rail-recover"
-            onClick={() => setProjectNavMode("expanded")}
-            title="恢复项目栏"
-            aria-label="恢复项目栏"
-          >
-            ≡
-          </button>
-        )}
-        <div className={`rail-dot rail-dot-${stateColor(workerState)}`} title={`Worker: ${workerState}`} />
-      </nav>
+      <RailNav />
 
-      {/* === ProjectNav === */}
       {projectNavMode !== "hidden" && (
         <aside className="projectnav">
           <div className="projectnav-header">
@@ -130,22 +89,18 @@ export function AppShell({ children }: Props) {
 
           {projectNavMode === "expanded" ? (
             <>
-              {/* Round 2: ProjectNav owns the project list (grouped,
-                  searchable, drag-to-reorder). The footer with the
-                  project's word/chapter targets stays in AppShell. */}
               <ProjectNav />
               {currentProject && (
                 <div className="projectnav-footer">
                   <div className="row small">
                     <span className="muted">目标</span>
                     <span className="spacer" />
-                    <span className="mono">{formatNumber(currentProject.target_word_count)}字 / {currentProject.target_chapter_count}章</span>
+                    <span className="mono">{formatThousands(currentProject.target_word_count)}字 / {currentProject.target_chapter_count}章</span>
                   </div>
                 </div>
               )}
             </>
           ) : (
-            /* compact mode: vertical icon strip of projects, status dot only */
             <div className="projectnav-compact-list">
               {projects.map((p) => (
                 <button
@@ -156,7 +111,6 @@ export function AppShell({ children }: Props) {
                   aria-label={p.name}
                 >
                   <span className="projectnav-compact-initial">{p.name.slice(0, 1)}</span>
-                  <span className={`projectnav-compact-dot projectnav-compact-dot-${stateColor(p.status)}`} />
                 </button>
               ))}
               {projects.length === 0 && (
@@ -167,10 +121,8 @@ export function AppShell({ children }: Props) {
         </aside>
       )}
 
-      {/* === Main content === */}
       <main className="main">{children}</main>
 
-      {/* === ChiefAgent (right) === */}
       {chiefMode !== "hidden" && (
         <ChiefAgentPanel
           projectId={currentProjectId}
@@ -179,52 +131,7 @@ export function AppShell({ children }: Props) {
         />
       )}
 
-      {/* === StatusBar (28px) === */}
-      <footer className="statusbar">
-        <span className={`status-dot status-dot-${stateColor(workerState)}`} />
-        <span>Worker: <b>{workerState}</b></span>
-        <span className="status-sep" />
-        <span>今日 <b className="mono">{formatNumber(todayWords)}</b> 字</span>
-        <span className="status-sep" />
-        <span>今日成本 <b className="mono">${todayCost.toFixed(3)}</b></span>
-        {lastError && (
-          <>
-            <span className="status-sep" />
-            <span className="error ellipsis" title={lastError}>最近错误：{lastError.slice(0, 60)}</span>
-          </>
-        )}
-        <span className="spacer" />
-        {currentProject ? (
-          <span>当前项目：<b className="gold">{currentProject.name}</b></span>
-        ) : (
-          <span className="muted">未选择项目</span>
-        )}
-      </footer>
+      <BottomStatusBar />
     </div>
   );
-}
-
-function RailItem({ to, label, icon }: { to: string; label: string; icon: string }) {
-  return (
-    <NavLink
-      to={to}
-      className={({ isActive }) => `rail-item ${isActive ? "active" : ""}`}
-      title={label}
-    >
-      <span className="rail-item-icon">{icon}</span>
-      <span className="rail-item-label">{label}</span>
-    </NavLink>
-  );
-}
-
-function stateColor(state: string): "ok" | "warn" | "error" | "info" {
-  if (state === "running") return "ok";
-  if (state === "paused" || state === "paused_budget") return "warn";
-  if (state === "error" || state === "stopped") return "error";
-  return "info";
-}
-
-function formatNumber(n: number): string {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
-  return n.toLocaleString();
 }

@@ -1,0 +1,52 @@
+/* BottomStatusBar — 28px strip at the bottom of the AppShell.
+   Light surface, dark text. Shows: Worker state / today words /
+   today cost / last error / current project. */
+
+.statusbar {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  gap: 8px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--accent-line);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot-ok { background: var(--state-ok); }
+.status-dot-warn { background: var(--state-warn); }
+.status-dot-error { background: var(--state-error); }
+.status-dot-info { background: var(--text-muted); }
+
+.status-sep {
+  color: var(--accent-line);
+  margin: 0 2px;
+}
+
+.statusbar-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusbar-error {
+  color: var(--state-error);
+  max-width: 280px;
+}
+
+.statusbar-project {
+  color: var(--text-secondary);
+}
+
+.statusbar-project b {
+  color: var(--accent-gold);
+  font-weight: 500;
+}
