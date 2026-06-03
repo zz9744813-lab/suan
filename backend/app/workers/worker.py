@@ -111,18 +111,12 @@ class WorkerController:
                 ws.today_cost_usd = 0.0
                 ws.last_reset_date = today
 
-            # budget check
-            policy = await self._active_policy(db)
-            if (
-                policy
-                and ws.today_cost_usd >= policy.daily_budget_usd
-                and policy.daily_budget_usd > 0
-            ):
-                # pause until tomorrow
-                await self._set_state_in_session(db, "paused_budget")
-                return False
-
-            # pick next queued task
+            # P1-2 fix: pick the next task FIRST, then load its
+            # project's policy. Previously the worker called
+            # ``_active_policy(db)`` with ``project_id=None`` which
+            # always returned None, so the budget / word-goal checks
+            # were never enforced. Now we resolve policy against the
+            # task's own project_id.
             task_row = (
                 await db.execute(
                     select(AgentTask)
@@ -133,6 +127,26 @@ class WorkerController:
             ).scalar_one_or_none()
             if task_row is None:
                 await self._heartbeat(db, ws)
+                return False
+
+            # resolve the project policy now that we know the task
+            policy = await self._active_policy(db, task_row.project_id)
+            if policy is None:
+                policy = await self._ensure_default_policy(db, task_row.project_id)
+
+            # budget check (now correctly scoped to the task's project)
+            if (
+                policy.daily_budget_usd > 0
+                and ws.today_cost_usd >= policy.daily_budget_usd
+            ):
+                # pause until tomorrow
+                await self._set_state_in_session(db, "paused_budget")
+                return False
+            if (
+                policy.daily_word_goal > 0
+                and ws.today_words >= policy.daily_word_goal
+            ):
+                await self._set_state_in_session(db, "paused_goal")
                 return False
 
             task_row.status = "running"
@@ -153,6 +167,7 @@ class WorkerController:
         target_task_id = task_row.id
         project_id = task_row.project_id
         chapter_id = task_row.chapter_id
+        chapter_no = chapter.chapter_no
         # Hard upper bound on total pipeline wall time. Per-agent LLM
         # calls already have a 600s read timeout × 2 retries, so a
         # well-behaved run finishes in <10 min. Anything beyond 30 min
@@ -182,15 +197,88 @@ class WorkerController:
                 task.output_tokens = result.total_output_tokens
                 ws2.current_task_id = None
                 await db.flush()
-        except Exception as exc:
+
+            # P1-1 fix: on success, enqueue the next chapter task so
+            # the worker keeps producing 24/7. We do this in a fresh
+            # session so the previous transaction is fully committed
+            # and the new task is visible to the next tick.
+            if policy.auto_continue:
+                from app.services.chapter_queue import ChapterQueueService
+                async with session_scope() as db:
+                    policy2 = await self._active_policy(db, project_id)
+                    if policy2 is None:
+                        policy2 = await self._ensure_default_policy(db, project_id)
+                    next_task = await ChapterQueueService().enqueue_next_chapter_if_needed(
+                        db,
+                        project_id=project_id,
+                        current_chapter_no=chapter_no,
+                        policy=policy2,
+                    )
+                    if next_task is None:
+                        # No outline for the next chapter — surface a
+                        # "waiting for outline" hint so the UI can
+                        # prompt the user.
+                        await self._emit_event(
+                            "worker.waiting_for_outline",
+                            {
+                                "project_id": project_id,
+                                "next_chapter_no": chapter_no + 1,
+                                "message": f"第 {chapter_no} 章已完成，等待第 {chapter_no + 1} 章大纲。",
+                            },
+                        )
+                    else:
+                        await self._emit_event(
+                            "worker.auto_continue_enqueued",
+                            {
+                                "project_id": project_id,
+                                "next_chapter_no": chapter_no + 1,
+                                "task_id": next_task.id,
+                            },
+                        )
+        except asyncio.TimeoutError:
+            # P1-3-ish: pipeline exceeded wall-clock budget. Mark the
+            # task as failed with a clear reason so the user can retry.
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
                 t.status = "failed"
-                t.error = str(exc)
+                t.error = f"Pipeline exceeded {PIPELINE_TIMEOUT_S}s timeout"
                 t.finished_at = datetime.utcnow()
                 ws3 = await self._get_or_create_status(db)
                 ws3.consecutive_failures += 1
-                ws3.last_error = str(exc)
+                ws3.last_error = t.error
+                ws3.current_task_id = None
+            await event_bus.publish(
+                Event(event_type="task.failed", payload={"task_id": target_task_id, "error": "pipeline timeout"})
+            )
+        except Exception as exc:
+            err_text = str(exc)
+            # P1-3 fix: a "Task N was cancelled by user" exception
+            # bubbling up from ``_ensure_not_cancelled`` is a clean
+            # stop, not a failure. Leave the task status as
+            # ``cancelled`` (the user already set it via the API) and
+            # don't bump consecutive_failures or stop the worker.
+            if "cancelled by user" in err_text:
+                async with session_scope() as db:
+                    t = await db.get(AgentTask, target_task_id)
+                    if t and t.status != "cancelled":
+                        # Defensive: re-assert the cancel in case some
+                        # other path tried to flip it.
+                        t.status = "cancelled"
+                        t.finished_at = datetime.utcnow()
+                    ws3 = await self._get_or_create_status(db)
+                    ws3.current_task_id = None
+                await event_bus.publish(
+                    Event(event_type="task.cancelled", payload={"task_id": target_task_id})
+                )
+                return False
+            async with session_scope() as db:
+                t = await db.get(AgentTask, target_task_id)
+                t.status = "failed"
+                t.error = err_text
+                t.finished_at = datetime.utcnow()
+                ws3 = await self._get_or_create_status(db)
+                ws3.consecutive_failures += 1
+                ws3.last_error = err_text
                 ws3.current_task_id = None
                 policy2 = await self._active_policy(db, project_id)
                 if (
@@ -200,9 +288,13 @@ class WorkerController:
                     await self._set_state_in_session(db, "error", error="consecutive_fail_stop reached")
                     self._stop.set()
             await event_bus.publish(
-                Event(event_type="task.failed", payload={"task_id": target_task_id, "error": str(exc)})
+                Event(event_type="task.failed", payload={"task_id": target_task_id, "error": err_text})
             )
         return True
+
+    async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Publish a worker-level event (no DB row, just SSE)."""
+        await event_bus.publish(Event(event_type=event_type, payload=payload))
 
     # ----- helpers -----
 

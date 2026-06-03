@@ -103,6 +103,7 @@ class LLMRouter:
                 base_url=resolved.provider.base_url,
                 api_key=resolved.provider.api_key,
                 request=request,
+                provider_extra=resolved.provider.extra or {},
             )
         except LLMAuthError as exc:
             raise model_connection_error(

@@ -51,6 +51,16 @@ class BaseAgent(ABC):
     prompt_key: str = ""
     step_name: str = "run"
     uses_json_output: bool = True
+    # P0-4 fix: by default, an agent whose model returns non-JSON (when
+    # ``uses_json_output=True``) is considered a hard failure and the
+    # whole pipeline is aborted. For Critic-like agents this is too
+    # strict — a missing or unparseable critic report is not a reason
+    # to lose the chapter. Subclasses that want graceful degradation
+    # (currently only ``CriticAgent``) flip this to True; the run-loop
+    # then synthesises a fallback parsed output tagged with
+    # ``parse_failed: true`` so the UI can surface it as
+    # "degraded" rather than a hard 400.
+    allow_json_fallback: bool = False
     extra_temperature: float | None = None
     extra_max_tokens: int | None = None
 
@@ -112,17 +122,32 @@ class BaseAgent(ABC):
         if self.uses_json_output:
             parsed = _safe_json_loads(result.content)
             if parsed is None:
-                step.status = "failed"
-                step.error_message = "模型返回内容无法解析为 JSON"
-                await ctx.db.flush()
-                raise bad_request(
-                    f"{self.name} 返回非 JSON: {result.content[:800]}",
-                    suggestion="请尝试更换模型或在 prompt 中强调返回 JSON。",
-                )
+                if self.allow_json_fallback:
+                    # P0-4 fix: don't blow up the whole chapter over a
+                    # single bad critic report. Synthesise a fallback
+                    # that the rewriter / continuity / memory steps
+                    # can still consume, and tag it so the UI can show
+                    # "degraded" instead of "400 BadRequest".
+                    parsed = self._build_json_fallback(result.content)
+                    step.parsed_output = parsed
+                    step.error_message = (
+                        "模型返回内容无法解析为 JSON，已使用 fallback 评分"
+                    )
+                    step.status = "succeeded"
+                else:
+                    step.status = "failed"
+                    step.error_message = "模型返回内容无法解析为 JSON"
+                    await ctx.db.flush()
+                    raise bad_request(
+                        f"{self.name} 返回非 JSON: {result.content[:800]}",
+                        suggestion="请尝试更换模型或在 prompt 中强调返回 JSON。",
+                    )
         else:
             parsed = {"content": result.content}
-        step.parsed_output = parsed
-        step.status = "succeeded"
+        if step.parsed_output is None:
+            step.parsed_output = parsed
+        if step.status not in ("failed",):
+            step.status = "succeeded"
         await ctx.db.flush()
 
         # 5. record post-hooks (e.g. memory update) defined by subclasses
@@ -144,6 +169,22 @@ class BaseAgent(ABC):
         self, ctx: AgentContext, parsed: dict[str, Any] | None, raw: str
     ) -> None:
         """Hook for subclasses. Default does nothing."""
+
+    def _build_json_fallback(self, raw: str) -> dict[str, Any]:
+        """Synthesise a parsed dict when the model returned non-JSON.
+
+        Only called when ``allow_json_fallback=True``. The default
+        returns a generic envelope; agents whose downstream consumers
+        expect a specific shape (Critic → rewriter, etc.) override
+        this to produce a minimally useful report instead of a hard
+        failure.
+        """
+        return {
+            "parse_failed": True,
+            "fallback": True,
+            "raw_preview": (raw or "")[:1000],
+            "summary": "模型未返回合法 JSON，已使用 fallback。",
+        }
 
 
 def _safe_json_loads(text: str) -> dict[str, Any] | None:

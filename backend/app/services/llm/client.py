@@ -236,6 +236,7 @@ class LLMClient:
         base_url: str,
         api_key: str,
         request: LLMRequest,
+        provider_extra: dict[str, Any] | None = None,
     ) -> LLMCallResult:
         # local mock mode: deterministic, no network, used for offline dev
         if base_url.startswith("mock://"):
@@ -262,7 +263,9 @@ class LLMClient:
         try:
             async for attempt in retrying:
                 with attempt:
-                    return await self._do_chat(url, api_key, payload, request.model)
+                    return await self._do_chat(
+                        url, api_key, payload, request.model, provider_extra=provider_extra
+                    )
         except LLMAuthError:
             raise
         except LLMResponseError:
@@ -279,6 +282,8 @@ class LLMClient:
         api_key: str,
         payload: dict[str, Any],
         model: str,
+        *,
+        provider_extra: dict[str, Any] | None = None,
     ) -> LLMCallResult:
         # Inject a hard system message that:
         #   1) forces reasoning models (step-3.7-flash, deepseek-r1, o1, ...)
@@ -322,15 +327,21 @@ class LLMClient:
             tail = {**tail, "content": (tail.get("content") or "") + extra}
             messages = messages[:-1] + [tail]
         payload["messages"] = messages
-        # step-3.7-flash (and other reasoning models on this provider) put
-        # most of their output into `reasoning_content` and only emit the
-        # final answer in `content` when reasoning is constrained. Forcing
-        # ``reasoning_effort=low`` keeps the model focused on producing the
-        # final answer, with only light planning — exactly what structured
-        # tasks like Planner/Critic/Rewriter need. The drafter (creative
-        # writing) also benefits: it stops emitting 4000 tokens of self-talk
-        # and uses the budget for the chapter prose instead.
-        payload.setdefault("extra_body", {"reasoning_effort": "low"})
+        # P0-5 fix: ``extra_body`` is a vLLM/sglang/StepFun convention,
+        # NOT a standard OpenAI field. Sending it to a strict OpenAI-
+        # compatible proxy triggers 400/422. We now only inject it when
+        # the Provider has explicitly opted in via its ``extra`` JSON
+        # column, e.g.:
+        #   {"inject_reasoning_effort": true, "reasoning_effort": "low"}
+        # Default providers (incl. anything pointing at openai.com)
+        # get a clean request with no extra_body.
+        if provider_extra and provider_extra.get("inject_reasoning_effort"):
+            payload.setdefault(
+                "extra_body",
+                {
+                    "reasoning_effort": provider_extra.get("reasoning_effort", "low")
+                },
+            )
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

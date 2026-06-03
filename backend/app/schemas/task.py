@@ -51,6 +51,11 @@ class AgentStepRead(BaseModel):
     parsed_output: dict[str, Any] | None
     model_name: str | None
     provider_name: str | None
+    # P0-3 fix: the ORM has these columns but the read schema never
+    # exported them, so the chapter-detail UI rendered
+    # ``模板 #undefined vundefined`` for every step.
+    prompt_template_id: int | None
+    prompt_version: int | None
     input_tokens: int
     output_tokens: int
     cost_usd: float

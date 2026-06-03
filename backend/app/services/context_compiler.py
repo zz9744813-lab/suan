@@ -61,10 +61,21 @@ class ContextCompiler:
                 .limit(5)
             )
         ).scalars().all()
-        recent_summaries = [
-            {"chapter_no": c.chapter_no, "title": c.title, "summary": _first_version_summary(db, c.id)}
-            for c in reversed(recent)
-        ]
+        # P0-1 fix: list comprehension previously called the (sync) helper
+        # inside an async context, which returned a coroutine instead of the
+        # summary text and surfaced as
+        #   AttributeError: 'coroutine' object has no attribute 'scalar_one_or_none'
+        # at chapter 2+. Build the list with a plain loop so we can `await`
+        # each helper call.
+        recent_summaries: list[dict[str, Any]] = []
+        for c in reversed(recent):
+            recent_summaries.append(
+                {
+                    "chapter_no": c.chapter_no,
+                    "title": c.title,
+                    "summary": await _first_version_summary(db, c.id),
+                }
+            )
         prior = recent_summaries[-1] if recent_summaries else None
 
         # outline for this chapter
@@ -229,19 +240,34 @@ class ContextCompiler:
         }
 
 
-def _first_version_summary(db: AsyncSession, chapter_id: int) -> str | None:
+async def _first_version_summary(db: AsyncSession, chapter_id: int) -> str | None:
+    """Return the most recent ChapterVersion summary for ``chapter_id``.
+
+    P0-1 fix: this used to be a synchronous function that called
+    ``db.execute`` (the AsyncSession API requires ``await``). At chapter
+    2+ the list comprehension in :meth:`ContextCompiler.compile` would
+    receive coroutine objects, not strings, and the next access would
+    blow up with ``AttributeError: 'coroutine' object has no attribute
+    'scalar_one_or_none'``.
+    """
     from app.models.project import ChapterVersion
 
     ver = (
-        db.execute(
+        await db.execute(
             select(ChapterVersion)
             .where(ChapterVersion.chapter_id == chapter_id)
             .order_by(ChapterVersion.version_no.desc())
         )
     ).scalar_one_or_none()
+
     if ver is None:
         return None
-    return ver.summary or (ver.content[:200] + "..." if ver.content else None)
+
+    if ver.summary:
+        return ver.summary
+    if ver.content:
+        return ver.content[:200] + "..."
+    return None
 
 
 _context_compiler_singleton: ContextCompiler | None = None

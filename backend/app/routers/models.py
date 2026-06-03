@@ -17,6 +17,7 @@ from app.schemas import (
     ModelProviderCreate,
     ModelProviderRead,
     ModelProviderTestResult,
+    ModelProviderUpdate,
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
 )
@@ -31,7 +32,8 @@ async def list_providers(db: AsyncSession = Depends(get_db)) -> APIResponse[list
     rows = (await db.execute(
         select(ModelProvider).order_by(ModelProvider.id.asc())
     )).scalars().all()
-    return {"ok": True, "data": [ModelProviderRead.model_validate(r) for r in rows]}
+    # P0-6: never serialise the raw API key to the client.
+    return {"ok": True, "data": [ModelProviderRead.from_orm_masked(r) for r in rows]}
 
 
 @router.post("/providers", response_model=APIResponse[ModelProviderRead])
@@ -48,7 +50,7 @@ async def create_provider(
     )
     db.add(row)
     await db.flush()
-    return {"ok": True, "data": ModelProviderRead.model_validate(row)}
+    return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
 
 @router.get("/providers/{provider_id}", response_model=APIResponse[ModelProviderRead])
@@ -56,20 +58,32 @@ async def get_provider(provider_id: int, db: AsyncSession = Depends(get_db)) -> 
     row = await db.get(ModelProvider, provider_id)
     if row is None:
         raise not_found("ModelProvider", provider_id)
-    return {"ok": True, "data": ModelProviderRead.model_validate(row)}
+    return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
 
 @router.put("/providers/{provider_id}", response_model=APIResponse[ModelProviderRead])
 async def update_provider(
-    provider_id: int, body: ModelProviderCreate, db: AsyncSession = Depends(get_db)
+    provider_id: int, body: ModelProviderUpdate, db: AsyncSession = Depends(get_db)
 ) -> APIResponse[ModelProviderRead]:
+    """Update a Provider.
+
+    P0-6 fix: an empty ``api_key`` in the request body means "keep the
+    existing key". This lets the UI edit other fields (default_model,
+    extra, enabled, ...) without forcing the user to re-paste a long
+    secret every time.
+    """
     row = await db.get(ModelProvider, provider_id)
     if row is None:
         raise not_found("ModelProvider", provider_id)
-    for k, v in body.model_dump().items():
+    data = body.model_dump()
+    new_key = data.pop("api_key", "")
+    if new_key:
+        row.api_key = new_key
+    # else: keep existing api_key untouched
+    for k, v in data.items():
         setattr(row, k, v)
     await db.flush()
-    return {"ok": True, "data": ModelProviderRead.model_validate(row)}
+    return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
 
 @router.delete("/providers/{provider_id}", response_model=APIResponse[dict])

@@ -25,6 +25,7 @@ from app.schemas.model_provider import (
     ModelProviderCreate,
     ModelProviderRead,
     ModelProviderTestResult,
+    ModelProviderUpdate,
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "ModelProviderCreate",
     "ModelProviderRead",
     "ModelProviderTestResult",
+    "ModelProviderUpdate",
     "ModelRoleAssignmentRead",
     "ModelRoleAssignmentUpdate",
     "PromptTemplateRead",

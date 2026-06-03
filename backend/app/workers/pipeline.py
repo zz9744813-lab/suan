@@ -75,10 +75,12 @@ class ChapterPipeline:
         await self._emit(db, task, chapter, "pipeline.started", "开始单章流水线")
 
         # 1) ContextCompiler
+        await self._ensure_not_cancelled(db, task)
         ctx_data = await self.compiler.compile(db, chapter=chapter, policy=policy)
         ctx_inputs = self.compiler.to_prompt_inputs(ctx_data)
 
         # 2) Planner
+        await self._ensure_not_cancelled(db, task)
         planner = PlannerAgent(self.router, self.engine)
         planner_result = await planner.run(
             AgentContext(
@@ -96,6 +98,7 @@ class ChapterPipeline:
         chapter_plan = planner_result.parsed or {}
 
         # 3) Drafter
+        await self._ensure_not_cancelled(db, task)
         drafter = DrafterAgent(self.router, self.engine)
         drafter_inputs = {
             "chapter_no": chapter.chapter_no,
@@ -159,6 +162,7 @@ class ChapterPipeline:
             )
 
         # 5) Critic
+        await self._ensure_not_cancelled(db, task)
         critic = CriticAgent(self.router, self.engine)
         critic_inputs = {
             "chapter_no": chapter.chapter_no,
@@ -194,6 +198,7 @@ class ChapterPipeline:
         })
 
         # 6) Optional Rewrite loop
+        await self._ensure_not_cancelled(db, task)
         rewriter = RewriterAgent(self.router, self.engine)
         rewrite_rounds = 0
         final_text = draft_text
@@ -203,6 +208,7 @@ class ChapterPipeline:
             and rewrite_rounds < policy.max_rewrite_rounds
             and not check.hard_conflicts
         ):
+            await self._ensure_not_cancelled(db, task)
             rewrite_inputs = {
                 "chapter_no": chapter.chapter_no,
                 "draft_content": final_text,
@@ -276,6 +282,7 @@ class ChapterPipeline:
                 break
 
         # 7) Continuity on the final text
+        await self._ensure_not_cancelled(db, task)
         cont_agent = ContinuityAgent(self.router, self.engine)
         cont_inputs = {
             "draft_content": final_text,
@@ -304,6 +311,7 @@ class ChapterPipeline:
         total_dur += cont_result.duration_ms
 
         # 8) Memory update
+        await self._ensure_not_cancelled(db, task)
         mu_agent = MemoryUpdateAgent(self.router, self.engine)
         mu_inputs = {
             "final_content": final_text,
@@ -332,6 +340,7 @@ class ChapterPipeline:
         total_dur += mu_result.duration_ms
 
         # 9) Learning reflection
+        await self._ensure_not_cancelled(db, task)
         chapter.current_score = current_score
         chapter.actual_word_count = len(final_text)
         chapter.status = "done" if current_score >= policy.pass_score else "needs_review"
@@ -390,6 +399,30 @@ class ChapterPipeline:
             hard_conflicts=check.hard_conflicts,
             issues=issues,
         )
+
+    async def _ensure_not_cancelled(
+        self, db: AsyncSession, task: AgentTask
+    ) -> None:
+        """P1-3 fix: abort the pipeline if the user cancelled the task.
+
+        Previously the cancel endpoint only flipped the DB status to
+        ``cancelled`` — the running pipeline had no way to find out and
+        would happily burn through every remaining agent step. Now we
+        refresh the row at every agent boundary and raise if the user
+        asked us to stop. The worker's outer ``except`` block catches
+        the RuntimeError, leaves the row in ``cancelled``, and
+        publishes a ``task.cancelled`` event.
+
+        The cancel check is cheap (one PK lookup + maybe a status
+        refresh) so the latency cost is negligible compared to the
+        multi-second LLM calls that follow.
+        """
+        # Refresh from DB so we see the latest status even if the
+        # current session has a stale snapshot. ``db.refresh`` re-queries
+        # only the columns of the instance we already loaded.
+        await db.refresh(task)
+        if task.status == "cancelled":
+            raise RuntimeError(f"Task {task.id} was cancelled by user")
 
     async def _save_version(
         self,
