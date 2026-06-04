@@ -111,20 +111,27 @@ code, .mono { font-family: var(--font-mono); }
   padding-bottom: 14px;
   border-bottom: 1px solid var(--accent-line);
 }
-/* P0-OCCLUSION-1 (R25 followup): 让 header 在窄窗口 (< 700px)
- * 下自动换行, 而不是把右侧按钮挤出可视范围. 通用 .page-header
- * 加 flex-wrap: wrap, 触发条件: 整个 main 区域 < 700px. */
-@container (max-width: 700px) {
-  .page-header {
-    flex-wrap: wrap;
-  }
-  .page-header > .spacer {
-    flex-basis: 0;
-  }
-  .page-header h1,
-  .page-header h2 {
-    font-size: 18px;
-  }
+/* P0-OCCLUSION-1 (R25 followup): graph page 的 page-header 永远
+ * 允许换行, 不依赖 @container 浏览器支持. 之前 v1+v2 都假设
+ * container query 能 fire, 但用户实测 1280px viewport 配上
+ * projectnav expanded + chief expanded 时, main cell 只有 584px,
+ * 标题/计数/3 个按钮塞一行必然溢出. 现在让 graph page 永远
+ * flex-wrap, 再用 min-width 让 spacer 不要把所有可用空间都吃掉. */
+.graph-page .page-header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.graph-page .page-header > .spacer {
+  /* 关键: spacer 不能 flex:1 撑满, 否则后面的按钮被推到右侧窗口外.
+   * 改成 flex: 0 1 auto, 让 spacer 收缩, 按钮才能在同 row 排下;
+   * 不够时 wrap 到下一行. */
+  flex: 0 1 auto;
+  width: 12px;
+  min-width: 0;
+}
+.graph-page .page-header h1,
+.graph-page .page-header h2 {
+  font-size: 18px;
 }
 .page-header h1 {
   font-size: 22px;
@@ -1013,6 +1020,19 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
     radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
   background-size: 28px 28px;
   background-position: 0 0;
+  /* P0-OCCLUSION-1 (v3): canvas-wrap 必须有 position + min-height +
+   * 内部 SVG 不能撑爆容器. 之前没有 min-width:0 + overflow:hidden,
+   * SVG 在某些 viewBox 配 preserveAspectRatio 下会让 wrapper 横向
+   * 溢出, 把整个 .main 撑出 100vw, 触发横向滚动条, 视觉上像是
+   * 「左侧被遮住」(其实是被推到了屏幕外). */
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  /* 给 svg 一个有意义的最小高度, 避免 viewBox 在 0 height 时崩溃 */
+  min-height: 320px;
 }
 
 .graph-page.graph-neural .graph-svg {
