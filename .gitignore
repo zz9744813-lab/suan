@@ -46,6 +46,9 @@ npm-debug.log*
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.bak*
+*.sqlite
+*.sqlite3
 data/*.db
 data/*.sqlite
 data/*.sqlite3
