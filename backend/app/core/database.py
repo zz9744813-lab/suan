@@ -23,6 +23,13 @@ engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
+    # SQLite-specific: wait up to 30s for another process to
+    # release the file lock. Without this, ``database is locked``
+    # is raised instantly the moment two processes try to write
+    # at the same time (e.g. the uvicorn lifespan startup racing
+    # a one-shot CLI script). 30s is generous — the dev DB is
+    # tiny and a COMMIT is sub-millisecond.
+    connect_args={"check_same_thread": False, "timeout": 30.0},
 )
 
 AsyncSessionLocal = async_sessionmaker(
