@@ -31,6 +31,13 @@ export type ShelfBookProps = {
   size?: ShelfSize;
   selected?: boolean;
   onClick?: () => void;
+  /**
+   * 悬停提示 (HTML 原生 title 属性). P1 项目书架: 章节进度 / 最近
+   * 任务 / Worker 状态等都通过这个 prop 一次性传进来, 鼠标悬停即看.
+   * 不引入额外 popover 组件 — P0 §8 禁 6 (不过度工程), 原生 tooltip
+   * 在桌面端够用, 移动端 long-press 也会触发.
+   */
+  hoverHint?: string;
 };
 
 const SIZE_PX: Record<ShelfSize, { w: number; h: number; spineW: number; fontSize: number }> = {
@@ -52,6 +59,7 @@ export function ShelfBook({
   size = "normal",
   selected = false,
   onClick,
+  hoverHint,
 }: ShelfBookProps) {
   const dim = SIZE_PX[size];
   const c = SHELF_COLORS[colorType] ?? SHELF_COLORS.blue;
@@ -71,6 +79,7 @@ export function ShelfBook({
         ["--shelf-font"  as any]: `${dim.fontSize}px`,
       }}
       aria-label={`${title}${status ? ` (${status})` : ""}`}
+      title={hoverHint}
     >
       <span className="shelf-book-status" style={{ background: c.tint, color: c.spine }}>
         {status ?? c.label}

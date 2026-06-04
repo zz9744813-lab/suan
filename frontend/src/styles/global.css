@@ -1357,3 +1357,57 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   display: flex;
   gap: 6px;
 }
+
+/* ============================================================
+   P1: 全局 modal / empty-large — 从旧 ProjectsPage.css 提到这里
+   多个页面 (ProjectsPage / BehaviorPage / GraphPage / StudyPage) 都用
+   .modal / .modal-backdrop, 之前通过 ProjectsPage.css 副作用进来.
+   P1 ProjectsPage 改 ShelfLayout 不再 import 那份 CSS, 提上来避免
+   P1 这次改动变成"破坏其它页面 modal 样式"的回归.
+   ============================================================ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-gold-dim);
+  border-radius: 6px;
+  padding: 24px;
+  width: 560px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.modal h3 {
+  font-family: var(--font-serif);
+  margin: 0 0 20px;
+  font-size: 18px;
+  color: var(--accent-gold);
+}
+.modal label { margin-top: 12px; }
+
+.empty-large {
+  padding: 80px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.empty-large-glyph {
+  font-family: var(--font-serif);
+  font-size: 64px;
+  color: var(--accent-gold-dim);
+  margin-bottom: 16px;
+  letter-spacing: 8px;
+}
+.empty-large h3 {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
