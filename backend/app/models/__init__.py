@@ -55,6 +55,13 @@ from app.models.agent_role import (
     AgentRun,
     AgentRunEvent,
 )
+from app.models.comment_review import (
+    ReaderAgentProfile,
+    ReaderReviewRun,
+    ReviewComment,
+    ReviewCommentGroup,
+    ReviewSettings,
+)
 
 __all__ = [
     "Project",
@@ -107,4 +114,10 @@ __all__ = [
     "AgentPromptBinding",
     "AgentRun",
     "AgentRunEvent",
+    # P6: 评论区驱动的模拟读者 Agent 评审系统
+    "ReaderAgentProfile",
+    "ReviewComment",
+    "ReviewCommentGroup",
+    "ReaderReviewRun",
+    "ReviewSettings",
 ]

@@ -8,8 +8,13 @@ from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal, init_db
 from app.models.agent_role import AgentModelBinding, AgentPromptBinding, AgentRole
+from app.models.comment_review import (
+    ReaderAgentProfile,
+    ReviewSettings,
+)
 from app.models.model_provider import ModelProvider, ModelRoleAssignment
 from app.models.prompt import PromptTemplate, PromptVersion
+from app.models.project import Project
 from app.models.task import WorkerStatus
 from app.prompts.default import WRITING_PROMPTS
 
@@ -54,6 +59,34 @@ DEFAULT_AGENT_ROLES: list[dict] = [
     {"key": "study_critic",        "display_name": "StudyCritic",
      "description": "StudyCritic — 知识密度打分",
      "category": "study",   "avatar_style": "critic",      "run_mode": "manual"},
+    # P6: 5 个模拟读者 Agent + 1 个主 Agent 评论接入官
+    # 读者 Agent: run_mode="event" (章节完成/手动触发),
+    #              pipeline_stage="reader_review" 走 ReaderReviewRun 元数据
+    # 评论接入官: run_mode="event" (评论流触发), pipeline_stage="comment_triage"
+    {"key": "reader_hook",      "display_name": "Reader·钩子",
+     "description": "模拟读者·节奏钩子评审 — 钩子/爆点/章末悬念",
+     "category": "review",  "avatar_style": "reader",      "run_mode": "event",
+     "pipeline_stage": "reader_review"},
+    {"key": "reader_emotion",   "display_name": "Reader·情绪",
+     "description": "模拟读者·人物情绪评审 — 动机/情绪递进/共情",
+     "category": "review",  "avatar_style": "reader",      "run_mode": "event",
+     "pipeline_stage": "reader_review"},
+    {"key": "reader_logic",     "display_name": "Reader·逻辑",
+     "description": "模拟读者·逻辑设定评审 — 因果/时间线/世界规则",
+     "category": "review",  "avatar_style": "reader",      "run_mode": "event",
+     "pipeline_stage": "reader_review"},
+    {"key": "reader_commercial","display_name": "Reader·商业",
+     "description": "模拟读者·商业留存评审 — 付费点/留存/章末钩子",
+     "category": "review",  "avatar_style": "reader",      "run_mode": "event",
+     "pipeline_stage": "reader_review"},
+    {"key": "reader_toxic",     "display_name": "Reader·毒点",
+     "description": "模拟读者·毒点劝退评审 — 违和/解释腔/劝退点",
+     "category": "review",  "avatar_style": "reader",      "run_mode": "event",
+     "pipeline_stage": "reader_review"},
+    {"key": "chief_comment_moderator", "display_name": "Chief·评论接入官",
+     "description": "主 Agent·评论接入官 — 分流/合并/转讨论/裁决",
+     "category": "discussion", "avatar_style": "discussion_core", "run_mode": "event",
+     "pipeline_stage": "comment_triage"},
 ]
 
 
@@ -216,21 +249,75 @@ async def seed() -> None:
         if ws is None:
             db.add(WorkerStatus(id=1, state="idle"))
 
-        # 5. P4: 默认 11 个 AgentRole + 默认 AgentModelBinding (走 stub)
+        # 5. P4: 默认 AgentRole + 默认 AgentModelBinding (走 stub)
+        #    P4 这一轮不创建 AgentPromptBinding (跟现有 11 个角色保持一致),
+        #    角色硬编码 prompt_key 在调用处解析.
         for spec in DEFAULT_AGENT_ROLES:
-            exists = (await db.execute(
+            row = (await db.execute(
                 select(AgentRole).where(AgentRole.key == spec["key"])
             )).scalar_one_or_none()
-            if exists is None:
+            if row is None:
                 row = AgentRole(**spec)
                 db.add(row)
                 await db.flush()
-                # 默认 binding: 走 stub provider, 跟旧 ModelRoleAssignment
-                # 行为保持一致 (P4 §10)
+                # 默认 model binding: 走 stub provider
                 db.add(AgentModelBinding(
                     agent_role_id=row.id,
                     provider_id=stub.id,
                     model_name="mock-fast",
+                ))
+
+        # 6. P6: 5 个 ReaderAgentProfile (跟 5 个 reader AgentRole 1:1)
+        #    维度跟 reader_key 对应, weight 初始 1.0, enabled=True
+        READER_PROFILES: list[tuple[str, str, str]] = [
+            ("reader_hook",       "Reader·钩子",   "节奏/钩子/爆点"),
+            ("reader_emotion",    "Reader·情绪",   "人物动机/情绪递进"),
+            ("reader_logic",      "Reader·逻辑",   "设定硬伤/因果/行为合理性"),
+            ("reader_commercial", "Reader·商业",   "留存/付费点/章末钩子"),
+            ("reader_toxic",      "Reader·毒点",   "劝退点/违和/解释腔"),
+        ]
+        for reader_key, display_name, dimension in READER_PROFILES:
+            # 通过 key 找 AgentRole
+            role_row = (await db.execute(
+                select(AgentRole).where(AgentRole.key == reader_key)
+            )).scalar_one_or_none()
+            if role_row is None:
+                continue  # 上一步没创建成功, 跳过
+            existing_profile = (await db.execute(
+                select(ReaderAgentProfile).where(
+                    ReaderAgentProfile.reader_key == reader_key
+                )
+            )).scalar_one_or_none()
+            if existing_profile is None:
+                db.add(ReaderAgentProfile(
+                    agent_role_id=role_row.id,
+                    reader_key=reader_key,
+                    display_name=display_name,
+                    dimension=dimension,
+                    weight=1.0,
+                    adopted_count=0,
+                    rejected_count=0,
+                    generated_comment_count=0,
+                    enabled=True,
+                ))
+
+        # 7. P6: 每个 project 一行 ReviewSettings (1:1 with Project)
+        #    默认 auto 全部开启, retention 7 天
+        projects = (await db.execute(select(Project))).scalars().all()
+        for proj in projects:
+            existing_settings = (await db.execute(
+                select(ReviewSettings).where(ReviewSettings.project_id == proj.id)
+            )).scalar_one_or_none()
+            if existing_settings is None:
+                db.add(ReviewSettings(
+                    project_id=proj.id,
+                    auto_reader_review=True,
+                    auto_chief_triage=True,
+                    auto_discussion=True,
+                    retention_days=7,
+                    max_comments_per_chapter=50,
+                    max_reader_comments_per_run=5,
+                    min_severity_for_discussion="medium",
                 ))
 
         await db.commit()

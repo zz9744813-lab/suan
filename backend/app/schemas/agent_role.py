@@ -23,8 +23,9 @@ class AgentRoleBase(BaseModel):
     key: str
     display_name: str
     description: str | None = None
-    # 5 类: writing / study / memory / discussion / custom
-    category: Literal["writing", "study", "memory", "discussion", "custom"] = "custom"
+    # 6 类: writing / study / memory / discussion / review / custom
+    # P6 新增 review (5 个模拟读者 Agent 共享)
+    category: Literal["writing", "study", "memory", "discussion", "review", "custom"] = "custom"
     avatar_style: str | None = None
     enabled: bool = True
     visible_in_matrix: bool = True
