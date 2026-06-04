@@ -684,6 +684,156 @@ export type GraphEdge = {
   updated_at: string;
 };
 
+// ===== R25: DeepStudy (单书知识网络 + 多 Agent 流水线) =====
+// P2 范围: 拆书书架 (StudyLibraryPage) + 单书知识网络 (StudyBookGraphPage)
+// 走这组 type, 数据源是 P0 (R25) commit efeb960 加的
+// /api/deepstudy/* 端点 + 9 张表 (StudyRun/ChapterAnalysis/Entity/...).
+
+/** Book spine row on the library shelf. 状态机:
+ *  empty / uploaded / chapterized / studying / paused /
+ *  review_required / completed / failed
+ *  颜色映射见 P2 §2: completed=gold/blue / studying=purple /
+ *  chapterized=green / failed=red / review_required=orange / uploaded=gray
+ *  (orange 当前 P0 color token 表里没有, fallback red, P2.1 加) */
+export type DeepStudyStatus =
+  | "empty" | "uploaded" | "chapterized" | "studying"
+  | "paused" | "review_required" | "completed" | "failed";
+
+export type LibraryItem = {
+  id: number;
+  title: string;
+  author: string;
+  shelf_category: string | null;     // 用户分桶 (玄幻/都市/...)
+  cover_theme: Record<string, any> | null;
+  study_status: DeepStudyStatus;
+  deepstudy_version: string | null;
+  chapter_count: number;
+  processed_chapters: number;
+  entity_count: number;
+  // 6 个深层 counter (R25 library 端点一次性 GROUP BY 出来, 避免 6 次往返)
+  scene_beat_count: number;
+  relationship_count: number;
+  foreshadow_count: number;
+  behavior_count: number;
+  technique_count: number;
+  knowledge_score: number | null;   // StudyCritic 给分
+  last_deepstudied_at: string | null;
+  cost_usd: number;
+  project_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibrarySummary = {
+  total_books: number;
+  completed: number;
+  studying: number;
+  paused: number;
+  review_required: number;
+  failed: number;
+  empty: number;
+  chapterized: number;
+  total_entities: number;
+  total_relationships: number;
+  total_techniques: number;
+  total_cost_usd: number;
+};
+
+export type LibraryResponse = {
+  items: LibraryItem[];
+  summary: LibrarySummary;
+  page: number;
+  page_size: number;
+  total: number;
+};
+
+export type StudyRunRead = {
+  id: number;
+  material_id: number;
+  project_id: number | null;
+  status: "queued" | "running" | "paused" | "succeeded" | "failed" | "cancelled";
+  mode: "full" | "entities_only" | "relationships_only"
+      | "behaviors_only" | "techniques_only" | "repair_failed";
+  total_chapters: number;
+  processed_chapters: number;
+  current_stage: string | null;
+  agent_plan: Record<string, any> | null;
+  progress: Record<string, any> | null;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StudyRunStartResponse = {
+  run_id: number;
+  material_id: number;
+  status: StudyRunRead["status"];
+  message: string;
+};
+
+export type StudyRunCreateBody = {
+  mode?: StudyRunRead["mode"];
+  chapter_range?: number[] | null;
+  force?: boolean;
+  max_concurrency?: number;
+  model_roles?: Record<string, string> | null;
+};
+
+/** 单书知识网络 — 节点 id 是 "book:1" / "entity:33" / "scene:55" 形式的
+ *  复合字符串, 跟 NodeDetailResponse 解析方式一致 (按 ":" partition). */
+export type DeepStudyGraphNode = {
+  id: string;
+  type: string;
+  label: string;
+  size: number;
+  score: number;
+  chapter_index: number | null;
+  extra: Record<string, any>;
+};
+
+export type DeepStudyGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  label: string;
+  weight: number;
+  evidence: string | null;
+  extra: Record<string, any>;
+};
+
+export type DeepStudyGraphStats = {
+  nodes: number;
+  edges: number;
+  by_type: Record<string, number>;
+};
+
+export type KnowledgeGraphResponse = {
+  book: Record<string, any>;
+  nodes: DeepStudyGraphNode[];
+  edges: DeepStudyGraphEdge[];
+  stats: DeepStudyGraphStats;
+};
+
+export type NodeDetailResponse = {
+  id: string;
+  type: string;
+  label: string;
+  profile: Record<string, any>;
+  mentions: Array<Record<string, any>>;
+  relationships: Array<Record<string, any>>;
+  scene_beats: Array<Record<string, any>>;
+  foreshadows: Array<Record<string, any>>;
+  behavior_patterns: Array<Record<string, any>>;
+  techniques: Array<Record<string, any>>;
+  agent_steps: Array<Record<string, any>>;
+};
+
 // ===== Discussion Room (P0-FEAT-1) =====
 export type DiscussionParticipantKey =
   | "planner" | "drafter" | "critic" | "continuity" | "memory";

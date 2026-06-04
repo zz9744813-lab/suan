@@ -491,3 +491,74 @@ export const globalSearch = (q: string, limit = 30) => {
   const params = new URLSearchParams({ q, limit: String(limit) });
   return api.get<SearchResult[]>(`/api/search?${params.toString()}`);
 };
+
+// ----- R25 / P2: DeepStudy (单书知识网络) -----
+// 前端 helper. 后端端点 (R25 commit efeb960 加):
+//   GET    /api/deepstudy/library                            书架列表
+//   POST   /api/deepstudy/materials/{id}/runs                启动一次 run
+//   GET    /api/deepstudy/runs/{id}                          run 进度
+//   POST   /api/deepstudy/runs/{id}/{pause|resume|cancel}    状态机控制
+//   GET    /api/deepstudy/materials/{id}/knowledge-graph     单书网络
+//   GET    /api/deepstudy/materials/{id}/nodes/{node_id}     节点详情
+//   GET    /api/deepstudy/patterns                           全局行为模式
+//   GET    /api/deepstudy/techniques                         全局技巧库
+//
+// P2 范围: 书架入口 (StudyLibraryPage) + 单书网络 (StudyBookGraphPage)
+// 都走这一组 helper; 启动 run 是 ShelfDetailPanel 的 "启动 DeepStudy" 按钮.
+
+import type {
+  LibraryResponse,
+  StudyRunCreateBody,
+  StudyRunRead,
+  StudyRunStartResponse,
+  KnowledgeGraphResponse,
+  NodeDetailResponse,
+} from "../types";
+
+export const listDeepStudyLibrary = (params: { page?: number; page_size?: number; status?: string } = {}) => {
+  const q = new URLSearchParams();
+  if (params.page) q.set("page", String(params.page));
+  if (params.page_size) q.set("page_size", String(params.page_size));
+  if (params.status) q.set("status", params.status);
+  const s = q.toString();
+  return api.get<LibraryResponse>(`/api/deepstudy/library${s ? `?${s}` : ""}`);
+};
+
+export const startDeepStudyRun = (materialId: number, body: StudyRunCreateBody = {}) =>
+  api.post<StudyRunStartResponse>(`/api/deepstudy/materials/${materialId}/runs`, body);
+
+export const getDeepStudyRun = (runId: number) =>
+  api.get<StudyRunRead>(`/api/deepstudy/runs/${runId}`);
+
+export const pauseDeepStudyRun = (runId: number) =>
+  api.post<StudyRunRead>(`/api/deepstudy/runs/${runId}/pause`);
+export const resumeDeepStudyRun = (runId: number) =>
+  api.post<StudyRunRead>(`/api/deepstudy/runs/${runId}/resume`);
+export const cancelDeepStudyRun = (runId: number) =>
+  api.post<StudyRunRead>(`/api/deepstudy/runs/${runId}/cancel`);
+
+export const getKnowledgeGraph = (materialId: number) =>
+  api.get<KnowledgeGraphResponse>(`/api/deepstudy/materials/${materialId}/knowledge-graph`);
+
+/** 复合 ID 解析 — 前端按 ":" partition 拆 (entity:33 → entity / 33).
+ *  后端路由直接接 node_id 字符串, 解析在 router 里做, 前端只负责 URL-encode. */
+export const getDeepStudyNode = (materialId: number, nodeId: string) =>
+  api.get<NodeDetailResponse>(`/api/deepstudy/materials/${materialId}/nodes/${encodeURIComponent(nodeId)}`);
+
+export const listDeepStudyPatterns = (params: { q?: string; tag?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.q) q.set("q", params.q);
+  if (params.tag) q.set("tag", params.tag);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<BehaviorPattern[]>(`/api/deepstudy/patterns${s ? `?${s}` : ""}`);
+};
+
+export const listDeepStudyTechniques = (params: { q?: string; technique_type?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.q) q.set("q", params.q);
+  if (params.technique_type) q.set("technique_type", params.technique_type);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<any[]>(`/api/deepstudy/techniques${s ? `?${s}` : ""}`);
+};
