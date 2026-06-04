@@ -1,4 +1,20 @@
-"""WorkerController: in-process loop driving the chapter pipeline."""
+"""WorkerController: in-process loop driving the chapter pipeline + P6 event tasks.
+
+P4 改造: 不再只跑 chapter_pipeline, 改成多任务 dispatcher (P6 spec §5):
+  - chapter_pipeline    — 章节流水线 (老逻辑, 抽成 _run_chapter_pipeline)
+  - reader_review       — 5 读者 Agent 评审一章 (ReaderReviewService)
+  - comment_triage      — 主 Agent 评论分流 (CommentTriageService)
+  - comment_discussion  — 跑 DiscussionSession participant + synthesis (CommentDiscussionRunner)
+  - comment_cleanup     — 7 天过期 review_comments 清理 (CommentCleanupService)
+
+支持: AgentTask.task_type.in_(SUPPORTED_TASKS) (P6 §5.1)
+派发: _dispatch_task(task) 按 task_type 分发到 _run_*_task (P6 §5.2)
+
+事件自动触发:
+  - chapter_pipeline 成功后, 入队 reader_review (P6 §5.3, 走 ReviewSettings.auto_reader_review)
+  - POST /api/reviews/comments 成功后, 入队 comment_triage (P6 §5.4, 走 ReviewSettings.auto_chief_triage)
+  - worker 启动时, 入队一次 comment_cleanup (P6 §5.5)
+"""
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +34,18 @@ from app.workers.pipeline import ChapterPipeline
 
 def _today() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+# P6 §5.1 — 5 种 worker 支持的任务类型. AgentTask.task_type 命中
+# 其中之一才会被 worker 拉起. 其它 (e.g. 旧的 study / graph /
+# memory / learning) 不在本轮 P0-P5 范围, 走老路径或手工触发.
+SUPPORTED_TASKS: frozenset[str] = frozenset({
+    "chapter_pipeline",     # P0-P3 老逻辑, 章节流水线
+    "reader_review",        # P2, ReaderReviewService — 5 读者评审
+    "comment_triage",       # P3, CommentTriageService — 主 Agent 分流
+    "comment_discussion",   # P3 + P4, CommentDiscussionRunner — 跑讨论室
+    "comment_cleanup",      # P4, CommentCleanupService — 7 天过期清理
+})
 
 
 class WorkerController:
@@ -54,6 +82,32 @@ class WorkerController:
         # fresh process. See worker log around 2026-06-03 00:48 for
         # the historical failure that prompted this fix.
         await self._clear_stale_failure_state()
+        # P6 §5.5: 入队一次 comment_cleanup (worker 启动时, 跑空闲时)
+        # 已有 pending 任务时由 ReviewQueueService 跳过.
+        try:
+            from app.services.review import (
+                ENQUEUE_SOURCE_WORKER_START,
+                get_review_queue,
+            )
+            async with session_scope() as db:
+                # 默认 7 天 retention, 跟 P6 §1.3 强制一致
+                from app.models.comment_review import ReviewSettings
+                # 找项目的 retention_days 中位值, fallback 7
+                retention = 7
+                settings_rows = (await db.execute(
+                    select(ReviewSettings)
+                )).scalars().all()
+                if settings_rows:
+                    retention = max(s.retention_days for s in settings_rows)
+                await get_review_queue().enqueue_comment_cleanup(
+                    db, retention_days=retention,
+                    source=ENQUEUE_SOURCE_WORKER_START,
+                )
+        except Exception as exc:  # 不让 cleanup 入队失败阻挡 worker 启动
+            await event_bus.publish(Event(
+                event_type="worker.startup_warning",
+                payload={"warning": "comment_cleanup enqueue failed", "error": str(exc)},
+            ))
         await event_bus.publish(Event(event_type="worker.started", payload={}))
 
     async def _clear_stale_failure_state(self) -> None:
@@ -125,6 +179,7 @@ class WorkerController:
             await self._set_state("error", error=str(exc))
 
     async def _tick(self) -> bool:
+        # P6 §5.1: pick 5 种支持任务类型中的下一个 pending
         async with session_scope() as db:
             # reset daily counters at date boundary
             ws = await self._get_or_create_status(db)
@@ -140,10 +195,14 @@ class WorkerController:
             # always returned None, so the budget / word-goal checks
             # were never enforced. Now we resolve policy against the
             # task's own project_id.
+            # P6 §5.1: 改用 SUPPORTED_TASKS in_(...) 派发
             task_row = (
                 await db.execute(
                     select(AgentTask)
-                    .where(AgentTask.status == "pending", AgentTask.task_type == "chapter_pipeline")
+                    .where(
+                        AgentTask.status == "pending",
+                        AgentTask.task_type.in_(SUPPORTED_TASKS),
+                    )
                     .order_by(AgentTask.priority.desc(), AgentTask.id.asc())
                     .limit(1)
                 )
@@ -175,28 +234,273 @@ class WorkerController:
             task_row.status = "running"
             task_row.started_at = datetime.utcnow()
             ws.current_task_id = task_row.id
-            chapter_id = task_row.chapter_id
             project_id = task_row.project_id
             await db.flush()
-            chapter = await db.get(Chapter, chapter_id) if chapter_id else None
-            if chapter is None:
-                task_row.status = "failed"
-                task_row.error = "Chapter missing"
-                await self._set_state_in_session(db, "error", error="Chapter missing")
-                return False
 
-        # Run the pipeline with a fresh session so commits roll forward per agent.
+        # P6 §5.2: dispatch by task_type. chapter_pipeline 走老路径
+        # (重 timeout / cancel / auto_continue), 其它 4 种走对应 service.
+        if task_row.task_type == "chapter_pipeline":
+            return await self._run_chapter_pipeline(task_row, ws, policy)
+        return await self._dispatch_event_task(task_row, ws, policy)
+
+    # ----- P6 §5.2: 派发 (event task) -----
+
+    async def _dispatch_event_task(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+        policy: WorkerPolicy,
+    ) -> bool:
+        """P6 §5.2: 4 种非 chapter_pipeline 任务的派发入口.
+
+        跟 chapter_pipeline 不同:
+          - 不重 30min timeout (这 4 种 task 都很快, 5min 封顶)
+          - 不在 budget 失败时停 worker (event task 跟 budget 解耦)
+          - 失败时把 task 标 failed, 发 task.failed 事件
+        """
+        target_task_id = task_row.id
+        # event task 跟 project 的 daily_budget / daily_word_goal 解耦
+        # (P6 §4 任务不等同 chapter pipeline 的产出, 不算 word).
+        try:
+            if task_row.task_type == "reader_review":
+                await self._run_reader_review(task_row, ws)
+            elif task_row.task_type == "comment_triage":
+                await self._run_comment_triage(task_row, ws)
+            elif task_row.task_type == "comment_discussion":
+                await self._run_comment_discussion(task_row, ws)
+            elif task_row.task_type == "comment_cleanup":
+                await self._run_comment_cleanup(task_row, ws)
+            else:
+                # 不应发生, _pick 已经过滤 SUPPORTED_TASKS
+                raise RuntimeError(
+                    f"_dispatch_event_task: 不支持 task_type={task_row.task_type}"
+                )
+            return True
+        except Exception as exc:
+            err_text = str(exc)
+            async with session_scope() as db:
+                t = await db.get(AgentTask, target_task_id)
+                t.status = "failed"
+                t.error = err_text
+                t.finished_at = datetime.utcnow()
+                ws3 = await self._get_or_create_status(db)
+                ws3.consecutive_failures += 0  # event 失败不算 worker 失败
+                ws3.last_error = err_text
+                ws3.current_task_id = None
+            await event_bus.publish(
+                Event(event_type="task.failed", payload={
+                    "task_id": target_task_id,
+                    "error": err_text,
+                    "task_type": task_row.task_type,
+                })
+            )
+            return False
+
+    async def _run_reader_review(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+    ) -> None:
+        """P6 §5.2: 5 读者 Agent 评审一章. 调 ReaderReviewService."""
+        from app.services.review import get_reader_review_service
+        payload = task_row.payload or {}
+        trigger = payload.get("trigger", "chapter_completed")
+        target_task_id = task_row.id
+        async with session_scope() as db:
+            t = await db.get(AgentTask, target_task_id)
+            outcome = await get_reader_review_service().run_for_chapter(
+                db,
+                project_id=task_row.project_id,
+                chapter_id=task_row.chapter_id,
+                trigger=trigger,
+            )
+            t.status = "succeeded"
+            t.finished_at = datetime.utcnow()
+            t.cost_usd = outcome.total_cost_usd
+            t.input_tokens = outcome.total_input_tokens
+            t.output_tokens = outcome.total_output_tokens
+            t.payload = {
+                **payload,
+                "run_id": outcome.run_id,
+                "status": outcome.status,
+                "comment_ids": outcome.comment_ids,
+                "succeeded_readers": outcome.reader_keys_succeeded,
+                "failed_readers": outcome.reader_keys_failed,
+            }
+            await self._set_state_in_session(db, "running")
+            ws2 = await self._get_or_create_status(db)
+            ws2.current_task_id = None
+            await db.flush()
+        await event_bus.publish(Event(
+            event_type="reader_review.completed",
+            payload={
+                "task_id": target_task_id,
+                "project_id": task_row.project_id,
+                "chapter_id": task_row.chapter_id,
+                "run_id": outcome.run_id,
+                "status": outcome.status,
+                "comment_count": len(outcome.comment_ids),
+            },
+        ))
+
+    async def _run_comment_triage(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+    ) -> None:
+        """P6 §5.2 + §5.4: 主 Agent 评论分流. 调 CommentTriageService."""
+        from app.services.review import get_comment_triage_service
+        target_task_id = task_row.id
+        async with session_scope() as db:
+            t = await db.get(AgentTask, target_task_id)
+            outcome = await get_comment_triage_service().run_for_chapter(
+                db,
+                project_id=task_row.project_id,
+                chapter_id=task_row.chapter_id,
+            )
+            t.status = "succeeded"
+            t.finished_at = datetime.utcnow()
+            t.payload = {
+                **(task_row.payload or {}),
+                "new_comment_count": outcome.new_comment_count,
+                "reply_count": outcome.reply_count,
+                "group_count": outcome.group_count,
+                "discuss_count": outcome.discuss_count,
+                "ignore_count": outcome.ignore_count,
+            }
+            await self._set_state_in_session(db, "running")
+            ws2 = await self._get_or_create_status(db)
+            ws2.current_task_id = None
+            await db.flush()
+        await event_bus.publish(Event(
+            event_type="comment_triage.completed",
+            payload={
+                "task_id": target_task_id,
+                "project_id": task_row.project_id,
+                "chapter_id": task_row.chapter_id,
+                "new_comment_count": outcome.new_comment_count,
+                "discuss_count": outcome.discuss_count,
+            },
+        ))
+
+    async def _run_comment_discussion(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+    ) -> None:
+        """P6 §5.2 + §4.4: 跑 DiscussionSession participant + synthesis.
+
+        P3 discussion_bridge 已经写好 session + meta turn + task 入队,
+        P4 worker 接管剩下 participant + synthesis 跑.
+        """
+        from app.services.review import get_comment_discussion_runner
+        target_task_id = task_row.id
+        async with session_scope() as db:
+            t = await db.get(AgentTask, target_task_id)
+            outcome = await get_comment_discussion_runner().run_for_task(db, task=t)
+            if outcome.session_status == "failed":
+                t.status = "failed"
+                t.error = outcome.error or "comment_discussion failed"
+            else:
+                t.status = "succeeded"
+            t.finished_at = datetime.utcnow()
+            t.payload = {
+                **(task_row.payload or {}),
+                "session_id": outcome.session_id,
+                "group_id": outcome.group_id,
+                "turn_count": outcome.turn_count,
+                "session_status": outcome.session_status,
+            }
+            await self._set_state_in_session(db, "running")
+            ws2 = await self._get_or_create_status(db)
+            ws2.current_task_id = None
+            await db.flush()
+        await event_bus.publish(Event(
+            event_type="comment_discussion.completed",
+            payload={
+                "task_id": target_task_id,
+                "session_id": outcome.session_id,
+                "group_id": outcome.group_id,
+                "turn_count": outcome.turn_count,
+                "session_status": outcome.session_status,
+            },
+        ))
+
+    async def _run_comment_cleanup(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+    ) -> None:
+        """P6 §5.2 + §4.6 + §5.5: 清理 7 天前过期的 review_comments."""
+        from app.services.review import get_comment_cleanup_service
+        target_task_id = task_row.id
+        payload = task_row.payload or {}
+        retention = int(payload.get("retention_days", 7))
+        async with session_scope() as db:
+            t = await db.get(AgentTask, target_task_id)
+            outcome = await get_comment_cleanup_service().cleanup_expired(
+                db, retention_days=retention,
+            )
+            t.status = "succeeded" if not outcome.error else "failed"
+            t.finished_at = datetime.utcnow()
+            t.error = outcome.error
+            t.payload = {
+                **payload,
+                "scanned": outcome.scanned,
+                "deleted": outcome.deleted,
+                "skipped_immortal": outcome.skipped_immortal,
+                "skipped_discussing": outcome.skipped_discussing,
+                "retention_days": outcome.retention_days,
+            }
+            await self._set_state_in_session(db, "running")
+            ws2 = await self._get_or_create_status(db)
+            ws2.current_task_id = None
+            await db.flush()
+        await event_bus.publish(Event(
+            event_type="comment_cleanup.completed",
+            payload={
+                "task_id": target_task_id,
+                "deleted": outcome.deleted,
+                "scanned": outcome.scanned,
+                "retention_days": outcome.retention_days,
+            },
+        ))
+
+    # ----- 老 chapter_pipeline 逻辑 (抽出来) -----
+
+    async def _run_chapter_pipeline(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+        policy: WorkerPolicy,
+    ) -> bool:
+        """P0-P3 老章节流水线, 抽自原 _tick() 内联.
+
+        关键不变量:
+          - 30 min wall-clock 封顶 (PIPELINE_TIMEOUT_S)
+          - 'cancelled by user' 异常: 标 cancelled, 不停 worker
+          - 其他失败: 标 failed, 累计 consecutive_failures,
+            达到 consecutive_fail_stop 时停 worker
+          - 成功: 入队下一章 (auto_continue) + P6 §5.3 入队 reader_review
+        """
+        chapter_id = task_row.chapter_id
+        if chapter_id is None:
+            # 没 chapter 关联的 pipeline 任务不该存在
+            await self._mark_task_failed(task_row.id, "Chapter missing")
+            return False
+        # 单独 session 校验 chapter
+        async with session_scope() as db:
+            chapter = await db.get(Chapter, chapter_id)
+            if chapter is None:
+                await self._mark_task_failed(task_row.id, "Chapter missing")
+                return False
+            chapter_no = chapter.chapter_no
+
         pipeline = ChapterPipeline()
         target_task_id = task_row.id
         project_id = task_row.project_id
-        chapter_id = task_row.chapter_id
-        chapter_no = chapter.chapter_no
-        # Hard upper bound on total pipeline wall time. Per-agent LLM
-        # calls already have a 600s read timeout × 2 retries, so a
-        # well-behaved run finishes in <10 min. Anything beyond 30 min
-        # almost certainly means a stuck connection to the LLM provider;
-        # abort the task instead of holding the worker hostage.
         PIPELINE_TIMEOUT_S = 1800
+
         try:
             async with session_scope() as db:
                 task = await db.get(AgentTask, target_task_id)
@@ -238,9 +542,6 @@ class WorkerController:
                         policy=policy2,
                     )
                     if next_task is None:
-                        # No outline for the next chapter — surface a
-                        # "waiting for outline" hint so the UI can
-                        # prompt the user.
                         await self._emit_event(
                             "worker.waiting_for_outline",
                             {
@@ -258,9 +559,31 @@ class WorkerController:
                                 "task_id": next_task.id,
                             },
                         )
+
+            # P6 §5.3: 章节完成后入队 reader_review (auto_reader_review 开关)
+            # 用 fresh session, 跟 P1-1 同样模式.
+            try:
+                from app.services.review import (
+                    ENQUEUE_SOURCE_AUTO_PIPELINE,
+                    get_review_queue,
+                )
+                async with session_scope() as db:
+                    await get_review_queue().enqueue_reader_review(
+                        db,
+                        project_id=project_id,
+                        chapter_id=chapter_id,
+                        trigger="chapter_completed",
+                        source=ENQUEUE_SOURCE_AUTO_PIPELINE,
+                    )
+            except Exception as exc:  # 入队失败不阻挡主线
+                await event_bus.publish(Event(
+                    event_type="worker.reader_review_enqueue_failed",
+                    payload={
+                        "project_id": project_id, "chapter_id": chapter_id,
+                        "error": str(exc),
+                    },
+                ))
         except asyncio.TimeoutError:
-            # P1-3-ish: pipeline exceeded wall-clock budget. Mark the
-            # task as failed with a clear reason so the user can retry.
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
                 t.status = "failed"
@@ -275,17 +598,10 @@ class WorkerController:
             )
         except Exception as exc:
             err_text = str(exc)
-            # P1-3 fix: a "Task N was cancelled by user" exception
-            # bubbling up from ``_ensure_not_cancelled`` is a clean
-            # stop, not a failure. Leave the task status as
-            # ``cancelled`` (the user already set it via the API) and
-            # don't bump consecutive_failures or stop the worker.
             if "cancelled by user" in err_text:
                 async with session_scope() as db:
                     t = await db.get(AgentTask, target_task_id)
                     if t and t.status != "cancelled":
-                        # Defensive: re-assert the cancel in case some
-                        # other path tried to flip it.
                         t.status = "cancelled"
                         t.finished_at = datetime.utcnow()
                     ws3 = await self._get_or_create_status(db)
@@ -314,6 +630,20 @@ class WorkerController:
                 Event(event_type="task.failed", payload={"task_id": target_task_id, "error": err_text})
             )
         return True
+
+    async def _mark_task_failed(self, task_id: int, error: str) -> None:
+        async with session_scope() as db:
+            t = await db.get(AgentTask, task_id)
+            t.status = "failed"
+            t.error = error
+            t.finished_at = datetime.utcnow()
+            ws2 = await self._get_or_create_status(db)
+            ws2.consecutive_failures += 1
+            ws2.last_error = error
+            ws2.current_task_id = None
+        await event_bus.publish(Event(
+            event_type="task.failed", payload={"task_id": task_id, "error": error},
+        ))
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Publish a worker-level event (no DB row, just SSE)."""

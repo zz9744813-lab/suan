@@ -226,6 +226,29 @@ async def create_comment(
     db.add(comment)
     await db.commit()
     await db.refresh(comment)
+    # P6 §5.4: 评论写入后, 自动入队 comment_triage 任务
+    # (auto_chief_triage 开关在 ReviewQueueService 内部判断, 关闭时静默跳过)
+    try:
+        from app.services.review import (
+            ENQUEUE_SOURCE_AUTO_COMMENT,
+            get_review_queue,
+        )
+        # 重新开 session, queue 走自己的 session_scope 避免污染请求 session
+        from app.core.database import session_scope
+        async with session_scope() as enq_db:
+            await get_review_queue().enqueue_triage(
+                enq_db,
+                project_id=comment.project_id,
+                chapter_id=comment.chapter_id,
+                source=ENQUEUE_SOURCE_AUTO_COMMENT,
+            )
+    except Exception as exc:  # 入队失败不阻挡评论写入成功
+        # 用 logger 写 stderr, 留 audit
+        import logging
+        logging.getLogger(__name__).warning(
+            "评论 %s 入队 comment_triage 失败: %s",
+            comment.id, str(exc),
+        )
     return {"ok": True, "data": ReviewCommentRead.model_validate(comment)}
 
 
