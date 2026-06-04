@@ -1042,6 +1042,29 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   border: 1px solid var(--accent-line-soft);
 }
 
+/* P0-OCCLUSION-1 (v3 防御性): 用户反馈怀疑有「左侧详情面板 /
+ * 抽屉的遮罩层」残留. 当前代码里 .graph-side-panel 都是 right:0
+ * (右侧), 也不存在 .overlay / .mask / .backdrop 等元素. 但如果
+ * 以后 R26+ 引入新的左侧面板, 误把 mask/backdrop 写成常驻渲染,
+ * 就会遮住左半边图谱. 这里加一条「零容忍」规则, 任何带这些
+ * 类的子元素, 在 graph page 内必须 display:none + 不可点击,
+ * 同时关闭状态绝不渲染遮罩 — 默认关到 root 层级也禁掉,
+ * 防止 z-index 较高时穿透到用户视区. */
+.graph-page .overlay,
+.graph-page .mask,
+.graph-page .backdrop,
+.graph-page .drawer-backdrop,
+.graph-page .side-panel-mask,
+.graph-page .graph-mask,
+.graph-page .graph-overlay,
+.graph-page .graph-backdrop,
+.graph-page .left-mask,
+.graph-page .left-overlay,
+.graph-page .left-backdrop {
+  display: none !important;
+  pointer-events: none !important;
+}
+
 /* focus pill (R24: 显示当前 focus 模式) */
 .graph-page .focus-pill {
   display: inline-flex;
