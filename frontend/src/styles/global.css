@@ -715,11 +715,16 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* R23: 交互式图谱 (GraphPage) — pan/zoom/drag/filter/search */
+/* R23: 交互式图谱 (GraphPage) — pan/zoom/drag/filter/search
+ * v4: 加 display:block + max-width:100% + height:auto, 防 SVG 在
+ * 非 graph-page 上下文 (万一被复用) 时撑爆布局. */
 .graph-svg {
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 .graph-svg:active { cursor: grabbing; }
 .graph-svg.edge-mode { cursor: crosshair; }
@@ -851,20 +856,13 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   text-decoration: underline;
 }
 
-/* 画布内提示 */
-.graph-hint {
-  position: absolute;
-  top: 8px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-elevated, rgba(20, 26, 40, 0.85));
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  pointer-events: none;
-  z-index: 10;
-  border: 1px solid var(--accent-line-soft);
-}
+/* P0-OCCLUSION-1 v4: 删掉原 .graph-hint 绝对定位版本. 这条规则
+ * 跟下面 scoped 的 .graph-page .graph-hint 同时存在, 两个都
+ * 写 position: absolute 但 top/left 不同, 浏览器按特异性挑
+ * .graph-page .graph-hint (胜), 但全局 .graph-hint 仍会作用
+ * 到任何用到这个 class 的元素上 (提示行未来可能复用到别处),
+ * 留着就是个雷. 直接删掉, 改用下面那条统一的静态流式规则. */
+/* .graph-hint: 历史规则 (line 855) 已删除 */
 
 /* 关系名 prompt (从节点拖到节点后弹出的输入框) */
 .graph-prompt {
@@ -1007,12 +1005,19 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
     radial-gradient(circle at 80% 100%, rgba(214,166,78,0.05), transparent 40%),
     var(--bg-base);
   position: relative;
-  /* P0-OCCLUSION-1: 防御性 — 防 svg 或子元素撑爆 main cell. */
+  /* P0-OCCLUSION-1 v4: 硬性禁止横向滚动. graph-page 自己 min/max
+   * 100%, 内部所有 * 都 min-width:0 — 任何"内容比容器宽"的情况
+   * 都会被截, 而不是把整个页面顶出 viewport 出现横向滚动条. */
   min-width: 0;
+  max-width: 100%;
   overflow-x: hidden;
-  /* 让 header/toolbar 在窄窗口下能换行而不是被切掉 */
+  /* v3 留的 container query hook, v4 不再使用但保留 (低开销, 后续
+   * 想用可以直接 @container). */
   container-type: inline-size;
 }
+/* v4: 兜底 — 任何 * 子元素都强制 min-width:0, 防止 inline-block /
+ * white-space:nowrap / 固定 width 的 child 把父容器撑出 100%. */
+.graph-page * { min-width: 0; }
 
 /* 点阵背景 */
 .graph-page.graph-neural .graph-canvas-wrap {
@@ -1020,22 +1025,36 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
     radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
   background-size: 28px 28px;
   background-position: 0 0;
-  /* P0-OCCLUSION-1 (v3): canvas-wrap 必须有 position + min-height +
-   * 内部 SVG 不能撑爆容器. 之前没有 min-width:0 + overflow:hidden,
-   * SVG 在某些 viewBox 配 preserveAspectRatio 下会让 wrapper 横向
-   * 溢出, 把整个 .main 撑出 100vw, 触发横向滚动条, 视觉上像是
-   * 「左侧被遮住」(其实是被推到了屏幕外). */
+  /* P0-OCCLUSION-1 (v4): canvas-wrap 是普通块级容器, 不允许跟
+   * 页面其它区域重叠. 关键是 isolation: isolate, 它给 wrapper
+   * 建立独立 stacking context, 任何内部元素的 z-index / opacity
+   * / transform 都不会逃出 wrapper — 防止内嵌的 .graph-prompt /
+   * .graph-hint / .graph-enrich-toast (历史上是 position:absolute)
+   * 跑出来覆盖到 toolbar 之上. 配合 overflow:hidden + min/max-width
+   * 100%, wrapper 自己永远 100% 宽度, 不可能越界盖到 header /
+   * 左导航. */
   position: relative;
+  display: block;
   width: 100%;
-  min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  border-radius: 6px;
-  /* 给 svg 一个有意义的最小高度, 避免 viewBox 在 0 height 时崩溃 */
+  min-width: 0;
   min-height: 320px;
+  overflow: hidden;
+  border-radius: 8px;
+  isolation: isolate;
 }
 
 .graph-page.graph-neural .graph-svg {
+  /* v4: 强制 svg block 化, 给明确 height, 不允许被 viewBox + preserve
+   * 把 wrapper 撑爆. 之前没 height, 浏览器在 SVG 没显式 height 时
+   * 会按 viewBox 比例算 intrinsic size, 某些 viewBox 比例下算出来
+   * 的高度会让 svg 在 wrapper 里 "溢出" 上方, 视觉上跟 toolbar 重叠. */
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: min(60vh, 700px);
+  min-height: 320px;
+  overflow: hidden;
   background:
     radial-gradient(ellipse at center, rgba(20,28,42,0.4), rgba(10,16,27,0.85));
   border-radius: 6px;
@@ -1292,15 +1311,29 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   padding: 0;
 }
 
-/* hint 行 */
+/* P0-OCCLUSION-1 v4: hint 行 (scoped 到 graph page)
+ *  之前: position: absolute; bottom: 4px; left: 12px; — 这条规则
+ *  把 hint 钉在 canvas-wrap 的左下角, 配上半透明背景, 视觉上
+ *  像 "画了一块深色矩形". 而且因为 .graph-canvas-wrap 在 R24 之后
+ *  加了 dot-pattern 背景, hint 的 absolute 浮层会跟点阵叠加, 让
+ *  左下角看起来"像被遮罩".
+ *  现在: hint 改成普通流式块级元素, 紧跟 toolbar 下方, 不再
+ *  绝对定位. 用户从 v4 开始看到的就是 "toolbar → hint 一行 →
+ *  canvas", hint 自己撑一行内容, 不会被任何绝对定位背景盖住. */
 .graph-page .graph-hint {
-  position: absolute;
-  bottom: 4px;
-  left: 12px;
+  position: static;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 6px 0 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(10, 16, 27, 0.45);
+  color: var(--text-muted);
   pointer-events: none;
-  background: rgba(10,16,27,0.5);
-  padding: 2px 6px;
-  border-radius: 3px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11px;
 }
 
 /* prompt 输入 (R23 沿用) */

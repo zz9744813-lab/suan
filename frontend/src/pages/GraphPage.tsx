@@ -907,6 +907,17 @@ export function GraphPage() {
         <button onClick={resetLayout} title="重置布局">↻</button>
       </div>
 
+      {/* P0-OCCLUSION-1 v4: hint 从 canvas-wrap 内部浮层改成普通
+       * 提示行, 放在 toolbar 跟 canvas 之间, position: static, 不
+       * 覆盖任何区域. 之前 v1-v3 都假设 hint 是 canvas 内部绝对
+       * 定位 (top/left: 8px), 但 css 里两套 .graph-hint 规则在抢
+       * 定位, 实际渲染时 hint 会覆盖到 canvas 之外的左侧区, 视觉
+       * 上像"深色大块遮住左侧". 改成静态流式元素后, hint 自身只
+       * 占据 toolbar 下方一行, 不再跟 canvas 的 z-index/bg 打架. */}
+      <div className="graph-hint muted tiny">
+        🖱️ 滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点选中 · <b>shift+点</b> 多选 · <b>双击</b> 聚焦该角色
+      </div>
+
       <div className="graph-canvas-wrap" ref={containerRef}>
         <svg
           ref={svgRef}
@@ -1024,10 +1035,6 @@ export function GraphPage() {
             )}
           </g>
         </svg>
-
-        <div className="graph-hint muted tiny">
-          🖱️ 滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点选中 · <b>shift+点</b> 多选 · <b>双击</b> 聚焦该角色
-        </div>
 
         {edgeRelationPrompt && (
           <div className="graph-prompt">
