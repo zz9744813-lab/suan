@@ -48,6 +48,13 @@ from app.models.deepstudy import (
     WritingTechnique,
 )
 from app.models.discussion import DiscussionSession, DiscussionTurn
+from app.models.agent_role import (
+    AgentModelBinding,
+    AgentPromptBinding,
+    AgentRole,
+    AgentRun,
+    AgentRunEvent,
+)
 
 __all__ = [
     "Project",
@@ -94,4 +101,10 @@ __all__ = [
     "StableCharacterState",
     "MemoryTimelineEvent",
     "DiscussionDecision",
+    # P4: Agent role / model binding / prompt binding / run / event
+    "AgentRole",
+    "AgentModelBinding",
+    "AgentPromptBinding",
+    "AgentRun",
+    "AgentRunEvent",
 ]

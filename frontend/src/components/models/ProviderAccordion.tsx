@@ -1,0 +1,101 @@
+/**
+ * ProviderAccordion — Provider 折叠摘要 (P4 §3)
+ *
+ * 默认折叠只显示摘要 (name / base url / 默认模型 / 模型数 / 启用 /
+ * 健康). 展开后显示完整编辑区 (跟原 ModelsPage 的 provider 编辑
+ * 逻辑一致, 但折叠态不再抢主视觉).
+ */
+import { useState } from "react";
+import type { ModelProvider } from "../../types";
+
+export function ProviderAccordion({
+  provider, defaultExpanded = false, onChange, onDelete, onTest, onHealth, onPreviewModels, busy,
+}: {
+  provider: ModelProvider;
+  defaultExpanded?: boolean;
+  onChange: (body: Partial<ModelProvider>) => Promise<void> | void;
+  onDelete: () => void;
+  onTest: () => void;
+  onHealth: (model?: string) => void;
+  onPreviewModels: (baseUrl: string, apiKey: string) => Promise<string[]> | void;
+  busy: { test?: boolean; health?: boolean; preview?: boolean };
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [draft, setDraft] = useState<Partial<ModelProvider>>({});
+  const healthColor = (() => {
+    const s = provider.last_health_status;
+    if (!s) return "gray";
+    if (s === "healthy") return "green";
+    if (s === "degraded") return "gold";
+    if (s === "unreachable" || s === "auth_failed" || s === "model_missing" || s === "unknown_error") return "red";
+    return "gray";
+  })();
+
+  return (
+    <div className={`provider-accordion ${expanded ? "expanded" : ""}`} data-health={healthColor}>
+      <button className="provider-accordion-head" onClick={() => setExpanded((v) => !v)}>
+        <span className="provider-accordion-caret">{expanded ? "▾" : "▸"}</span>
+        <span className="provider-accordion-name">{provider.name}</span>
+        <span className="provider-accordion-model">{provider.default_model}</span>
+        <span className="provider-accordion-count">{provider.model_list?.length ?? 0} 模型</span>
+        <span className="provider-accordion-baseurl" title={provider.base_url}>{provider.base_url}</span>
+        <span className={`provider-accordion-dot provider-accordion-dot-${healthColor}`} title={provider.last_health_status ?? "未测"} />
+        <span className="provider-accordion-enabled" data-on={provider.enabled}>{provider.enabled ? "启用" : "禁用"}</span>
+      </button>
+      {expanded && (
+        <div className="provider-accordion-body">
+          <Field label="名称">
+            <input className="input" defaultValue={provider.name} onBlur={(e) => e.target.value !== provider.name && onChange({ name: e.target.value })} />
+          </Field>
+          <Field label="Base URL">
+            <input className="input" defaultValue={provider.base_url} onBlur={(e) => e.target.value !== provider.base_url && onChange({ base_url: e.target.value })} />
+          </Field>
+          <Field label="API Key">
+            <input className="input" placeholder={provider.has_api_key ? provider.api_key : "未配置, 粘贴新 key"} onChange={(e) => setDraft((d) => ({ ...d, api_key: e.target.value }))} onBlur={() => draft.api_key && onChange({ api_key: draft.api_key })} />
+          </Field>
+          <Field label="默认模型">
+            <input className="input" defaultValue={provider.default_model} onBlur={(e) => e.target.value !== provider.default_model && onChange({ default_model: e.target.value })} />
+          </Field>
+          <Field label="模型列表 (逗号分隔)">
+            <input className="input" defaultValue={(provider.model_list ?? []).join(", ")} onBlur={(e) => {
+              const list = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+              if (JSON.stringify(list) !== JSON.stringify(provider.model_list ?? [])) onChange({ model_list: list });
+            }} />
+          </Field>
+          <Field label="启用">
+            <label className="inline-checkbox">
+              <input type="checkbox" defaultChecked={provider.enabled} onChange={(e) => onChange({ enabled: e.target.checked })} />
+              启用
+            </label>
+          </Field>
+          <div className="provider-accordion-actions">
+            <button onClick={onTest} disabled={busy.test}>{busy.test ? "测试中..." : "测试连接"}</button>
+            <button onClick={() => onHealth()} disabled={busy.health}>{busy.health ? "健康检查中..." : "健康检查"}</button>
+            <button
+              onClick={async () => {
+                const list = await onPreviewModels(provider.base_url, draft.api_key ?? "");
+                if (Array.isArray(list) && list.length > 0) onChange({ model_list: list });
+              }}
+              disabled={busy.preview}
+            >
+              {busy.preview ? "拉取中..." : "拉取模型列表"}
+            </button>
+            <button onClick={onDelete} className="danger">删除</button>
+          </div>
+          {provider.last_test_message && (
+            <div className="provider-accordion-hint">{provider.last_test_message}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="provider-accordion-field">
+      <label>{label}</label>
+      {children}
+    </div>
+  );
+}

@@ -1158,6 +1158,190 @@ export type ApplyDecisionResponse = {
   message: string;
 };
 
+// ===== P4: Agent Role / Model Binding / Prompt Binding / Run / Event =====
+// 跟 backend/app/schemas/agent_role.py 1:1 对应. P4 spec 05 §8/§9.
+export type AgentCategory =
+  | "writing" | "study" | "memory" | "discussion" | "custom";
+
+export type AgentRunMode = "manual" | "pipeline" | "scheduled" | "event";
+
+export type AgentStatus =
+  | "idle" | "queued" | "running" | "waiting"
+  | "succeeded" | "failed" | "disabled";
+
+export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
+  idle:      "待命",
+  queued:    "排队",
+  running:   "运行中",
+  waiting:   "等待上游",
+  succeeded: "完成",
+  failed:    "失败",
+  disabled:  "禁用",
+};
+
+export const AGENT_CATEGORY_LABEL: Record<AgentCategory, string> = {
+  writing:    "写作",
+  study:      "拆书",
+  memory:     "记忆",
+  discussion: "讨论",
+  custom:     "自定义",
+};
+
+// Avatar 样式 — 7 种内置 + 1 自定义
+export type AgentAvatarStyle =
+  | "orb" | "robot" | "scribe" | "critic" | "memory_core"
+  | "study_core" | "discussion_core" | "custom";
+
+export const AGENT_AVATAR_STYLES: { key: AgentAvatarStyle; label: string; emoji: string }[] = [
+  { key: "orb",              label: "光球",      emoji: "●" },
+  { key: "robot",            label: "机器人",    emoji: "⌬" },
+  { key: "scribe",           label: "执笔",      emoji: "✎" },
+  { key: "critic",           label: "天平",      emoji: "⚖" },
+  { key: "memory_core",      label: "记忆核",    emoji: "❖" },
+  { key: "study_core",       label: "研究核",    emoji: "☷" },
+  { key: "discussion_core",  label: "讨论核",    emoji: "☕" },
+  { key: "custom",           label: "自定义",    emoji: "✦" },
+];
+
+export type AgentRole = {
+  id: number;
+  key: string;
+  display_name: string;
+  description: string | null;
+  category: AgentCategory;
+  avatar_style: AgentAvatarStyle | null;
+  enabled: boolean;
+  visible_in_matrix: boolean;
+  run_mode: AgentRunMode;
+  pipeline_stage: string | null;
+  timeout_seconds: number;
+  max_retries: number;
+  concurrency_limit: number;
+  cost_limit_usd: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentModelBinding = {
+  id: number;
+  agent_role_id: number;
+  provider_id: number | null;
+  model_name: string | null;
+  fallback_provider_id: number | null;
+  fallback_model_name: string | null;
+  temperature: number | null;
+  max_tokens: number | null;
+  extra_body: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentPromptBinding = {
+  id: number;
+  agent_role_id: number;
+  system_prompt_template_id: number | null;
+  task_prompt_template_id: number | null;
+  output_schema: Record<string, any> | null;
+  strict_json: boolean;
+  evidence_required: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRun = {
+  id: number;
+  agent_role_id: number;
+  project_id: number | null;
+  task_id: number | null;
+  agent_step_id: number | null;
+  run_type: string;
+  status: string;
+  current_task: string | null;
+  progress: number;
+  provider_id: number | null;
+  model_name: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  elapsed_ms: number | null;
+  input_summary: string | null;
+  output_summary: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type AgentRunEvent = {
+  id: number;
+  agent_run_id: number;
+  event_type: string;
+  message: string;
+  payload: Record<string, any> | null;
+  created_at: string;
+};
+
+/** 矩阵一行 — 角色 + 绑定 + 最新 run 状态 (P4 §9.4). */
+export type AgentRoleMatrixItem = {
+  role: AgentRole;
+  binding: AgentModelBinding | null;
+  prompt_binding: AgentPromptBinding | null;
+  status: AgentStatus;
+  status_label: string;
+  current_task: string | null;
+  progress: number;
+  provider_name: string | null;
+  model_name: string | null;
+  last_run_id: number | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  total_runs: number;
+  recent_runs: AgentRun[];
+  recent_events: AgentRunEvent[];
+};
+
+export type AgentRoleMatrixResponse = {
+  items: AgentRoleMatrixItem[];
+  section_counts: Record<string, number>;
+};
+
+// ----- 创建 / 更新 Agent 表单 body -----
+export type AgentRoleCreateBody = {
+  key: string;
+  display_name: string;
+  description?: string | null;
+  category: AgentCategory;
+  avatar_style?: AgentAvatarStyle | null;
+  enabled?: boolean;
+  visible_in_matrix?: boolean;
+  run_mode?: AgentRunMode;
+  pipeline_stage?: string | null;
+  timeout_seconds?: number;
+  max_retries?: number;
+  concurrency_limit?: number;
+  cost_limit_usd?: number | null;
+};
+
+export type AgentRoleUpdateBody = Partial<Omit<AgentRoleCreateBody, "key">>;
+
+export type AgentModelBindingUpdateBody = {
+  provider_id?: number | null;
+  model_name?: string | null;
+  fallback_provider_id?: number | null;
+  fallback_model_name?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  extra_body?: Record<string, any> | null;
+};
+
+export type AgentPromptBindingUpdateBody = {
+  system_prompt_template_id?: number | null;
+  task_prompt_template_id?: number | null;
+  output_schema?: Record<string, any> | null;
+  strict_json?: boolean | null;
+  evidence_required?: boolean | null;
+};
+
 // ===== Global Search (Round 11, P0-UI-5) =====
 export type SearchResultType =
   | "project"

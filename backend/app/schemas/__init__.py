@@ -130,6 +130,19 @@ from app.schemas.memory_v2 import (
     StableMemoryEntityDetail,
     StableMemoryEntityRead,
 )
+from app.schemas.agent_role import (
+    AgentModelBindingRead,
+    AgentModelBindingUpdate,
+    AgentPromptBindingRead,
+    AgentPromptBindingUpdate,
+    AgentRoleCreate,
+    AgentRoleMatrixItem,
+    AgentRoleMatrixResponse,
+    AgentRoleRead,
+    AgentRoleUpdate,
+    AgentRunEventRead,
+    AgentRunRead,
+)
 
 __all__ = [
     "APIError",
@@ -247,4 +260,16 @@ __all__ = [
     "StableCharacterStateRead",
     "StableMemoryEntityDetail",
     "StableMemoryEntityRead",
+    # P4: Agent Role / Model / Prompt / Run / Event
+    "AgentModelBindingRead",
+    "AgentModelBindingUpdate",
+    "AgentPromptBindingRead",
+    "AgentPromptBindingUpdate",
+    "AgentRoleCreate",
+    "AgentRoleMatrixItem",
+    "AgentRoleMatrixResponse",
+    "AgentRoleRead",
+    "AgentRoleUpdate",
+    "AgentRunEventRead",
+    "AgentRunRead",
 ]

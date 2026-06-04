@@ -1,0 +1,63 @@
+/* AgentAvatar — 8 样式 × 7 状态, inline SVG 走 fill + stroke 切换 */
+
+.agent-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 2px solid var(--accent-line, #4a4a52);
+  transition: box-shadow 0.3s, transform 0.2s, border-color 0.3s;
+  flex-shrink: 0;
+}
+.agent-avatar svg {
+  fill: currentColor;
+  color: inherit;
+}
+
+/* 8 样式 — 不同 base 色 */
+.agent-avatar[data-style="orb"]             { color: #8a9bb0; }
+.agent-avatar[data-style="robot"]           { color: #7eb1d4; }
+.agent-avatar[data-style="scribe"]          { color: #d6a64e; }
+.agent-avatar[data-style="critic"]          { color: #c89478; }
+.agent-avatar[data-style="memory_core"]     { color: #5d9c5d; }
+.agent-avatar[data-style="study_core"]      { color: #a078c8; }
+.agent-avatar[data-style="discussion_core"] { color: #d4a8c8; }
+.agent-avatar[data-style="custom"]          { color: #e0c585; }
+
+/* 状态: idle 灰 (低饱和) */
+.agent-avatar[data-status="idle"] {
+  opacity: 0.55;
+  filter: saturate(0.5);
+}
+.agent-avatar[data-status="queued"] {
+  border-color: #d68a3e;
+  box-shadow: 0 0 0 1px rgba(214, 138, 62, 0.3);
+}
+.agent-avatar[data-status="running"] {
+  border-color: #6ec47e;
+  box-shadow: 0 0 12px rgba(110, 196, 126, 0.6);
+  animation: agent-avatar-pulse 1.6s ease-in-out infinite;
+}
+.agent-avatar[data-status="waiting"] {
+  border-color: #6e9ad6;
+  animation: agent-avatar-pulse 2.4s ease-in-out infinite;
+}
+.agent-avatar[data-status="succeeded"] {
+  border-color: #5d9c5d;
+  box-shadow: 0 0 0 1px rgba(93, 156, 93, 0.4);
+}
+.agent-avatar[data-status="failed"] {
+  border-color: #c45858;
+  box-shadow: 0 0 0 1px rgba(196, 88, 88, 0.4);
+}
+.agent-avatar[data-status="disabled"] {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
+
+@keyframes agent-avatar-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(110, 196, 126, 0.3); }
+  50%      { box-shadow: 0 0 16px rgba(110, 196, 126, 0.7); }
+}

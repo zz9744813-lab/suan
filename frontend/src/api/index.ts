@@ -580,6 +580,16 @@ export const listDeepStudyTechniques = (params: { q?: string; technique_type?: s
 import type {
   ApplyDecisionRequestBody,
   ApplyDecisionResponse,
+  AgentModelBinding,
+  AgentModelBindingUpdateBody,
+  AgentPromptBinding,
+  AgentPromptBindingUpdateBody,
+  AgentRole,
+  AgentRoleCreateBody,
+  AgentRoleMatrixResponse,
+  AgentRoleUpdateBody,
+  AgentRun,
+  AgentRunEvent,
   CabinetType,
   ConsolidateRequestBody,
   ConsolidateResponse,
@@ -663,3 +673,65 @@ export const listRawMemoryEntries = (
   const s = q.toString();
   return api.get<RawMemoryEntry[]>(`/api/project-memory/${projectId}/raw-entries${s ? `?${s}` : ""}`);
 };
+
+// ----- P4: Agent Role / Model Binding / Prompt Binding / Run -----
+// 后端端点 (P4 spec 05 §9, 12 个):
+//   GET    /api/agent-roles                        角色列表
+//   GET    /api/agent-roles/matrix                 角色矩阵 (核心)
+//   POST   /api/agent-roles                        新增角色
+//   GET    /api/agent-roles/{id}                   角色详情
+//   PUT    /api/agent-roles/{id}                   更新角色
+//   DELETE /api/agent-roles/{id}                   删除角色
+//   PUT    /api/agent-roles/{id}/model-binding     改绑模型
+//   PUT    /api/agent-roles/{id}/prompt-binding    改绑 prompt
+//   GET    /api/agent-runs/current                 当前 runs
+//   GET    /api/agent-runs?agent_role_id=          runs 历史
+//   GET    /api/agent-runs/{id}                    单 run
+//   GET    /api/agent-runs/{id}/events             run 事件流
+
+export const listAgentRoles = (params: { category?: string; enabled_only?: boolean } = {}) => {
+  const q = new URLSearchParams();
+  if (params.category) q.set("category", params.category);
+  if (params.enabled_only) q.set("enabled_only", "1");
+  const s = q.toString();
+  return api.get<AgentRole[]>(`/api/agent-roles${s ? `?${s}` : ""}`);
+};
+
+export const getAgentRoleMatrix = () =>
+  api.get<AgentRoleMatrixResponse>("/api/agent-roles/matrix");
+
+export const createAgentRole = (body: AgentRoleCreateBody) =>
+  api.post<AgentRole>("/api/agent-roles", body);
+
+export const getAgentRole = (id: number) =>
+  api.get<AgentRole>(`/api/agent-roles/${id}`);
+
+export const updateAgentRole = (id: number, body: AgentRoleUpdateBody) =>
+  api.put<AgentRole>(`/api/agent-roles/${id}`, body);
+
+export const deleteAgentRole = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/agent-roles/${id}`);
+
+export const updateAgentModelBinding = (id: number, body: AgentModelBindingUpdateBody) =>
+  api.put<AgentModelBinding>(`/api/agent-roles/${id}/model-binding`, body);
+
+export const updateAgentPromptBinding = (id: number, body: AgentPromptBindingUpdateBody) =>
+  api.put<AgentPromptBinding>(`/api/agent-roles/${id}/prompt-binding`, body);
+
+export const listCurrentAgentRuns = () =>
+  api.get<AgentRun[]>("/api/agent-runs/current");
+
+export const listAgentRuns = (params: { agent_role_id?: number; project_id?: number; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.agent_role_id != null) q.set("agent_role_id", String(params.agent_role_id));
+  if (params.project_id != null) q.set("project_id", String(params.project_id));
+  if (params.limit != null) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<AgentRun[]>(`/api/agent-runs${s ? `?${s}` : ""}`);
+};
+
+export const getAgentRun = (id: number) =>
+  api.get<AgentRun>(`/api/agent-runs/${id}`);
+
+export const getAgentRunEvents = (id: number, limit = 100) =>
+  api.get<AgentRunEvent[]>(`/api/agent-runs/${id}/events?limit=${limit}`);

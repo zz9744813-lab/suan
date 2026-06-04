@@ -7,10 +7,54 @@ from datetime import datetime
 from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal, init_db
+from app.models.agent_role import AgentModelBinding, AgentPromptBinding, AgentRole
 from app.models.model_provider import ModelProvider, ModelRoleAssignment
 from app.models.prompt import PromptTemplate, PromptVersion
 from app.models.task import WorkerStatus
 from app.prompts.default import WRITING_PROMPTS
+
+
+# P4 §10 — 11 个默认 AgentRole. 矩阵默认显示前 9 个, 后 3 个
+# 折叠到"更多". P4 这一轮 visible_in_matrix 全部 True, 后续
+# Matrix UI 内部按 category 分组 (writing/study/memory/discussion).
+DEFAULT_AGENT_ROLES: list[dict] = [
+    # 写作 5 件套 (P4 §10 矩阵默认显示)
+    {"key": "planner",     "display_name": "Planner",     "description": "章节规划 — 主设定 + 大纲 + StableMemory + 伏笔 → chapter_plan",
+     "category": "writing", "avatar_style": "scribe",      "run_mode": "pipeline",
+     "pipeline_stage": "plan"},
+    {"key": "drafter",     "display_name": "Drafter",     "description": "主笔 — chapter_plan + scene beats → 章节正文",
+     "category": "writing", "avatar_style": "scribe",      "run_mode": "pipeline",
+     "pipeline_stage": "draft"},
+    {"key": "critic",      "display_name": "Critic",      "description": "审稿 — 维度打分 + 改写建议",
+     "category": "writing", "avatar_style": "critic",      "run_mode": "pipeline",
+     "pipeline_stage": "review"},
+    {"key": "rewriter",    "display_name": "Rewriter",    "description": "改写 — 采纳 critic 建议生成 rewrite_N",
+     "category": "writing", "avatar_style": "scribe",      "run_mode": "pipeline",
+     "pipeline_stage": "rewrite"},
+    {"key": "continuity",  "display_name": "Continuity",  "description": "连戏 — 状态对账 + 一致性",
+     "category": "writing", "avatar_style": "memory_core", "run_mode": "pipeline",
+     "pipeline_stage": "continuity"},
+    # 记忆类 (P4 §10 矩阵默认显示)
+    {"key": "memory_update","display_name": "Memory",     "description": "MemoryUpdate — 章节写完后写 RawMemoryEntry",
+     "category": "memory",  "avatar_style": "memory_core", "run_mode": "pipeline",
+     "pipeline_stage": "memory_update"},
+    # 拆书类 (P4 §10 矩阵默认显示)
+    {"key": "deep_study",  "display_name": "DeepStudy",   "description": "DeepStudyCoordinator — 8 子 Agent 流水线",
+     "category": "study",   "avatar_style": "study_core",  "run_mode": "manual"},
+    # 讨论类 (P4 §10 矩阵默认显示)
+    {"key": "discussion",  "display_name": "Discussion",  "description": "DiscussionAgent — 5 角色讨论室 + 裁决",
+     "category": "discussion", "avatar_style": "discussion_core", "run_mode": "manual"},
+    # 高级 (P4 §10 折叠到"更多")
+    {"key": "memory_consolidator", "display_name": "MemoryConsolidator",
+     "description": "MemoryConsolidator — 二次加工 (去重 / 合并 / 冲突识别)",
+     "category": "memory",  "avatar_style": "memory_core", "run_mode": "manual"},
+    {"key": "technique_distill",   "display_name": "TechniqueDistill",
+     "description": "TechniqueDistill — 拆书写作技巧蒸馏",
+     "category": "study",   "avatar_style": "study_core",  "run_mode": "manual"},
+    {"key": "study_critic",        "display_name": "StudyCritic",
+     "description": "StudyCritic — 知识密度打分",
+     "category": "study",   "avatar_style": "critic",      "run_mode": "manual"},
+]
 
 
 DEFAULT_ROLE_ASSIGNMENTS: list[tuple[str, str, str, float, int]] = [
@@ -171,6 +215,23 @@ async def seed() -> None:
         ws = await db.get(WorkerStatus, 1)
         if ws is None:
             db.add(WorkerStatus(id=1, state="idle"))
+
+        # 5. P4: 默认 11 个 AgentRole + 默认 AgentModelBinding (走 stub)
+        for spec in DEFAULT_AGENT_ROLES:
+            exists = (await db.execute(
+                select(AgentRole).where(AgentRole.key == spec["key"])
+            )).scalar_one_or_none()
+            if exists is None:
+                row = AgentRole(**spec)
+                db.add(row)
+                await db.flush()
+                # 默认 binding: 走 stub provider, 跟旧 ModelRoleAssignment
+                # 行为保持一致 (P4 §10)
+                db.add(AgentModelBinding(
+                    agent_role_id=row.id,
+                    provider_id=stub.id,
+                    model_name="mock-fast",
+                ))
 
         await db.commit()
 
