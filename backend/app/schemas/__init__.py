@@ -143,6 +143,25 @@ from app.schemas.agent_role import (
     AgentRunEventRead,
     AgentRunRead,
 )
+from app.schemas.review import (
+    GroupDecisionRequest,
+    GroupDiscussRequest,
+    ReaderAgentProfileRead,
+    ReaderReviewRunCreate,
+    ReaderReviewRunRead,
+    ReviewCommentCreate,
+    ReviewCommentGroupCreate,
+    ReviewCommentGroupDetail,
+    ReviewCommentGroupRead,
+    ReviewCommentGroupUpdate,
+    ReviewCommentListResponse,
+    ReviewCommentRead,
+    ReviewCommentReplyCreate,
+    ReviewCommentUpdate,
+    ReviewCommentWithReplies,
+    ReviewSettingsRead,
+    ReviewSettingsUpdate,
+)
 
 __all__ = [
     "APIError",
@@ -272,4 +291,22 @@ __all__ = [
     "AgentRoleUpdate",
     "AgentRunEventRead",
     "AgentRunRead",
+    # P6 §6: 评论 / 评论组 / 读者评审 / 设置
+    "GroupDecisionRequest",
+    "GroupDiscussRequest",
+    "ReaderAgentProfileRead",
+    "ReaderReviewRunCreate",
+    "ReaderReviewRunRead",
+    "ReviewCommentCreate",
+    "ReviewCommentGroupCreate",
+    "ReviewCommentGroupDetail",
+    "ReviewCommentGroupRead",
+    "ReviewCommentGroupUpdate",
+    "ReviewCommentListResponse",
+    "ReviewCommentRead",
+    "ReviewCommentReplyCreate",
+    "ReviewCommentUpdate",
+    "ReviewCommentWithReplies",
+    "ReviewSettingsRead",
+    "ReviewSettingsUpdate",
 ]

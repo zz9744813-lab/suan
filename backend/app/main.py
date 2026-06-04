@@ -26,6 +26,7 @@ from app.routers import (
     project_memory,
     projects,
     prompts,
+    reviews,
     search,
     study,
     tasks,
@@ -102,5 +103,6 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           models.router, worker.router, chief_agent.router, memory.router,
           events.router, study.router, behavior.router, graph.router,
           discussion.router, search.router, deepstudy.router,
-          project_memory.router, agent_roles.router, agent_roles.agent_runs_router):
+          project_memory.router, agent_roles.router, agent_roles.agent_runs_router,
+          reviews.router):
     app.include_router(r, prefix=PREFIX)
