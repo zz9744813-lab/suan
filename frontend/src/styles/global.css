@@ -985,6 +985,19 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
     radial-gradient(circle at 80% 100%, rgba(214,166,78,0.05), transparent 40%),
     var(--bg-base);
   position: relative;
+  /* P0-OCCLUSION-1 (R25 followup): 在窄窗口(<1280) 下, 标题/过滤
+   * 搜索那一行会被左侧 rail 盖住. 加 16px padding-left 让内容
+   * 离 rail 边缘有点呼吸距离, 不会被遮.
+   *
+   * 32px 是个保守值: rail 56px 已经有 8px 内边距, 16px 视觉间隔
+   * + 8px 防御 buffer, 合计刚好在 main 区域靠左但不会被盖.
+   */
+  padding-left: 32px;
+  padding-right: 16px;
+  /* 防 svg 横向溢出: 页面 grid 已经管 main 宽度, 这里 min-width
+   * 0 配合 minmax(0, 1fr) 强制 main 可收缩, 不会被 svg 撑爆. */
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 /* 点阵背景 */
