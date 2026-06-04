@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   listPromptTemplates, listPromptVersions, createPromptVersion, activatePromptVersion,
+  createPromptTemplate, deletePromptTemplate, getTemplateUsage,
 } from "../api";
 import type { PromptTemplate, PromptVersion } from "../types";
 import { PromptVersionViewer } from "../components/prompts/PromptVersionViewer";
 
 export function PromptsPage() {
+  const navigate = useNavigate();
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [active, setActive] = useState<PromptTemplate | null>(null);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [editing, setEditing] = useState<{ body: string; note: string; activate: boolean } | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTpl, setNewTpl] = useState({ template_key: "", name: "", category: "writing", role: "Draft", genre: "", initial_body: "" });
 
   useEffect(() => { listPromptTemplates().then(setTemplates).catch(() => {}); }, []);
 
@@ -58,6 +63,10 @@ export function PromptsPage() {
     <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100%", minHeight: 0 }}>
       <aside className="card" style={{ margin: 16, overflow: "auto", borderRadius: 6 }}>
         <h3 style={{ margin: "0 0 12px" }}>Prompt 模板</h3>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button className="btn btn-sm" onClick={() => setShowCreate(true)} title="新建模板">+ 新建</button>
+          <button className="btn btn-sm" onClick={() => navigate("/prompts-matrix")} title="类型矩阵">▦ 矩阵</button>
+        </div>
         {Object.entries(byCategory).map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 16 }}>
             <div className="muted tiny" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{cat}</div>
@@ -211,6 +220,75 @@ export function PromptsPage() {
           </div>
         )}
       </main>
+
+      {/* P7: New template creation dialog */}
+      {showCreate && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="card" style={{ width: 520, maxHeight: "90vh", overflow: "auto", padding: 24 }}>
+            <h3 style={{ margin: "0 0 16px" }}>新建 Prompt 模板</h3>
+            <label>名称</label>
+            <input value={newTpl.name} onChange={(e) => setNewTpl({ ...newTpl, name: e.target.value, template_key: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })} placeholder="都市爽文流·写手" />
+            <label>Key</label>
+            <input value={newTpl.template_key} onChange={(e) => setNewTpl({ ...newTpl, template_key: e.target.value })} placeholder="drafter_urban_smooth" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div>
+                <label>分类</label>
+                <select value={newTpl.category} onChange={(e) => setNewTpl({ ...newTpl, category: e.target.value })}>
+                  <option value="writing">writing</option>
+                  <option value="review">review</option>
+                  <option value="study">study</option>
+                  <option value="memory">memory</option>
+                  <option value="chief">chief</option>
+                </select>
+              </div>
+              <div>
+                <label>角色</label>
+                <select value={newTpl.role} onChange={(e) => setNewTpl({ ...newTpl, role: e.target.value })}>
+                  <option value="Draft">Draft</option>
+                  <option value="Planner">Planner</option>
+                  <option value="Critic">Critic</option>
+                  <option value="Rewrite">Rewrite</option>
+                  <option value="Continuity">Continuity</option>
+                  <option value="MemoryUpdate">MemoryUpdate</option>
+                </select>
+              </div>
+            </div>
+            <label>类型 (genre)</label>
+            <select value={newTpl.genre} onChange={(e) => setNewTpl({ ...newTpl, genre: e.target.value })}>
+              <option value="">通用</option>
+              <option value="玄幻">玄幻</option>
+              <option value="都市">都市</option>
+              <option value="科幻">科幻</option>
+              <option value="历史">历史</option>
+              <option value="悬疑">悬疑</option>
+              <option value="言情">言情</option>
+            </select>
+            <label>初始正文</label>
+            <textarea value={newTpl.initial_body} onChange={(e) => setNewTpl({ ...newTpl, initial_body: e.target.value })} rows={10} style={{ fontFamily: "var(--font-mono)" }} placeholder="你是一位专注于…的写手…" />
+            <div className="row" style={{ marginTop: 12 }}>
+              <button onClick={() => setShowCreate(false)}>取消</button>
+              <span className="spacer" />
+              <button className="primary" onClick={async () => {
+                if (!newTpl.template_key || !newTpl.name) { alert("Key 和名称必填"); return; }
+                try {
+                  const tpl = await createPromptTemplate({
+                    template_key: newTpl.template_key,
+                    name: newTpl.name,
+                    category: newTpl.category,
+                    role: newTpl.role,
+                    genre: newTpl.genre || null,
+                    initial_body: newTpl.initial_body,
+                  });
+                  setTemplates([...templates, tpl]);
+                  setShowCreate(false);
+                  setNewTpl({ template_key: "", name: "", category: "writing", role: "Draft", genre: "", initial_body: "" });
+                  pickTemplate(tpl);
+                } catch (e: any) { alert(e.message || "创建失败"); }
+              }}>创建</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

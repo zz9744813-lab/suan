@@ -47,6 +47,11 @@ import type {
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
+  // P7
+  GenrePromptMapping,
+  GenrePromptMatrixResponse,
+  PromptSnapshotDetail,
+  TemplateUsageRead,
 } from "../types";
 
 // ----- projects -----
@@ -735,3 +740,46 @@ export const getAgentRun = (id: number) =>
 
 export const getAgentRunEvents = (id: number, limit = 100) =>
   api.get<AgentRunEvent[]>(`/api/agent-runs/${id}/events?limit=${limit}`);
+
+// ============================================================
+// P7: Genre-Prompt mapping API
+// ============================================================
+export const getGenrePromptMatrix = () =>
+  api.get<GenrePromptMatrixResponse>("/api/genre-prompts/matrix");
+
+export const bindGenrePrompt = (data: { agent_role_key: string; genre: string; prompt_template_id: number; priority?: number }) =>
+  api.put<GenrePromptMapping>("/api/genre-prompts/bind", data);
+
+export const unbindGenrePrompt = (data: { agent_role_key: string; genre: string; prompt_template_id: number }) => {
+  const q = new URLSearchParams({ agent_role_key: data.agent_role_key, genre: data.genre, prompt_template_id: String(data.prompt_template_id) });
+  return api.delete<{ deleted: number }>(`/api/genre-prompts/unbind?${q.toString()}`);
+};
+
+export const reorderGenrePrompts = (items: { id: number; sort_order: number }[]) =>
+  api.put<{ updated: number }>("/api/genre-prompts/reorder", { items });
+
+export const getAvailableTemplates = (agent_role_key: string, genre?: string) => {
+  const g = genre || "";
+  return api.get<{ id: number; template_key: string; name: string; genre: string | null; category: string; role: string }[]>(
+    `/api/genre-prompts/available?agent_role_key=${agent_role_key}&genre=${g}`
+  );
+};
+
+export const getProjectPromptAudit = (projectId: number) =>
+  api.get<PromptSnapshotDetail[]>(`/api/genre-prompts/projects/${projectId}/prompt-audit`);
+
+export const getChapterPromptAudit = (projectId: number, chapterId: number) =>
+  api.get<PromptSnapshotDetail>(`/api/genre-prompts/projects/${projectId}/chapters/${chapterId}/prompt-audit`);
+
+export const createPromptTemplate = (data: {
+  template_key: string; name: string; category?: string; role?: string;
+  scope?: string; genre?: string | null; description?: string | null;
+  initial_body?: string;
+}) =>
+  api.post<PromptTemplate>("/api/prompts/templates", data);
+
+export const deletePromptTemplate = (id: number) =>
+  api.delete<{ deleted: number }>(`/api/prompts/templates/${id}`);
+
+export const getTemplateUsage = (id: number) =>
+  api.get<TemplateUsageRead>(`/api/genre-prompts/templates/${id}/usage`);

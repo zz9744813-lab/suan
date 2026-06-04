@@ -31,6 +31,7 @@ const CORE_ITEMS: Item[] = [
 
 const LEARN_ITEMS: Item[] = [
   { to: "/prompts",    label: "Prompt",   icon: "✎" },
+  { to: "/prompts-matrix", label: "Prompt矩阵", icon: "▦" },
   { to: "/models",     label: "模型",     icon: "◈" },
   { to: "/study",      label: "拆书",     icon: "☷" },
   { to: "/behavior",   label: "行为模式", icon: "✺" },

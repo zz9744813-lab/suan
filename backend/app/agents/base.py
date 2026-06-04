@@ -29,6 +29,7 @@ class AgentContext:
     task: AgentTask
     project_id: int
     chapter_id: int | None
+    project_genre: str | None = None  # P7: genre for prompt routing
     inputs: dict[str, Any] = field(default_factory=dict)
 
 
@@ -82,8 +83,13 @@ class BaseAgent(ABC):
         ctx.db.add(step)
         await ctx.db.flush()
 
-        # 2. render the prompt
-        rendered = await self.engine.render(ctx.db, self.prompt_key, ctx.inputs)
+        # 2. render the prompt (P7: genre-aware routing)
+        rendered = await self.engine.resolve_for_agent(
+            ctx.db, self.prompt_key, ctx.project_genre, ctx.inputs,
+        )
+        if rendered is None:
+            # No genre mapping — fall back to hardcoded prompt_key
+            rendered = await self.engine.render(ctx.db, self.prompt_key, ctx.inputs)
         step.input_prompt = rendered.body
         step.prompt_template_id = rendered.template_id
         step.prompt_version = rendered.version

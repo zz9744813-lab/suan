@@ -20,6 +20,7 @@ from app.routers import (
     deepstudy,
     discussion,
     events,
+    genre_prompts,
     graph,
     memory,
     models,
@@ -104,5 +105,5 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           events.router, study.router, behavior.router, graph.router,
           discussion.router, search.router, deepstudy.router,
           project_memory.router, agent_roles.router, agent_roles.agent_runs_router,
-          reviews.router):
+          reviews.router, genre_prompts.router):
     app.include_router(r, prefix=PREFIX)

@@ -9,11 +9,13 @@ import { TasksPage } from "./pages/TasksPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { StudyLibraryPage, StudyBookGraphPage } from "./pages/StudyLibraryPage";
+import { StudyPage } from "./pages/StudyPage";
 import { DiscussionPage } from "./pages/DiscussionPage";
 import { MemoryShelfPage, MemoryArchivePage } from "./pages/MemoryShelfPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
+import { GenrePromptMatrixPage } from "./pages/GenrePromptMatrixPage";
 import { NotFound } from "./pages/NotFound";
 
 // P0-MODEL-9: dev-mode banner so the operator can see at a glance
@@ -67,10 +69,14 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/models" element={<ModelsPage />} />
-        {/* P0 (01 §6) 路由基础规范: 新增 /study/library, 旧 /study
-         *  重定向到这里; 旧 /study 不破坏, 仍能直接打开. 后续 P2
-         *  把 StudyPage 内部改成书架结构, 旧 URL 一起切到新版本. */}
-        <Route path="/study" element={<Navigate to="/study/library" replace />} />
+        {/* P0 (01 §6) 路由基础规范: /study/library 是 P2 拆书书架
+         * (主入口, 查书/启动 DeepStudy/看知识网络).
+         * 旧 /study 重新挂上旧版 StudyPage, 给书架上的"📤 上传 /
+         * 粘贴 / 行为模式"按钮当落地页. P2 commit 漏了这一步,
+         * 旧路径被注释承诺"仍能直接打开", 实际把 /study 硬重定向
+         * 到 /study/library 自己, 让按钮 click 看似无响应.
+         * 这里改成渲染旧版 StudyPage, 书架 + 上传页各司其职. */}
+        <Route path="/study" element={<StudyPage />} />
         <Route path="/study/library" element={<StudyLibraryPage />} />
         <Route path="/study/books/:materialId/graph" element={<StudyBookGraphPage />} />
         <Route path="/behavior" element={<BehaviorPage />} />
@@ -82,6 +88,8 @@ export default function App() {
         <Route path="/memory/:projectId" element={<MemoryArchivePage />} />
         {/* P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7) */}
         <Route path="/reviews" element={<ReviewCommentsPage />} />
+        {/* P7: Genre-Prompt matrix with drag-drop */}
+        <Route path="/prompts-matrix" element={<GenrePromptMatrixPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

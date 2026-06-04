@@ -62,6 +62,10 @@ from app.models.comment_review import (
     ReviewCommentGroup,
     ReviewSettings,
 )
+from app.models.genre_prompt_map import (
+    GenrePromptMapping,
+    ProjectPromptSnapshot,
+)
 
 __all__ = [
     "Project",
@@ -120,4 +124,7 @@ __all__ = [
     "ReviewCommentGroup",
     "ReaderReviewRun",
     "ReviewSettings",
+    # P7: Genre-Prompt mapping + traceability
+    "GenrePromptMapping",
+    "ProjectPromptSnapshot",
 ]

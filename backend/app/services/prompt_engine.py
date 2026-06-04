@@ -3,6 +3,8 @@
 The engine enforces the spec §7 isolation rules by refusing to allow
 `forbidden_inputs` to leak into the rendered prompt, and by stamping a
 provenance block listing exactly which template/version was used.
+
+P7: Added `resolve_for_agent()` — genre-aware template routing.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import bad_request, not_found
+from app.models.genre_prompt_map import GenrePromptMapping
 from app.models.prompt import PromptTemplate, PromptVersion
 
 
@@ -28,7 +31,8 @@ class RenderedPrompt:
     body: str
     role: str
     category: str
-    warnings: list[str]
+    genre: str | None = None
+    warnings: list[str] | None = None
 
 
 class PromptEngine:
@@ -62,6 +66,74 @@ class PromptEngine:
         if ver is None:
             raise bad_request(f"Prompt '{template_key}' 没有任何版本。")
         return tpl, ver
+
+    # ============================================================
+    # P7: Genre-aware prompt resolution
+    # ============================================================
+    async def resolve_for_agent(
+        self,
+        db: AsyncSession,
+        agent_role_key: str,
+        project_genre: str | None,
+        inputs: dict[str, Any],
+    ) -> RenderedPrompt:
+        """Resolve the best prompt template for (agent, genre) and render it.
+
+        Lookup order:
+        1. genre_prompt_mapping WHERE agent_role_key=X AND genre=Y (exact match)
+        2. genre_prompt_mapping WHERE agent_role_key=X AND genre="" (generic fallback)
+        3. Fall back to the agent's hardcoded prompt_key (legacy path)
+        """
+        tpl: PromptTemplate | None = None
+
+        # Step 1: exact genre match
+        if project_genre:
+            mapping = (await db.execute(
+                select(GenrePromptMapping)
+                .where(
+                    GenrePromptMapping.agent_role_key == agent_role_key,
+                    GenrePromptMapping.genre == project_genre,
+                )
+                .order_by(GenrePromptMapping.priority.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if mapping:
+                tpl = await db.get(PromptTemplate, mapping.prompt_template_id)
+
+        # Step 2: generic fallback (genre="")
+        if tpl is None:
+            mapping = (await db.execute(
+                select(GenrePromptMapping)
+                .where(
+                    GenrePromptMapping.agent_role_key == agent_role_key,
+                    GenrePromptMapping.genre == "",
+                )
+                .order_by(GenrePromptMapping.priority.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if mapping:
+                tpl = await db.get(PromptTemplate, mapping.prompt_template_id)
+
+        # Step 3: no mapping found — return None signal (caller falls back)
+        if tpl is None:
+            return None  # type: ignore[return-value]
+
+        # Get active version
+        ver = (await db.execute(
+            select(PromptVersion)
+            .where(PromptVersion.template_id == tpl.id, PromptVersion.status == "active")
+            .order_by(PromptVersion.version.desc())
+        )).scalar_one_or_none()
+        if ver is None:
+            ver = (await db.execute(
+                select(PromptVersion)
+                .where(PromptVersion.template_id == tpl.id)
+                .order_by(PromptVersion.version.desc())
+            )).scalar_one_or_none()
+        if ver is None:
+            raise bad_request(f"Genre-mapped prompt '{tpl.template_key}' 没有任何版本。")
+
+        return self._render(tpl, ver, inputs)
 
     async def render(
         self,
@@ -116,6 +188,7 @@ class PromptEngine:
             body=rendered,
             role=tpl.role,
             category=tpl.category,
+            genre=tpl.genre,
             warnings=warnings,
         )
 

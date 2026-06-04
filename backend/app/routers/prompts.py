@@ -8,9 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.errors import not_found
+from app.core.errors import bad_request, conflict, not_found
 from app.models.prompt import PromptTemplate, PromptVersion
-from app.schemas import APIResponse, PromptTemplateRead, PromptVersionRead, PromptVersionUpdate
+from app.schemas import (
+    APIResponse,
+    PromptTemplateCreate,
+    PromptTemplateRead,
+    PromptVersionRead,
+    PromptVersionUpdate,
+)
 
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
@@ -30,6 +36,63 @@ async def get_template(template_id: int, db: AsyncSession = Depends(get_db)) -> 
     if row is None:
         raise not_found("PromptTemplate", template_id)
     return {"ok": True, "data": PromptTemplateRead.model_validate(row)}
+
+
+@router.post("/templates", response_model=APIResponse[PromptTemplateRead], status_code=201)
+async def create_template(body: PromptTemplateCreate, db: AsyncSession = Depends(get_db)):
+    # Check template_key uniqueness
+    existing = (await db.execute(
+        select(PromptTemplate).where(PromptTemplate.template_key == body.template_key)
+    )).scalar_one_or_none()
+    if existing:
+        raise conflict(f"template_key 已存在: {body.template_key}", suggestion="换一个唯一的 key")
+
+    tpl = PromptTemplate(
+        template_key=body.template_key,
+        name=body.name,
+        category=body.category,
+        role=body.role,
+        scope=body.scope,
+        genre=body.genre,
+        description=body.description,
+        allowed_inputs=body.allowed_inputs,
+        forbidden_inputs=body.forbidden_inputs,
+        output_schema=body.output_schema,
+        can_modify=body.can_modify,
+        cannot_modify=body.cannot_modify,
+        hard_rules=body.hard_rules,
+        immutable=False,  # user-created templates are always mutable
+    )
+    db.add(tpl)
+    await db.flush()
+
+    # Create initial version if body provided
+    if body.initial_body:
+        ver = PromptVersion(
+            template_id=tpl.id,
+            version=1,
+            body=body.initial_body,
+            status="active",
+            change_note="初始版本",
+        )
+        db.add(ver)
+        await db.flush()
+        tpl.active_version_id = ver.id
+
+    await db.flush()
+    return {"ok": True, "data": PromptTemplateRead.model_validate(tpl)}
+
+
+@router.delete("/templates/{template_id}", response_model=APIResponse[dict])
+async def delete_template(template_id: int, db: AsyncSession = Depends(get_db)):
+    tpl = await db.get(PromptTemplate, template_id)
+    if tpl is None:
+        raise not_found("PromptTemplate", template_id)
+    if tpl.immutable:
+        raise bad_request("内置模板不可删除", suggestion="你可以解绑它，但不能删除内置模板。")
+    await db.delete(tpl)
+    await db.flush()
+    return {"ok": True, "data": {"deleted": template_id}}
 
 
 @router.get("/{template_id}/versions", response_model=APIResponse[list[PromptVersionRead]])

@@ -30,6 +30,7 @@ class PromptTemplate(Base):
     can_modify: Mapped[list[str]] = mapped_column(JSON, default=list)
     cannot_modify: Mapped[list[str]] = mapped_column(JSON, default=list)
     hard_rules: Mapped[list[str]] = mapped_column(JSON, default=list)
+    immutable: Mapped[bool] = mapped_column(Boolean, default=False)  # seed templates can't be deleted
     active_version_id: Mapped[int | None] = mapped_column(default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)

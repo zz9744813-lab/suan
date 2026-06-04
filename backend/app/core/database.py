@@ -117,6 +117,10 @@ async def init_db() -> None:
         ("study_materials", "study_progress", "JSON"),
         ("study_materials", "knowledge_score", "FLOAT"),
         ("study_materials", "last_deepstudied_at", "DATETIME"),
+        # P6: immutable flag on seed prompt templates so the UI's
+        # prompt editor doesn't let users "delete" the bundled
+        # reader_/chief_comment prompts by accident.
+        ("prompt_templates", "immutable", "BOOLEAN DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

@@ -162,6 +162,19 @@ from app.schemas.review import (
     ReviewSettingsRead,
     ReviewSettingsUpdate,
 )
+from app.schemas.genre_prompt import (
+    GenrePromptBindRequest,
+    GenrePromptMappingRead,
+    GenrePromptMatrixResponse,
+    GenrePromptReorderItem,
+    GenrePromptReorderRequest,
+    GenrePromptUnbindRequest,
+    MatrixCell,
+    PromptSnapshotDetail,
+    PromptSnapshotRead,
+    PromptTemplateCreate,
+    TemplateUsageRead,
+)
 
 __all__ = [
     "APIError",
@@ -309,4 +322,16 @@ __all__ = [
     "ReviewCommentWithReplies",
     "ReviewSettingsRead",
     "ReviewSettingsUpdate",
+    # P7: Genre-Prompt mapping + traceability
+    "GenrePromptMappingRead",
+    "GenrePromptBindRequest",
+    "GenrePromptUnbindRequest",
+    "GenrePromptReorderItem",
+    "GenrePromptReorderRequest",
+    "GenrePromptMatrixResponse",
+    "MatrixCell",
+    "PromptSnapshotRead",
+    "PromptSnapshotDetail",
+    "PromptTemplateCreate",
+    "TemplateUsageRead",
 ]

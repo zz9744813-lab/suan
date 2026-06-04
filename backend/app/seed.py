@@ -14,9 +14,11 @@ from app.models.comment_review import (
 )
 from app.models.model_provider import ModelProvider, ModelRoleAssignment
 from app.models.prompt import PromptTemplate, PromptVersion
+from app.models.genre_prompt_map import GenrePromptMapping
 from app.models.project import Project
 from app.models.task import WorkerStatus
 from app.prompts.default import WRITING_PROMPTS
+from app.prompts.default.library import GENRE_PROMPTS
 
 
 # P4 §10 — 11 个默认 AgentRole. 矩阵默认显示前 9 个, 后 3 个
@@ -142,6 +144,7 @@ async def seed() -> None:
                     can_modify=spec.get("can_modify", []),
                     cannot_modify=spec.get("cannot_modify", []),
                     hard_rules=spec.get("hard_rules", []),
+                    immutable=True,  # seed templates can't be deleted
                 )
                 db.add(tpl)
                 await db.flush()
@@ -325,6 +328,119 @@ async def seed() -> None:
                     max_comments_per_chapter=50,
                     max_reader_comments_per_run=5,
                     min_severity_for_discussion="medium",
+                ))
+
+        # 8. P7: Genre-specific prompt templates (都市/科幻/历史/悬疑/言情)
+        for key, spec in GENRE_PROMPTS.items():
+            tpl = (
+                await db.execute(
+                    select(PromptTemplate).where(PromptTemplate.template_key == key)
+                )
+            ).scalar_one_or_none()
+            if tpl is None:
+                tpl = PromptTemplate(
+                    template_key=key,
+                    name=spec["name"],
+                    category=spec["category"],
+                    role=spec["role"],
+                    scope=spec["scope"],
+                    genre=spec.get("genre"),
+                    description=spec.get("description"),
+                    allowed_inputs=spec.get("allowed_inputs", []),
+                    forbidden_inputs=spec.get("forbidden_inputs", []),
+                    output_schema=spec.get("output_schema"),
+                    can_modify=spec.get("can_modify", []),
+                    cannot_modify=spec.get("cannot_modify", []),
+                    hard_rules=spec.get("hard_rules", []),
+                    immutable=True,
+                )
+                db.add(tpl)
+                await db.flush()
+            else:
+                # Sync metadata
+                tpl.name = spec["name"]
+                tpl.category = spec["category"]
+                tpl.role = spec["role"]
+                tpl.scope = spec["scope"]
+                tpl.genre = spec.get("genre")
+                tpl.description = spec.get("description")
+                tpl.allowed_inputs = spec.get("allowed_inputs", [])
+                tpl.forbidden_inputs = spec.get("forbidden_inputs", [])
+                tpl.output_schema = spec.get("output_schema")
+                tpl.can_modify = spec.get("can_modify", [])
+                tpl.cannot_modify = spec.get("cannot_modify", [])
+                tpl.hard_rules = spec.get("hard_rules", [])
+            # Ensure v1 exists
+            existing = (
+                await db.execute(
+                    select(PromptVersion).where(PromptVersion.template_id == tpl.id)
+                )
+            ).scalars().all()
+            if not existing:
+                ver = PromptVersion(
+                    template_id=tpl.id, version=1, body=spec["body"],
+                    status="active", change_note="initial seed (genre-specific)",
+                )
+                db.add(ver)
+                await db.flush()
+                tpl.active_version_id = ver.id
+            else:
+                # Auto-bump same as WRITING_PROMPTS
+                active = next(
+                    (v for v in existing if v.id == tpl.active_version_id),
+                    next((v for v in existing if v.status == "active"), existing[0]),
+                )
+                if active and active.body != spec["body"]:
+                    next_no = max(v.version for v in existing) + 1
+                    active.status = "deprecated"
+                    ver = PromptVersion(
+                        template_id=tpl.id, version=next_no, body=spec["body"],
+                        status="active",
+                        change_note="auto-bump by seed: genre library body changed",
+                    )
+                    db.add(ver)
+                    await db.flush()
+                    tpl.active_version_id = ver.id
+
+        # 9. P7: Default genre_prompt_mapping — bind each genre's drafter template
+        #    Also bind writing agents as generic fallback (genre="")
+        GENRE_DEFAULT_MAPPINGS: list[tuple[str, str, str]] = [
+            # (agent_role_key, genre, template_key)
+            ("drafter", "玄幻", "drafter_main"),
+            ("drafter", "都市", "drafter_urban_smooth"),
+            ("drafter", "科幻", "drafter_scifi_hard"),
+            ("drafter", "历史", "drafter_historical"),
+            ("drafter", "悬疑", "drafter_suspense"),
+            ("drafter", "言情", "drafter_romance"),
+            # Generic fallbacks (genre="") — these agents use the same template across all genres
+            ("critic", "", "critic_main"),
+            ("rewriter", "", "rewriter_main"),
+            ("planner", "", "planner_main"),
+            ("continuity", "", "continuity_main"),
+            ("memory_update", "", "memory_update_main"),
+        ]
+        for agent_key, genre, template_key in GENRE_DEFAULT_MAPPINGS:
+            # Find the template
+            tpl = (await db.execute(
+                select(PromptTemplate).where(PromptTemplate.template_key == template_key)
+            )).scalar_one_or_none()
+            if tpl is None:
+                continue
+            # Check if mapping already exists
+            existing = (await db.execute(
+                select(GenrePromptMapping).where(
+                    GenrePromptMapping.agent_role_key == agent_key,
+                    GenrePromptMapping.genre == genre,
+                    GenrePromptMapping.prompt_template_id == tpl.id,
+                )
+            )).scalar_one_or_none()
+            if existing is None:
+                db.add(GenrePromptMapping(
+                    agent_role_key=agent_key,
+                    genre=genre,
+                    prompt_template_id=tpl.id,
+                    priority=0,
+                    sort_order=0,
                 ))
 
         await db.commit()

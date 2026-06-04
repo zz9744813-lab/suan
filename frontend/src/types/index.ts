@@ -162,6 +162,7 @@ export type PromptTemplate = {
   can_modify: string[];
   cannot_modify: string[];
   hard_rules: string[];
+  immutable: boolean;
   active_version_id: number | null;
   created_at: string;
   updated_at: string;
@@ -1446,4 +1447,48 @@ export type ReaderReviewRunRead = {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+};
+
+// P7: Genre-Prompt mapping types
+export type GenrePromptMapping = {
+  id: number;
+  agent_role_key: string;
+  genre: string;
+  prompt_template_id: number;
+  priority: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MatrixCell = {
+  agent_role_key: string;
+  genre: string;
+  prompt_template_id: number | null;
+  template_key: string | null;
+  template_name: string | null;
+  priority: number;
+  sort_order: number;
+  state: "bound" | "fallback" | "empty";
+};
+
+export type GenrePromptMatrixResponse = {
+  genres: string[];
+  agent_role_keys: string[];
+  cells: MatrixCell[];
+};
+
+export type PromptSnapshotDetail = {
+  id: number;
+  chapter_id: number | null;
+  chapter_title: string | null;
+  trigger: string;
+  snapshot_data: Record<string, { template_key: string; template_id: number; version: number; genre: string }>;
+  created_at: string;
+};
+
+export type TemplateUsageRead = {
+  template_id: number;
+  total_snapshots: number;
+  chapter_ids: number[];
 };

@@ -22,7 +22,8 @@ from app.agents.planner import PlannerAgent
 from app.agents.rewriter import RewriterAgent
 from app.core.errors import bad_request
 from app.core.events import Event, event_bus
-from app.models.project import Chapter, ChapterVersion
+from app.models.genre_prompt_map import ProjectPromptSnapshot
+from app.models.project import Chapter, ChapterVersion, Project
 from app.models.study import BehaviorPattern
 from app.models.task import AgentTask, WorkerPolicy
 from app.services.context_compiler import ContextCompiler, get_context_compiler
@@ -171,6 +172,10 @@ class ChapterPipeline:
         # 0) Load policy (already passed in) + ensure chapter
         await self._emit(db, task, chapter, "pipeline.started", "开始单章流水线")
 
+        # P7: load project genre for prompt routing
+        project = await db.get(Project, chapter.project_id)
+        project_genre = project.genre if project else None
+
         # 0.5) P15 / P0-RETRY-1: read retry_mode and load any
         # previously-succeeded step outputs so we can skip them
         # instead of re-calling the LLM.
@@ -224,6 +229,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=ctx_inputs,
                 )
             )
@@ -292,6 +298,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=drafter_inputs,
                 )
             )
@@ -367,6 +374,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=critic_inputs,
                 )
             )
@@ -440,6 +448,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=rewrite_inputs,
                 )
             )
@@ -478,6 +487,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=critic_inputs2,
                 )
             )
@@ -533,6 +543,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=cont_inputs,
                 )
             )
@@ -575,6 +586,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=mu_inputs,
                 )
             )
@@ -627,6 +639,7 @@ class ChapterPipeline:
                     task=task,
                     project_id=chapter.project_id,
                     chapter_id=chapter.id,
+                    project_genre=project_genre,
                     inputs=learn_inputs,
                 )
             )
@@ -643,6 +656,10 @@ class ChapterPipeline:
             "pipeline.completed",
             f"第 {chapter.chapter_no} 章完成，分数 {current_score}，状态 {pass_status}",
         )
+
+        # P7: write prompt snapshot for traceability
+        await self._write_snapshot(db, task, chapter, project_genre)
+
         return ChapterPipelineResult(
             chapter_id=chapter.id,
             final_text=final_text,
@@ -757,3 +774,50 @@ class ChapterPipeline:
                 },
             )
         )
+
+    async def _write_snapshot(
+        self,
+        db: AsyncSession,
+        task: AgentTask,
+        chapter: Chapter,
+        project_genre: str | None,
+    ) -> None:
+        """P7: record which prompts each agent used in this pipeline run."""
+        from app.models.task import AgentStep
+
+        steps = (await db.execute(
+            select(AgentStep).where(
+                AgentStep.task_id == task.id,
+                AgentStep.prompt_template_id.isnot(None),
+            )
+        )).scalars().all()
+
+        snapshot_data: dict[str, dict] = {}
+        for step in steps:
+            # Extract agent role key from agent_name (e.g. "DrafterAgent" -> "drafter")
+            agent_key = step.agent_name.replace("Agent", "").lower() if step.agent_name else "unknown"
+            # Look up template key
+            tpl_key = None
+            genre_val = ""
+            if step.prompt_template_id:
+                from app.models.prompt import PromptTemplate as _PT
+                tpl = await db.get(_PT, step.prompt_template_id)
+                if tpl:
+                    tpl_key = tpl.template_key
+                    genre_val = tpl.genre or ""
+            snapshot_data[agent_key] = {
+                "template_key": tpl_key or "",
+                "template_id": step.prompt_template_id,
+                "version": step.prompt_version or 0,
+                "genre": genre_val,
+            }
+
+        if snapshot_data:
+            snap = ProjectPromptSnapshot(
+                project_id=chapter.project_id,
+                chapter_id=chapter.id,
+                trigger="chapter_pipeline",
+                snapshot_data=snapshot_data,
+            )
+            db.add(snap)
+            await db.flush()

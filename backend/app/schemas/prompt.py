@@ -24,6 +24,7 @@ class PromptTemplateRead(BaseModel):
     can_modify: list[str]
     cannot_modify: list[str]
     hard_rules: list[str]
+    immutable: bool
     active_version_id: int | None
     updated_at: datetime
 
