@@ -37,6 +37,8 @@ const LEARN_ITEMS: Item[] = [
   { to: "/graph",      label: "图谱",     icon: "◉" },
   { to: "/discussion", label: "讨论室",   icon: "☕" },
   { to: "/memory",     label: "记忆库",   icon: "❖" },
+  // P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7)
+  { to: "/reviews",    label: "评论评审", icon: "✦" },
 ];
 
 export function RailNav() {

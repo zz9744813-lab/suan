@@ -9,7 +9,6 @@ import { ChiefAgentPanel } from "./ChiefAgentPanel";
 import { ProjectNav } from "./project/ProjectNav";
 import { RailNav } from "./layout/RailNav";
 import { BottomStatusBar } from "./layout/BottomStatusBar";
-import { GlobalSearch } from "./layout/GlobalSearch";
 import { formatThousands } from "../lib/format";
 import "./AppShell.css";
 
@@ -135,9 +134,10 @@ export function AppShell({ children }: Props) {
       )}
 
       <main className="main">
-        <div className="main-topbar">
-          <GlobalSearch />
-        </div>
+        {/* P6 P5: 删了 GlobalSearch (F:\07_P6 spec §7).
+            留 .main-topbar 占位让 grid 布局不变 (R15/P0-SCROLL-1
+            依赖 :not(.main-topbar) 选择器). */}
+        <div className="main-topbar" />
         {children}
       </main>
 

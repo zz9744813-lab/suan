@@ -13,6 +13,7 @@ import { DiscussionPage } from "./pages/DiscussionPage";
 import { MemoryShelfPage, MemoryArchivePage } from "./pages/MemoryShelfPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
+import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
 import { NotFound } from "./pages/NotFound";
 
 // P0-MODEL-9: dev-mode banner so the operator can see at a glance
@@ -79,6 +80,8 @@ export default function App() {
          *  /memory/:projectId (记忆档案馆) 在 P3 替换为真正的实现. */}
         <Route path="/memory" element={<MemoryShelfPage />} />
         <Route path="/memory/:projectId" element={<MemoryArchivePage />} />
+        {/* P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7) */}
+        <Route path="/reviews" element={<ReviewCommentsPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

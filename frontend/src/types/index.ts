@@ -1360,3 +1360,90 @@ export type SearchResult = {
   link: string;
   score: number;
 };
+
+// ===== P6: 评论区驱动的模拟读者 Agent 评审系统 =====
+
+export type ReviewAuthorType = "user" | "reader_agent" | "chief_agent" | "system";
+export type ReviewCommentStatus =
+  | "new" | "replied" | "grouped" | "discussing"
+  | "accepted" | "rejected" | "ignored" | "done";
+export type ReviewSeverity = "low" | "medium" | "high" | "blocker";
+export type ReviewGroupStatus =
+  | "new" | "discussing" | "decided" | "rewrite_queued" | "done" | "ignored";
+
+export type ReviewCommentRead = {
+  id: number;
+  project_id: number;
+  chapter_id: number | null;
+  chapter_version_id: number | null;
+  parent_id: number | null;
+  target_type: string;
+  author_type: ReviewAuthorType;
+  author_label: string;
+  agent_role_id: number | null;
+  content: string;
+  evidence: Array<Record<string, any>> | null;
+  rating: Record<string, any> | null;
+  tags: string[];
+  weight_at_created: number;
+  status: ReviewCommentStatus;
+  priority: number;
+  related_group_id: number | null;
+  related_discussion_id: number | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReviewCommentListResponse = {
+  items: ReviewCommentRead[];
+  total: number;
+};
+
+export type ReviewCommentGroupRead = {
+  id: number;
+  project_id: number;
+  chapter_id: number | null;
+  chapter_version_id: number | null;
+  title: string;
+  summary: string;
+  comment_ids: number[];
+  severity: ReviewSeverity;
+  status: ReviewGroupStatus;
+  discussion_session_id: number | null;
+  decision: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReviewSettingsRead = {
+  id: number;
+  project_id: number;
+  auto_reader_review: boolean;
+  auto_chief_triage: boolean;
+  auto_discussion: boolean;
+  retention_days: number;
+  max_comments_per_chapter: number;
+  max_reader_comments_per_run: number;
+  min_severity_for_discussion: ReviewSeverity;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReaderReviewRunRead = {
+  id: number;
+  project_id: number;
+  chapter_id: number;
+  chapter_version_id: number | null;
+  trigger: string;
+  status: string;
+  reader_agent_keys: string[];
+  generated_comment_ids: number[];
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
