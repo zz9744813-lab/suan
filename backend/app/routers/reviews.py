@@ -1,17 +1,13 @@
-"""P6 §6: 评论/评论组/读者评审 — REST API (P1 阶段).
+"""P6 §6: 评论/评论组/读者评审 — REST API.
 
-P1 范围:
+P1 范围 (已实现):
   - 17 端点, 全部直接读写 DB
-  - 不调 LLM (P2/P3 才补)
-  - 不做自动 triage 触发 (§5 worker, P4)
-  - discuss / cleanup / run 这些"动作"端点是状态转换, 在 P1
-    只写状态 + 占位, 实际执行 (建 DiscussionSession / 跑 reader)
-    推到 P2/P3
-
-P1 不做的事:
-  - 不入队 (worker 还没扩展到 event-driven, P4)
   - 不调 LLM
-  - 不发 SSE 事件 (event_bus 留给 P2 reader 完成时)
+
+P3 增强 (本文件内):
+  - discuss_group: 调 DiscussionBridge 真创建 DiscussionSession (替代 P1 占位)
+  - decide_group:  调 WeightService.bump_for_comment 更新读者权重
+  - 新增 trigger_triage: 手动触发 chief_comment_moderator 分流
 """
 from __future__ import annotations
 
@@ -20,6 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +49,15 @@ from app.schemas.review import (
     ReviewCommentWithReplies,
     ReviewSettingsRead,
     ReviewSettingsUpdate,
+)
+from app.services.review import (
+    CommentTriageService,
+    DiscussionBridge,
+    TriageOutcome,
+    WeightService,
+    get_comment_triage_service,
+    get_discussion_bridge,
+    get_weight_service,
 )
 
 
@@ -221,6 +227,88 @@ async def create_comment(
     await db.commit()
     await db.refresh(comment)
     return {"ok": True, "data": ReviewCommentRead.model_validate(comment)}
+
+
+# ============================================================
+# §6.2.0.1 触发主 Agent 分流 (P3 §5.4)
+# 手动测试 / 内部 worker 触发, 拉取 project / chapter 下所有 status='new'
+# 评论调 chief_comment_moderator 分流. 评论流已经在 POST /comments
+# 自动入队, 这个端点主要给"重跑"和"管理面板"用.
+# ============================================================
+class TriageTriggerRequest(BaseModel):
+    project_id: int = Field(..., ge=1)
+    chapter_id: int | None = None
+
+
+class TriageItemOut(BaseModel):
+    comment_id: int
+    action: str
+    success: bool
+    detail: str
+    error: str | None = None
+
+
+class TriageTriggerResponse(BaseModel):
+    project_id: int
+    chapter_id: int | None
+    new_comment_count: int
+    reply_count: int
+    group_count: int
+    discuss_count: int
+    ignore_count: int
+    error_count: int
+    error: str | None
+    items: list[TriageItemOut]
+    triage_run_id: int | None  # 调 chief 的 AgentRun.id
+
+
+@router.post(
+    "/triage",
+    response_model=APIResponse[TriageTriggerResponse],
+    status_code=200,
+)
+async def trigger_triage(
+    body: TriageTriggerRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[TriageTriggerResponse]:
+    """P3 §5.4: 触发主 Agent (chief_comment_moderator) 分流.
+
+    拉 project/chapter 下所有 status='new' 的评论, 调 chief 决策
+    (reply/group/discuss/ignore), 写主 Agent reply, 合并/触发讨论.
+    """
+    settings = await _get_or_create_settings(db, body.project_id)
+    if not settings.auto_chief_triage:
+        raise bad_request(
+            "auto_chief_triage 已关闭, 不允许自动分流",
+            suggestion="在 ReviewSettings 打开 auto_chief_triage 后再试",
+        )
+    service = get_comment_triage_service()
+    outcome = await service.run_for_chapter(
+        db, project_id=body.project_id, chapter_id=body.chapter_id,
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "data": TriageTriggerResponse(
+            project_id=outcome.project_id,
+            chapter_id=outcome.chapter_id,
+            new_comment_count=outcome.new_comment_count,
+            reply_count=outcome.reply_count,
+            group_count=outcome.group_count,
+            discuss_count=outcome.discuss_count,
+            ignore_count=outcome.ignore_count,
+            error_count=outcome.error_count,
+            error=outcome.error,
+            items=[
+                TriageItemOut(
+                    comment_id=i.comment_id, action=i.action,
+                    success=i.success, detail=i.detail, error=i.error,
+                )
+                for i in outcome.items
+            ],
+            triage_run_id=outcome.triage_result.run_id if outcome.triage_result else None,
+        ),
+    }
 
 
 # ============================================================
@@ -513,8 +601,8 @@ async def update_group(
 
 
 # ============================================================
-# §6.4.3 转讨论 — P1 占位: 改 status + 标 discuss_pending
-# P3 DiscussionBridge 实际创建 DiscussionSession
+# §6.4.3 转讨论 — P3 实装: 调 DiscussionBridge 真创建 DiscussionSession
+# P1 阶段是占位 (改 status), P3 这一步补 DiscussionSession 占位 + 入队
 # ============================================================
 @router.post(
     "/groups/{group_id}/discuss",
@@ -533,18 +621,30 @@ async def discuss_group(
             f"Group status is '{g.status}', cannot discuss",
             suggestion="只有 new/discussing 状态可转讨论",
         )
-    g.status = "discussing"
-    # P1 占位: P3 再创建 DiscussionSession 并回填 discussion_session_id
-    # P1 在 status 推进的同时把 note 写到 summary 末尾, 方便审计
-    if body.note:
-        g.summary = (g.summary or "") + f"\n\n[主 Agent 转讨论] {body.note}"
-    await db.commit()
-    await db.refresh(g)
+
+    # P3 增强: 调 DiscussionBridge 真创建 DiscussionSession
+    if g.discussion_session_id is None:
+        bridge = get_discussion_bridge()
+        session = await bridge.create_from_group(db, g)
+        # g.status / g.discussion_session_id 由 bridge 内部写好
+        # note 写到 summary 末尾 (兼容 P1 行为)
+        if body.note:
+            g.summary = (g.summary or "") + f"\n\n[主 Agent 转讨论] {body.note}"
+        await db.commit()
+        await db.refresh(g)
+    else:
+        # 已存在 session, 只追加 note
+        if body.note:
+            g.summary = (g.summary or "") + f"\n\n[主 Agent 转讨论] {body.note}"
+        await db.commit()
+        await db.refresh(g)
     return {"ok": True, "data": ReviewCommentGroupRead.model_validate(g)}
 
 
 # ============================================================
 # §6.4.4 主 Agent 写裁决
+# P3 增强: 写 decision 后, 调 WeightService.bump_for_comment 更新
+#          每条 reader_agent 评论的权重 (accept +0.08, reject -0.03)
 # ============================================================
 @router.post(
     "/groups/{group_id}/decide",
@@ -584,6 +684,33 @@ async def decide_group(
             .where(ReviewComment.id.in_(body.rejected_comment_ids))
             .values(status="rejected")
         )
+
+    # P3 增强: 更新读者权重
+    weight_service = get_weight_service()
+    bump_results: list[dict[str, Any]] = []
+    for cid in body.accepted_comment_ids:
+        r = await weight_service.bump_for_comment(db, comment_id=cid, decision="accepted")
+        if r is not None:
+            bump_results.append({
+                "comment_id": cid, "decision": r.decision,
+                "reader_key": r.reader_key,
+                "old_weight": r.old_weight, "new_weight": r.new_weight,
+            })
+    for cid in body.rejected_comment_ids:
+        r = await weight_service.bump_for_comment(db, comment_id=cid, decision="rejected")
+        if r is not None:
+            bump_results.append({
+                "comment_id": cid, "decision": r.decision,
+                "reader_key": r.reader_key,
+                "old_weight": r.old_weight, "new_weight": r.new_weight,
+            })
+
+    # 把权重变更记到 decision JSON 末尾 (审计用)
+    if bump_results:
+        existing = dict(g.decision or {})
+        existing["weight_bumps"] = bump_results
+        g.decision = existing
+
     await db.commit()
     await db.refresh(g)
     return {"ok": True, "data": ReviewCommentGroupRead.model_validate(g)}

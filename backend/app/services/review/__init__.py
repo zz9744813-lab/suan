@@ -1,4 +1,5 @@
-"""P6 review services — AgentRoleRunner / ReaderReviewService / WeightService.
+"""P6 review services — AgentRoleRunner / ReaderReviewService / WeightService /
+CommentTriageService / DiscussionBridge.
 
 Lives next to ``services/llm/`` and ``services/pipeline`` so the rest
 of the codebase can ``from app.services.review import ...``.
@@ -20,6 +21,19 @@ Public surface:
                       writes one ReviewComment per reader, and updates
                       ReaderReviewRun totals.
 
+  CommentTriageService
+                   - the P3 chief-moderator intake path. Pulls all
+                      status='new' comments, asks chief_comment_moderator
+                      for triage (reply / group / discuss / ignore), then
+                      writes chief_agent replies, builds comment groups,
+                      and triggers discussions for high-severity groups.
+
+  DiscussionBridge  - the P3 bridge from ReviewCommentGroup to
+                      DiscussionSession. Selects participants by
+                      severity + tags, renders the P6 spec topic
+                      format, creates the session, and enqueues a
+                      'comment_discussion' task for the P4 worker.
+
   WeightService    - bumps ReaderAgentProfile.weight based on whether
                       the chief moderator accepted / rejected the
                       originating comment.
@@ -36,6 +50,16 @@ from app.services.review.agent_role_runner import (
     AgentRoleRunner,
     get_agent_role_runner,
 )
+from app.services.review.comment_triage_service import (
+    CommentTriageService,
+    TriageItemOutcome,
+    TriageOutcome,
+    get_comment_triage_service,
+)
+from app.services.review.discussion_bridge import (
+    DiscussionBridge,
+    get_discussion_bridge,
+)
 from app.services.review.reader_review_service import (
     ReaderReviewService,
     get_reader_review_service,
@@ -46,8 +70,14 @@ __all__ = [
     "AgentRoleRunResult",
     "AgentRoleRunner",
     "ReaderReviewService",
+    "CommentTriageService",
+    "TriageItemOutcome",
+    "TriageOutcome",
+    "DiscussionBridge",
     "WeightService",
     "get_agent_role_runner",
     "get_reader_review_service",
+    "get_comment_triage_service",
+    "get_discussion_bridge",
     "get_weight_service",
 ]
