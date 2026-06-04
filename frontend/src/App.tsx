@@ -8,9 +8,9 @@ import { WorkerPage } from "./pages/WorkerPage";
 import { TasksPage } from "./pages/TasksPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { ModelsPage } from "./pages/ModelsPage";
-import { StudyPage } from "./pages/StudyPage";
+import { StudyLibraryPage, StudyBookGraphPage } from "./pages/StudyLibraryPage";
 import { DiscussionPage } from "./pages/DiscussionPage";
-import { MemoryPage } from "./pages/MemoryPage";
+import { MemoryShelfPage, MemoryArchivePage } from "./pages/MemoryShelfPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
 import { NotFound } from "./pages/NotFound";
@@ -66,11 +66,19 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/models" element={<ModelsPage />} />
-        <Route path="/study" element={<StudyPage />} />
+        {/* P0 (01 §6) 路由基础规范: 新增 /study/library, 旧 /study
+         *  重定向到这里; 旧 /study 不破坏, 仍能直接打开. 后续 P2
+         *  把 StudyPage 内部改成书架结构, 旧 URL 一起切到新版本. */}
+        <Route path="/study" element={<Navigate to="/study/library" replace />} />
+        <Route path="/study/library" element={<StudyLibraryPage />} />
+        <Route path="/study/books/:materialId/graph" element={<StudyBookGraphPage />} />
         <Route path="/behavior" element={<BehaviorPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/discussion" element={<DiscussionPage />} />
-        <Route path="/memory" element={<MemoryPage />} />
+        {/* P0 (01 §6): 旧 /memory 仍可访问 (P0 §8 禁 8). 新增
+         *  /memory/:projectId (记忆档案馆) 在 P3 替换为真正的实现. */}
+        <Route path="/memory" element={<MemoryShelfPage />} />
+        <Route path="/memory/:projectId" element={<MemoryArchivePage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

@@ -7,6 +7,7 @@ import {
 } from "../api";
 import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask } from "../types";
 import { useProjectStore } from "../stores/projectStore";
+import { ShelfBreadcrumb } from "../components/shelf";
 
 const TABS = [
   { key: "overview", label: "概览" },
@@ -14,14 +15,15 @@ const TABS = [
   { key: "outlines", label: "大纲" },
   { key: "chapters", label: "章节" },
   { key: "policy", label: "策略" },
-];
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
 
 export function ProjectPage() {
   const { pid } = useParams();
   const projectId = Number(pid);
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
-  const [tab, setTab] = useState<"overview" | "bible" | "outlines" | "chapters" | "policy">("overview");
+  const [tab, setTab] = useState<TabKey>("overview");
   const [bible, setBible] = useState<Bible | null>(null);
   const [outlines, setOutlines] = useState<Outline[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -69,6 +71,18 @@ export function ProjectPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* P0 (01 §2.1 + §2.2): 顶部必须有「← 返回项目书架」按钮 + 面包屑
+       *  不用 window.history.back() (01 §8 禁 1), 直接 navigate("/projects").
+       *  刷新二级页 history 栈只有 1 条时也不会失效. */}
+      <ShelfBreadcrumb
+        backTo="/projects"
+        backLabel="返回项目书架"
+        items={[
+          { label: "项目书架", to: "/projects" },
+          { label: project.name },
+          { label: TABS.find((t) => t.key === tab)?.label ?? "" },
+        ]}
+      />
       <div className="subheader">
         <h2 className="serif">{project.name}</h2>
         <span className="badge gold">{project.genre}</span>
@@ -87,7 +101,7 @@ export function ProjectPage() {
             <button
               key={t.key}
               className={`tab ${tab === t.key ? "active" : ""}`}
-              onClick={() => setTab(t.key as any)}
+              onClick={() => setTab(t.key)}
             >
               {t.label}
             </button>

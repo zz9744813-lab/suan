@@ -7,6 +7,7 @@ import {
 import type { Chapter, ChapterVersion, AgentStep } from "../types";
 import { useProjectStore } from "../stores/projectStore";
 import { ChapterCompare } from "../components/chapter/ChapterCompare";
+import { ShelfBreadcrumb } from "../components/shelf";
 import "../components/chapter/ChapterCompare.css";
 
 const TABS = [
@@ -68,6 +69,18 @@ export function ChapterDetail() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* P0 (01 §3): 三级页 (项目 → 章节 → tab) 也要有完整面包屑
+       *  + 顶部返回项目工作台按钮, 不能用单纯的 Link 「← 返回项目」糊弄. */}
+      <ShelfBreadcrumb
+        backTo={`/projects/${projectId}`}
+        backLabel="返回项目工作台"
+        items={[
+          { label: "项目书架", to: "/projects" },
+          { label: `项目 #${projectId}`, to: `/projects/${projectId}` },
+          { label: `第 ${chapter.chapter_no} 章 · ${chapter.title}` },
+          { label: TABS.find((t) => t.key === tab)?.label ?? "" },
+        ]}
+      />
       <div className="subheader">
         <Link to={`/projects/${projectId}`} className="muted">← 返回项目</Link>
         <h2 className="serif">第 {chapter.chapter_no} 章 · {chapter.title}</h2>

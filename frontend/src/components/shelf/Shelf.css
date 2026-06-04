@@ -1,0 +1,415 @@
+/* ==========================================================================
+   P0 — 书架基础样式 (Shelf.css)
+   --------------------------------------------------------------------------
+   总纲 (00) §5 + P0 §5:
+     暗色背景 + 木质横板 + 发光书脊 + 悬停上浮 + 状态标签 + 右侧摘要卡
+   颜色统一 (P0 §5 + index.ts 的 SHELF_COLORS):
+     blue   #3a6ea5  进行中 / 主写
+     gold   #d6a64e  高完成度 / 已完成
+     purple #a078c8  运行中 / 深度处理
+     green  #5d9c5d  健康 / 已通过
+     red    #c45858  失败 / 待修
+     gray   #6e7681  归档 / 禁用
+
+   这条 CSS 是建筑块, P1-P3 拼装, 不绑死某个具体页面. 自适应窄窗口
+   (1100px 以下) 跟 AppShell 现有响应式一致, 三栏降级为单列堆叠.
+   ========================================================================== */
+
+/* ---------- 颜色 token (CSS 变量, 让 .shelf-book 跟子组件共享) ---- */
+:root {
+  --shelf-color-blue:   #3a6ea5;
+  --shelf-color-gold:   #d6a64e;
+  --shelf-color-purple: #a078c8;
+  --shelf-color-green:  #5d9c5d;
+  --shelf-color-red:    #c45858;
+  --shelf-color-gray:   #6e7681;
+}
+
+/* ---------- 1. 面包屑 (ShelfBreadcrumb) --------------------------- */
+.shelf-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--accent-line);
+  font-size: 12px;
+}
+
+.shelf-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-line);
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s;
+  /* P0 §2.1 要求: 按钮固定显示, 不能 hover 才出 */
+}
+.shelf-back-button:hover {
+  background: var(--bg-paper-soft);
+  border-color: var(--accent-gold-dim);
+  color: var(--accent-gold);
+}
+.shelf-back-arrow {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.shelf-breadcrumb-list {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.shelf-breadcrumb-item { display: inline-flex; align-items: center; }
+.shelf-breadcrumb-sep { margin: 0 6px; opacity: 0.6; }
+.shelf-breadcrumb-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.shelf-breadcrumb-link:hover { color: var(--accent-gold); text-decoration: underline; }
+.shelf-breadcrumb-text { color: var(--text-primary); font-weight: 500; }
+
+/* ---------- 2. 书脊 (ShelfBook) ---------------------------------- */
+.shelf-book {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  background: linear-gradient(180deg, var(--bg-elevated), var(--bg-panel));
+  border: 1px solid var(--accent-line);
+  border-radius: 4px 4px 6px 6px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: center;
+  overflow: hidden;
+  padding: 0 4px 8px;
+  font-family: var(--font-serif);
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+  /* 上方书脊条 + 下方书底投影, 用 ::before / ::after 画 */
+}
+.shelf-book::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--shelf-spine, var(--shelf-color-blue));
+  box-shadow: 0 0 8px var(--shelf-glow, transparent);
+}
+.shelf-book::after {
+  content: "";
+  position: absolute;
+  bottom: -3px; left: 4px; right: 4px;
+  height: 6px;
+  background: linear-gradient(180deg, transparent, rgba(0,0,0,0.45));
+  border-radius: 0 0 6px 6px;
+  pointer-events: none;
+}
+.shelf-book:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.45), 0 0 12px var(--shelf-glow, transparent);
+  border-color: var(--shelf-spine, var(--accent-gold-dim));
+}
+.shelf-book.is-selected {
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 2px rgba(214,166,78,0.35), 0 8px 18px rgba(0,0,0,0.45);
+}
+
+.shelf-book-status {
+  position: absolute;
+  top: 10px;
+  right: 4px;
+  font-family: var(--font-sans);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.shelf-book-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--shelf-font, 13px);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  line-height: 1.25;
+  margin: 18px 0 2px;
+  word-break: break-all;
+}
+.shelf-book-subtitle {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shelf-book-progress {
+  display: block;
+  width: 80%;
+  height: 2px;
+  margin: auto auto 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.shelf-book-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--shelf-spine, var(--accent-gold));
+  box-shadow: 0 0 4px var(--shelf-glow, transparent);
+  transition: width 0.4s;
+}
+.shelf-book-progress-label {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 9px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 3. 书架横架 (ShelfRow) -------------------------------- */
+.shelf-row {
+  margin-bottom: 22px;
+}
+.shelf-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+.shelf-row-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--text-primary);
+  letter-spacing: 1px;
+}
+.shelf-row-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.shelf-row-board {
+  position: relative;
+  padding: 14px 12px 10px;
+  background:
+    linear-gradient(180deg, rgba(110, 78, 50, 0.18) 0%, rgba(110, 78, 50, 0.05) 30%, transparent 31%),
+    linear-gradient(180deg, var(--bg-panel), var(--bg-elevated));
+  border-top: 1px solid rgba(214,166,78,0.2);
+  border-bottom: 1px solid rgba(0,0,0,0.4);
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.shelf-row-books {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.shelf-row-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ---------- 4. 三栏布局 (ShelfLayout) ----------------------------- */
+.shelf-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.shelf-layout-head { flex: 0 0 auto; }
+.shelf-layout-title {
+  padding: 18px 24px 12px;
+  border-bottom: 1px solid var(--accent-line-soft);
+}
+.shelf-layout-h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  color: var(--text-primary);
+  letter-spacing: 1px;
+}
+.shelf-layout-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.shelf-layout-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 240px 1fr 320px;
+  gap: 16px;
+  padding: 16px 24px;
+  min-height: 0;
+  overflow: hidden;
+}
+.shelf-layout-left,
+.shelf-layout-right {
+  overflow-y: auto;
+  min-width: 0;
+}
+.shelf-layout-center {
+  overflow-y: auto;
+  min-width: 0;
+  padding-right: 4px;
+}
+@media (max-width: 1100px) {
+  .shelf-layout-body {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+  }
+  .shelf-layout-left, .shelf-layout-right {
+    max-height: 240px;
+  }
+}
+
+/* ---------- 5. 工具条 (ShelfToolbar) ------------------------------ */
+.shelf-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+}
+.shelf-toolbar .input { width: 100%; }
+.shelf-toolbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.shelf-toolbar-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line);
+  color: var(--text-secondary);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.shelf-toolbar-chip:hover { color: var(--accent-gold); border-color: var(--accent-gold-dim); }
+.shelf-toolbar-chip.active {
+  color: var(--accent-gold);
+  background: rgba(214,166,78,0.1);
+  border-color: var(--accent-gold-dim);
+}
+
+/* ---------- 6. 侧边摘要 (ShelfSidePanel) -------------------------- */
+.shelf-side-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-line);
+  border-left: 3px solid var(--shelf-accent, var(--shelf-color-blue));
+  border-radius: 4px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+.shelf-side-panel-title {
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+.shelf-side-panel-body { color: var(--text-secondary); line-height: 1.6; }
+
+/* ---------- 7. 大详情卡 (ShelfDetailPanel) ------------------------- */
+.shelf-detail-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 100%;
+  min-height: 0;
+}
+.shelf-detail-panel-head {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 14px 12px 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+}
+.shelf-detail-panel-bar {
+  display: block;
+  width: 3px;
+  background: var(--shelf-accent, var(--shelf-color-blue));
+  box-shadow: 0 0 8px var(--shelf-glow, transparent);
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+.shelf-detail-panel-titles { flex: 1; min-width: 0; }
+.shelf-detail-panel-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+.shelf-detail-panel-sub {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.shelf-detail-panel-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--accent-line-soft);
+  border-bottom: 1px solid var(--accent-line-soft);
+  font-size: 12px;
+}
+.shelf-detail-panel-stat { margin: 0; min-width: 0; }
+.shelf-detail-panel-stat dt {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.shelf-detail-panel-stat dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.shelf-detail-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px;
+  min-height: 0;
+}
+.shelf-detail-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--accent-line-soft);
+  background: var(--bg-elevated);
+}
