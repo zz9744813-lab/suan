@@ -1,7 +1,7 @@
 # NovelForge 2.0
 
-> 长篇小说 AI 协同工作台 — 6 个核心 Agent(Chief / Planner / Drafter / Critic / Rewriter / Continuity / MemoryUpdate / Learning) +
-> ContextCompiler + DetailGuard + 多层记忆 + 24h Worker 续写器 + Prompt 模板中心 + 模型角色绑定 + SSE 实时事件流。
+> 长篇小说 AI 协同工作台 — 8 个核心 Agent（Chief / Planner / Drafter / Critic / Rewriter / Continuity / MemoryUpdater / Learner）+
+> ContextCompiler + DetailGuard + 多层记忆 v2 + 24h Worker 续写器 + Prompt 模板中心 + 模型角色绑定 + 拆书/深拆 + 讨论裁决 + SSE 实时事件流。
 
 ## 目录
 
@@ -44,7 +44,7 @@
                   └────────────────────────┘
 ```
 
-详见 `docs/spec.md`（技术规范）和 `docs/ui-ux.md`（UI/UX 规范）。
+详见 `docs/P5_联调验收手册.md`。
 
 ## 快速开始
 
@@ -83,7 +83,7 @@ npm run dev
 2. 切到「主设定」标签页写入世界观、主角
 3. 切到「大纲」标签页，批量加几章
 4. 切到「章节」标签页，对第一章点「开始流水线」
-5. Worker 自动跑 6 个 Agent，1~2 分钟后打开「章节详情」看「正文 / 版本 / 时间线 / 上下文」四个标签
+5. Worker 自动跑 8 个 Agent，1~2 分钟后打开「章节详情」看「正文 / 版本 / 时间线 / 上下文」四个标签
 
 ## 项目结构
 
@@ -98,9 +98,9 @@ wudi8633/
 │   │   ├── schemas/               # Pydantic v2 schemas
 │   │   ├── services/              # LLM client + router, prompt engine, context compiler,
 │   │   │                          # detail guard, memory, learning
-│   │   ├── agents/                # 6 个核心 Agent + base class
+│   │   ├── agents/                # 8 个核心 Agent（含 Study 拆书 Agent）+ base class
 │   │   ├── workers/               # 异步 worker + chapter pipeline
-│   │   ├── routers/               # 9 个 API 路由分组
+│   │   ├── routers/               # 17 个 API 路由分组
 │   │   └── prompts/default/       # 10 个默认 Prompt 模板（中文）
 │   ├── pyproject.toml
 │   └── .env.example
@@ -114,12 +114,11 @@ wudi8633/
 │   │   ├── stores/                # Zustand: project / worker / chief / event
 │   │   ├── hooks/                 # useSSE（自动重连）
 │   │   ├── components/            # AppShell(4 区) + ChiefAgentPanel
-│   │   └── pages/                 # 10 个页面
+│   │   └── pages/                 # 16 个页面
 │   ├── vite.config.ts             # /api → 8000 代理
 │   └── package.json
 └── docs/
-    ├── spec.md                    # 技术规范（v2）
-    └── ui-ux.md                   # UI/UX 规范（v2）
+    └── P5_联调验收手册.md
 ```
 
 ## Mock LLM
@@ -128,7 +127,7 @@ wudi8633/
 mock LLM:
 
 - 当 Provider 的 `base_url` 以 `mock://` 开头时启用
-- 6 个 Agent 都有预制的占位回复(剧情走向、Critic 评分、记忆增量等)
+- 8 个 Agent 都有预制的占位回复(剧情走向、Critic 评分、记忆增量等)
 - 入口的 stub Provider 在 seed 时已自动建好,所有角色绑定都指向它
 - 切到「模型」页新建一个真实 OpenAI 兼容 Provider,把角色绑过去即可走真实模型
 
@@ -136,7 +135,7 @@ mock LLM:
 
 - [x] ~~Memory Agent(角色、硬事实、伏笔)的增量化写入~~ (Round 9, 知识库 UI + 8 个写接口)
 - [x] ~~拆书 / 行为模式卡(Study / BehaviorPattern Agent)UI~~ (Round 5)
-- [ ] 知识图谱(GraphRAG)页
+- [x] ~~知识图谱(GraphRAG)页~~ (Round 10+)
 - [x] ~~讨论室(DiscussionRoom)多人轮换~~ (Round 7)
 - [x] ~~章节对比视图(左稿纸 / 右建议)~~ (Round 6)
 - [x] ~~Docker compose(PostgreSQL + 后端 + 前端 nginx)~~ (Round 8, SQLite 默认, Postgres 可切)
