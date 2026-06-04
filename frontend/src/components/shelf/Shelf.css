@@ -413,3 +413,182 @@
   border-top: 1px solid var(--accent-line-soft);
   background: var(--bg-elevated);
 }
+
+/* ==========================================================================
+   P3 — 记忆档案馆组件 (cabinet-tab / entity-card / decision-card / raw-card)
+   --------------------------------------------------------------------------
+   走 SHELF_COLORS 同样的 6 色 token. data-color / data-active / data-status
+   是组件打的 attribute, 这里按属性选择器着色, 跟 ShelfBook 的 data-color
+   风格保持一致.
+   ========================================================================== */
+
+/* 8 柜 tab — 左边一列 (7 档案柜 + 讨论 + 原始) */
+.cabinet-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  margin-bottom: 2px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.cabinet-tab:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.cabinet-tab[data-active="true"] {
+  background: var(--bg-elevated);
+  border-color: var(--accent-line, #4a4a52);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.cabinet-tab-emoji {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+}
+.cabinet-tab-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cabinet-tab-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.cabinet-tab[data-active="true"] .cabinet-tab-count {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 按 data-color 给 tab 左边加一道 accent bar (4px) */
+.cabinet-tab[data-color="blue"]   { border-left: 3px solid #3a6ea5; }
+.cabinet-tab[data-color="gold"]   { border-left: 3px solid #d6a64e; }
+.cabinet-tab[data-color="purple"] { border-left: 3px solid #a078c8; }
+.cabinet-tab[data-color="green"]  { border-left: 3px solid #5d9c5d; }
+.cabinet-tab[data-color="red"]    { border-left: 3px solid #c45858; }
+.cabinet-tab[data-color="gray"]   { border-left: 3px solid #6e7681; }
+.cabinet-tab[data-active="true"][data-color="blue"]   { background: rgba(58, 110, 165, 0.15); }
+.cabinet-tab[data-active="true"][data-color="gold"]   { background: rgba(214, 166, 78, 0.15); }
+.cabinet-tab[data-active="true"][data-color="purple"] { background: rgba(160, 120, 200, 0.15); }
+.cabinet-tab[data-active="true"][data-color="green"]  { background: rgba(93, 156, 93, 0.15); }
+.cabinet-tab[data-active="true"][data-color="red"]    { background: rgba(196, 88, 88, 0.15); }
+.cabinet-tab[data-active="true"][data-color="gray"]   { background: rgba(110, 118, 129, 0.15); }
+
+/* 单实体卡片 — 7 柜 grid 里的"档案卡片" */
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line-soft, #2a2a30);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  min-height: 70px;
+}
+.entity-card:hover {
+  border-color: var(--accent-line, #4a4a52);
+  transform: translateY(-1px);
+}
+.entity-card[data-selected="1"] {
+  border-color: var(--accent-gold, #d6a64e);
+  box-shadow: 0 0 0 1px rgba(214, 166, 78, 0.3);
+}
+.entity-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.entity-card-aliases {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.entity-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.entity-card-tag {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.entity-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+}
+.entity-card-conf {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 实体卡按 data-color 着色 (左边 3px accent bar) */
+.entity-card[data-color="blue"]   { border-left: 3px solid #3a6ea5; }
+.entity-card[data-color="gold"]   { border-left: 3px solid #d6a64e; }
+.entity-card[data-color="purple"] { border-left: 3px solid #a078c8; }
+.entity-card[data-color="green"]  { border-left: 3px solid #5d9c5d; }
+.entity-card[data-color="red"]    { border-left: 3px solid #c45858; }
+.entity-card[data-color="gray"]   { border-left: 3px solid #6e7681; }
+
+/* 讨论裁决记录 — 卡片 */
+.decision-card {
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line-soft, #2a2a30);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.decision-card[data-status="pending"]  { border-left: 3px solid #3a6ea5; }
+.decision-card[data-status="running"]  { border-left: 3px solid #a078c8; }
+.decision-card[data-status="decided"]  { border-left: 3px solid #5d9c5d; }
+.decision-card[data-status="failed"]   { border-left: 3px solid #c45858; }
+
+/* 原始记忆池 — 卡片 */
+.raw-card {
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent-line-soft, #2a2a30);
+  border-radius: 3px;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.raw-card[data-status="raw"]                  { border-left: 3px solid #3a6ea5; }
+.raw-card[data-status="processed"]            { border-left: 3px solid #6e7681; }
+.raw-card[data-status="merged"]               { border-left: 3px solid #5d9c5d; }
+.raw-card[data-status="decided"]              { border-left: 3px solid #5d9c5d; }
+.raw-card[data-status="rejected"]             { border-left: 3px solid #c45858; }
+.raw-card[data-status="needs_discussion"]     { border-left: 3px solid #a078c8; }
+
+/* pill 小巧增强 — data-color 着色 (沿用 Shelf.css 既有 .pill.tiny, 这次补 data-color 选择器) */
+.pill.tiny[data-color="blue"]   { background: rgba(58, 110, 165, 0.18); color: #8db4d9; }
+.pill.tiny[data-color="gold"]   { background: rgba(214, 166, 78, 0.18); color: #e0c585; }
+.pill.tiny[data-color="purple"] { background: rgba(160, 120, 200, 0.18); color: #c8a8e0; }
+.pill.tiny[data-color="green"]  { background: rgba(93, 156, 93, 0.18); color: #9cc59c; }
+.pill.tiny[data-color="red"]    { background: rgba(196, 88, 88, 0.18); color: #e0a0a0; }
+.pill.tiny[data-color="gray"]   { background: rgba(110, 118, 129, 0.18); color: #a8b0b9; }

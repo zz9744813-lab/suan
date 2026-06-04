@@ -114,6 +114,22 @@ from app.schemas.deepstudy import (
     StudyRunStartResponse,
     WritingTechniqueQuery,
 )
+from app.schemas.memory_v2 import (
+    ApplyDecisionRequest,
+    ApplyDecisionResponse,
+    ConsolidateRequest,
+    ConsolidateResponse,
+    DiscussionDecisionRead,
+    MemoryTimelineEventRead,
+    ProjectMemoryArchiveOverview,
+    ProjectMemoryShelfItem,
+    ProjectMemoryShelfResponse,
+    RawMemoryEntryRead,
+    RunDiscussionRequest,
+    StableCharacterStateRead,
+    StableMemoryEntityDetail,
+    StableMemoryEntityRead,
+)
 
 __all__ = [
     "APIError",
@@ -216,4 +232,19 @@ __all__ = [
     "StudyRunRead",
     "StudyRunStartResponse",
     "WritingTechniqueQuery",
+    # P3: Raw + Stable memory
+    "ApplyDecisionRequest",
+    "ApplyDecisionResponse",
+    "ConsolidateRequest",
+    "ConsolidateResponse",
+    "DiscussionDecisionRead",
+    "MemoryTimelineEventRead",
+    "ProjectMemoryArchiveOverview",
+    "ProjectMemoryShelfItem",
+    "ProjectMemoryShelfResponse",
+    "RawMemoryEntryRead",
+    "RunDiscussionRequest",
+    "StableCharacterStateRead",
+    "StableMemoryEntityDetail",
+    "StableMemoryEntityRead",
 ]

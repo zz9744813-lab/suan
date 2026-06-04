@@ -938,6 +938,226 @@ export type MemoryHardFact = {
   created_at: string;
 };
 
+// ===== P3: 项目记忆库 (Raw + Stable + Discussion) =====
+// 跟 backend/app/schemas/memory_v2.py 1:1 对应. 详情参见 P3 spec
+// (04_P3_项目记忆书架_二次加工_讨论裁决.md) §7.
+
+/** 第一层 — 项目记忆书架每一本记忆册. 7 柜 + 原始/裁决计数 + 健康分. */
+export type ProjectMemoryShelfItem = {
+  project_id: number;
+  project_name: string;
+  last_consolidated_at: string | null;
+  // 7 档案柜 (P3 §5) — 跟 entity_type 一致
+  character_count: number;
+  location_count: number;
+  faction_count: number;
+  item_count: number;
+  world_rule_count: number;
+  foreshadow_count: number;
+  hard_fact_count: number;
+  // 原始 + 裁决计数 — 详情面板的"待裁决" badge
+  raw_entry_count: number;
+  raw_entry_pending: number;
+  decision_pending: number;
+  decision_running: number;
+  // 0..1 — 健康分 (decided / 总裁决)
+  health_score: number | null;
+  // "active" / "archived"
+  status: string;
+};
+
+/** 第一层 — 整个书架的响应, 含 3 本固定系统维护册 (P3 §4). */
+export type ProjectMemoryShelfResponse = {
+  items: ProjectMemoryShelfItem[];
+  system_books: Array<{ key: string; label: string; subtitle: string }>;
+};
+
+/** 第二层 — 单项目档案馆概览 (7 柜 + 裁决室 + 健康). */
+export type ProjectMemoryArchiveOverview = {
+  project_id: number;
+  project_name: string;
+  health_score: number | null;
+  last_consolidated_at: string | null;
+  // 7 柜计数 (跟 ShelfItem 同结构但走 dict — 路由直接 GROUP BY 出来)
+  counts: Record<string, number>;
+  // pending / running / decided / failed 各自多少
+  decision_summary: Record<string, number>;
+};
+
+// 7 柜的 entity_type 取值 (StableMemoryEntity.entity_type Literal)
+export type CabinetType =
+  | "character"
+  | "location"
+  | "faction"
+  | "item"
+  | "world_rule"
+  | "foreshadow"
+  | "hard_fact";
+
+export const CABINETS: { key: CabinetType; label: string; emoji: string }[] = [
+  { key: "character",   label: "人物档案",   emoji: "👤" },
+  { key: "location",    label: "地点档案",   emoji: "🏔" },
+  { key: "faction",     label: "势力档案",   emoji: "⚔" },
+  { key: "item",        label: "物品档案",   emoji: "🗡" },
+  { key: "world_rule",  label: "世界规则",   emoji: "📜" },
+  { key: "foreshadow",  label: "伏笔档案",   emoji: "🎯" },
+  { key: "hard_fact",   label: "硬事实",     emoji: "📌" },
+];
+
+/** P3 §7.1 原始记忆池. status 6 值:
+ *  raw / processed / merged / rejected / needs_discussion / decided */
+export type RawMemoryEntry = {
+  id: number;
+  project_id: number;
+  chapter_id: number | null;
+  chapter_index: number | null;
+  entry_type: string;
+  subject: string;
+  predicate: string | null;
+  object_value: string | null;
+  raw_payload: Record<string, any>;
+  source_quote: string | null;
+  source_summary: string | null;
+  confidence: number;
+  agent_name: string;
+  agent_step_id: number | null;
+  status: string;
+  processed_at: string | null;
+  merged_into_entity_id: number | null;
+  created_at: string;
+};
+
+/** P3 §7.2 稳定实体 (7 柜共用表). */
+export type StableMemoryEntity = {
+  id: number;
+  project_id: number;
+  entity_type: CabinetType;
+  canonical_name: string;
+  aliases: string[];
+  tags: string[];
+  profile: Record<string, any>;
+  importance: number;
+  confidence: number;
+  status: string;
+  first_chapter_index: number | null;
+  last_chapter_index: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** P3 §7.3 人物当前状态. */
+export type StableCharacterState = {
+  id: number;
+  project_id: number;
+  entity_id: number;
+  current_location: string | null;
+  current_faction: string | null;
+  current_goal: string | null;
+  emotion_state: string | null;
+  injury_state: string | null;
+  power_state: string | null;
+  owned_items: string[];
+  abilities: string[];
+  secrets: string[];
+  last_seen_chapter: number | null;
+  evidence_entry_ids: number[];
+  confidence: number;
+  updated_at: string;
+};
+
+/** P3 §7.4 时间线事件. */
+export type MemoryTimelineEvent = {
+  id: number;
+  project_id: number;
+  entity_id: number | null;
+  memory_type: string;
+  chapter_id: number | null;
+  chapter_index: number | null;
+  event_title: string;
+  event_summary: string;
+  before_state: Record<string, any> | null;
+  after_state: Record<string, any> | null;
+  source_quote: string | null;
+  source_entry_id: number | null;
+  created_by: string;
+  created_at: string;
+};
+
+/** 单实体详情 — 基础 + latest_state + timeline. */
+export type StableMemoryEntityDetail = StableMemoryEntity & {
+  latest_state: StableCharacterState | null;
+  timeline: MemoryTimelineEvent[];
+};
+
+/** P3 §7.5 讨论裁决记录.
+ *  topic_type 5 值: duplicate_entity / field_conflict /
+ *  foreshadow_unclear / hard_fact_conflict / relationship_conflict
+ *  status 4 值: pending / running / decided / failed */
+export type DiscussionDecision = {
+  id: number;
+  project_id: number;
+  topic_type: string;
+  topic_title: string;
+  raw_entry_ids: number[];
+  related_entity_ids: number[];
+  status: string;
+  decision_payload: Record<string, any> | null;
+  decision: string | null;
+  reason: string | null;
+  decided_by_agent: string | null;
+  discussion_session_id: number | null;
+  created_at: string;
+  decided_at: string | null;
+};
+
+export const DECISION_TOPIC_TYPE_LABEL: Record<string, string> = {
+  duplicate_entity:    "实体去重",
+  field_conflict:      "字段冲突",
+  foreshadow_unclear:  "伏笔不清",
+  hard_fact_conflict:  "硬事实冲突",
+  relationship_conflict: "关系冲突",
+};
+
+export const DECISION_STATUS_LABEL: Record<string, string> = {
+  pending:  "待裁决",
+  running:  "裁决中",
+  decided:  "已裁决",
+  failed:   "裁决失败",
+};
+
+// ----- Consolidation / discussion 请求 / 响应 -----
+export type ConsolidateRequestBody = {
+  min_confidence?: number;
+  batch_limit?: number;
+  run_discussion_inline?: boolean;
+};
+export type ConsolidateResponse = {
+  processed: number;
+  merged: number;
+  rejected: number;
+  needs_discussion: number;
+  decided_inline: number;
+  decisions_created: number[];
+  duration_ms: number;
+  cost_usd: number;
+};
+
+export type RunDiscussionRequestBody = {
+  participants?: string[];
+  max_turns?: number;
+};
+export type ApplyDecisionRequestBody = {
+  decision_payload_override?: Record<string, any> | null;
+  reason_override?: string | null;
+};
+export type ApplyDecisionResponse = {
+  decision_id: number;
+  applied: boolean;
+  affected_entity_ids: number[];
+  created_timeline_event_ids: number[];
+  message: string;
+};
+
 // ===== Global Search (Round 11, P0-UI-5) =====
 export type SearchResultType =
   | "project"

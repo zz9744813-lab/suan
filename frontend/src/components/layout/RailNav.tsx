@@ -36,7 +36,7 @@ const LEARN_ITEMS: Item[] = [
   { to: "/behavior",   label: "行为模式", icon: "✺" },
   { to: "/graph",      label: "图谱",     icon: "◉" },
   { to: "/discussion", label: "讨论室",   icon: "☕" },
-  { to: "/memory",     label: "知识库",   icon: "❖" },
+  { to: "/memory",     label: "记忆库",   icon: "❖" },
 ];
 
 export function RailNav() {

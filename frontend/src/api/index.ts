@@ -562,3 +562,104 @@ export const listDeepStudyTechniques = (params: { q?: string; technique_type?: s
   const s = q.toString();
   return api.get<any[]>(`/api/deepstudy/techniques${s ? `?${s}` : ""}`);
 };
+
+// ----- P3: 项目记忆 (Raw + Stable + Discussion) -----
+// 后端端点 (P3 spec 04 §10, 11 个):
+//   GET    /api/project-memory                                          书架列表
+//   GET    /api/project-memory/{project_id}                             档案馆概览
+//   POST   /api/project-memory/{project_id}/consolidate                 二次加工
+//   GET    /api/project-memory/{project_id}/entities?type=&search=      7 柜统一接口
+//   GET    /api/project-memory/{project_id}/entities/{entity_id}        单实体详情
+//   GET    /api/project-memory/{project_id}/foreshadows?status=         伏笔专用
+//   GET    /api/project-memory/{project_id}/facts?category=             硬事实专用
+//   GET    /api/project-memory/{project_id}/discussion-decisions        讨论裁决记录
+//   POST   /api/project-memory/{project_id}/discussion-decisions/{id}/run  跑讨论
+//   POST   /api/project-memory/{project_id}/discussion-decisions/{id}/apply 应用裁决
+//   GET    /api/project-memory/{project_id}/raw-entries?status=         原始记忆池
+
+import type {
+  ApplyDecisionRequestBody,
+  ApplyDecisionResponse,
+  CabinetType,
+  ConsolidateRequestBody,
+  ConsolidateResponse,
+  DiscussionDecision,
+  ProjectMemoryArchiveOverview,
+  ProjectMemoryShelfResponse,
+  RawMemoryEntry,
+  RunDiscussionRequestBody,
+  StableMemoryEntity,
+  StableMemoryEntityDetail,
+} from "../types";
+
+export const listProjectMemoryShelf = () =>
+  api.get<ProjectMemoryShelfResponse>("/api/project-memory");
+
+export const getProjectMemoryArchive = (projectId: number) =>
+  api.get<ProjectMemoryArchiveOverview>(`/api/project-memory/${projectId}`);
+
+export const consolidateProjectMemory = (projectId: number, body: ConsolidateRequestBody = {}) =>
+  api.post<ConsolidateResponse>(`/api/project-memory/${projectId}/consolidate`, body);
+
+/** 7 柜统一接口. type 不传 = 全部 active 实体. */
+export const listProjectMemoryEntities = (
+  projectId: number,
+  params: { type?: CabinetType; search?: string; limit?: number } = {},
+) => {
+  const q = new URLSearchParams();
+  if (params.type) q.set("type", params.type);
+  if (params.search) q.set("search", params.search);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<StableMemoryEntity[]>(`/api/project-memory/${projectId}/entities${s ? `?${s}` : ""}`);
+};
+
+export const getProjectMemoryEntity = (projectId: number, entityId: number) =>
+  api.get<StableMemoryEntityDetail>(`/api/project-memory/${projectId}/entities/${entityId}`);
+
+/** 伏笔专用 — 走 status 过滤 (active/paid_off/dropped). */
+export const listProjectMemoryForeshadows = (projectId: number, params: { status?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<StableMemoryEntity[]>(`/api/project-memory/${projectId}/foreshadows${s ? `?${s}` : ""}`);
+};
+
+/** 硬事实专用 — 走 tags 子串匹配 (P3 阶段没专门 category 列). */
+export const listProjectMemoryFacts = (projectId: number, params: { category?: string; limit?: number } = {}) => {
+  const q = new URLSearchParams();
+  if (params.category) q.set("category", params.category);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<StableMemoryEntity[]>(`/api/project-memory/${projectId}/facts${s ? `?${s}` : ""}`);
+};
+
+export const listDiscussionDecisions = (
+  projectId: number,
+  params: { status?: string; topic_type?: string; limit?: number } = {},
+) => {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  if (params.topic_type) q.set("topic_type", params.topic_type);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<DiscussionDecision[]>(`/api/project-memory/${projectId}/discussion-decisions${s ? `?${s}` : ""}`);
+};
+
+export const runDiscussionDecision = (projectId: number, decisionId: number, body: RunDiscussionRequestBody = {}) =>
+  api.post<DiscussionDecision>(`/api/project-memory/${projectId}/discussion-decisions/${decisionId}/run`, body);
+
+export const applyDiscussionDecision = (projectId: number, decisionId: number, body: ApplyDecisionRequestBody = {}) =>
+  api.post<ApplyDecisionResponse>(`/api/project-memory/${projectId}/discussion-decisions/${decisionId}/apply`, body);
+
+export const listRawMemoryEntries = (
+  projectId: number,
+  params: { status?: string; limit?: number } = {},
+) => {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  if (params.limit) q.set("limit", String(params.limit));
+  const s = q.toString();
+  return api.get<RawMemoryEntry[]>(`/api/project-memory/${projectId}/raw-entries${s ? `?${s}` : ""}`);
+};

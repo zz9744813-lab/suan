@@ -20,6 +20,13 @@ from app.models.memory import (
     MemoryForeshadow,
     MemoryHardFact,
 )
+from app.models.memory_v2 import (
+    DiscussionDecision,
+    MemoryTimelineEvent,
+    RawMemoryEntry,
+    StableCharacterState,
+    StableMemoryEntity,
+)
 from app.models.chief_agent import ChiefAgentMessage, ChiefAgentSession
 from app.models.study import (
     BehaviorPattern,
@@ -81,4 +88,10 @@ __all__ = [
     "ForeshadowChain",
     "BehaviorPatternEvidence",
     "WritingTechnique",
+    # P3: Raw + Stable memory
+    "RawMemoryEntry",
+    "StableMemoryEntity",
+    "StableCharacterState",
+    "MemoryTimelineEvent",
+    "DiscussionDecision",
 ]

@@ -46,8 +46,8 @@ export function MemoryPage() {
   return (
     <div className="page memory-page">
       <div className="subheader">
-        <h2 className="serif">知识库</h2>
-        <span className="muted small">当前项目 #{projectId} · 维护 MemoryUpdate Agent 写入的条目</span>
+        <h2 className="serif">记忆库 (旧版)</h2>
+        <span className="muted small">当前项目 #{projectId} · 旧 MemoryUpdate Agent 写入 (Round 9) · 推荐用 <a href="/memory">项目记忆库</a> (P3)</span>
       </div>
       <div className="tabs" style={{ padding: "0 24px" }}>
         <button className={`tab ${tab === "characters" ? "active" : ""}`} onClick={() => setTab("characters")}>人物</button>
