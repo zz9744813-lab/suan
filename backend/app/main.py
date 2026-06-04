@@ -16,6 +16,7 @@ from app.routers import (
     behavior,
     chapters,
     chief_agent,
+    deepstudy,
     discussion,
     events,
     graph,
@@ -98,5 +99,5 @@ PREFIX = settings.api_prefix
 for r in (projects.router, chapters.router, tasks.router, prompts.router,
           models.router, worker.router, chief_agent.router, memory.router,
           events.router, study.router, behavior.router, graph.router,
-          discussion.router, search.router):
+          discussion.router, search.router, deepstudy.router):
     app.include_router(r, prefix=PREFIX)

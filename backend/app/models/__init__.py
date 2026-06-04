@@ -29,6 +29,17 @@ from app.models.study import (
     StudyCharacter,
     StudyMaterial,
 )
+from app.models.deepstudy import (
+    BehaviorPatternEvidence,
+    ChapterAnalysis,
+    Entity,
+    EntityMention,
+    ForeshadowChain,
+    Relationship,
+    SceneBeat,
+    StudyRun,
+    WritingTechnique,
+)
 from app.models.discussion import DiscussionSession, DiscussionTurn
 
 __all__ = [
@@ -60,4 +71,14 @@ __all__ = [
     "GraphEdge",
     "DiscussionSession",
     "DiscussionTurn",
+    # P0-DeepStudy
+    "StudyRun",
+    "ChapterAnalysis",
+    "Entity",
+    "EntityMention",
+    "SceneBeat",
+    "Relationship",
+    "ForeshadowChain",
+    "BehaviorPatternEvidence",
+    "WritingTechnique",
 ]

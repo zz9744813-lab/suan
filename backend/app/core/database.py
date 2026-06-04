@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -95,10 +96,48 @@ async def init_db() -> None:
         # Study page and the graph materialise endpoint filter "things
         # this book produced" without scanning the JSON payload blob.
         ("memory_foreshadows", "source_material_id", "INTEGER"),
+        # P0-DeepStudy: book-shelf + DeepStudy coordination fields on
+        # the StudyMaterial row. ``study_status`` mirrors the older
+        # ``status`` field but with the DeepStudy state machine
+        # (empty/uploaded/chapterized/studying/.../completed/failed).
+        # The default is "empty"; a one-shot UPDATE below
+        # backfills existing rows to "chapterized" if they already
+        # have chapters, or "empty" if they don't.
+        ("study_materials", "study_status", "VARCHAR(40) DEFAULT 'empty'"),
+        ("study_materials", "deepstudy_version", "VARCHAR(40)"),
+        ("study_materials", "shelf_category", "VARCHAR(80)"),
+        ("study_materials", "cover_theme", "JSON"),
+        ("study_materials", "study_progress", "JSON"),
+        ("study_materials", "knowledge_score", "FLOAT"),
+        ("study_materials", "last_deepstudied_at", "DATETIME"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:
             await _ensure_column(conn, table, column, ddl)
+
+        # P0-DeepStudy: one-shot backfill for existing StudyMaterial
+        # rows. We can only run this after the column exists. We map
+        # the old ``status`` to the new ``study_status`` so the
+        # library API works on legacy rows:
+        #   old "draft"            -> "empty"        (no chapters)
+        #   old "ready"            -> "chapterized"  (chapterize done)
+        #   old "failed"           -> "failed"       (preserve)
+        # Anything else is left as-is so a re-run is a no-op.
+        #
+        # We also re-fire this for rows where the column backfilled
+        # to the "empty" default — those are the existing rows that
+        # pre-date the migration and need their legacy ``status``
+        # mapped onto the new field. Idempotent: a row whose
+        # ``study_status`` is already non-empty (e.g. the user has
+        # actually run a DeepStudy pass) keeps its real value.
+        await conn.execute(text(
+            "UPDATE study_materials SET study_status = CASE "
+            "  WHEN status = 'ready' THEN 'chapterized' "
+            "  WHEN status = 'failed' THEN 'failed' "
+            "  ELSE 'empty' END "
+            "WHERE study_status = 'empty' OR study_status IS NULL "
+            "  OR study_status = ''"
+        ))
 
 
 async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
@@ -108,8 +147,6 @@ async def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
     a raw async SA connection — we drive ``text()`` directly so the
     migration works for both fresh and existing DBs.
     """
-    from sqlalchemy import text
-
     rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
     existing = {row[1] for row in rows}  # row[1] = column name
     if column in existing:

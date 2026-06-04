@@ -67,6 +67,37 @@ class StudyMaterial(Base):
     chapter_count: Mapped[int] = mapped_column(Integer, default=0)
     character_count: Mapped[int] = mapped_column(Integer, default=0)
     extra: Mapped[dict | None] = mapped_column(JSON, default=None)
+    # === P0-DeepStudy: book-shelf + DeepStudy coordination fields ===
+    # ``study_status`` is the DeepStudy pipeline state (separate from
+    # the older ``status`` which is the basic chapterize state). Values
+    # are the DeepStudy state machine: empty / uploaded / chapterized
+    # / studying / paused / review_required / completed / failed.
+    # Default to ``empty`` for new materials and backfill all
+    # existing rows to ``chapterized`` (chapterize succeeded) or
+    # ``empty`` (no chapters) below in the column backfill.
+    study_status: Mapped[str] = mapped_column(String(40), default="empty")
+    # ``deepstudy_version`` records which DeepStudy pipeline version
+    # last produced results for this material. ``None`` means the
+    # material hasn't been DeepStudied yet.
+    deepstudy_version: Mapped[str | None] = mapped_column(String(40), default=None)
+    # ``shelf_category`` is a free-form grouping for the library UI
+    # (e.g. "玄幻" / "都市" / "古典") so the user can organise the
+    # shelf. Defaults to the project's genre or empty.
+    shelf_category: Mapped[str | None] = mapped_column(String(80), default=None)
+    # ``cover_theme`` is a per-book UI hint (gradient / accent) the
+    # library page uses to differentiate book spines.
+    cover_theme: Mapped[dict | None] = mapped_column(JSON, default=None)
+    # ``study_progress`` is the live snapshot of the running run's
+    # progress (total/processed chapters, current stage, counters).
+    # Updated by the DeepStudy worker; cleared on completion.
+    study_progress: Mapped[dict | None] = mapped_column(JSON, default=None)
+    # ``knowledge_score`` is the latest StudyCritic score (0..1). Set
+    # when a critic pass completes; ``None`` means no critic has run.
+    knowledge_score: Mapped[float | None] = mapped_column(Float, default=None)
+    # ``last_deepstudied_at`` is the timestamp of the most recent
+    # successful DeepStudy run. ``None`` means the material has
+    # never been DeepStudied.
+    last_deepstudied_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

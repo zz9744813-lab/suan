@@ -99,6 +99,21 @@ from app.schemas.study import (
     StudyRelationshipSuggestion,
     StudyRequest,
 )
+from app.schemas.deepstudy import (
+    BehaviorPatternQuery,
+    GraphEdgeRead as DeepStudyGraphEdgeRead,
+    GraphNodeRead as DeepStudyGraphNodeRead,
+    KnowledgeGraphResponse,
+    KnowledgeGraphStats,
+    LibraryItem,
+    LibraryResponse,
+    LibrarySummary,
+    NodeDetailResponse,
+    StudyRunCreate,
+    StudyRunRead,
+    StudyRunStartResponse,
+    WritingTechniqueQuery,
+)
 
 __all__ = [
     "APIError",
@@ -187,4 +202,18 @@ __all__ = [
     "StudyRelationshipsResponse",
     "StudyRelationshipSuggestion",
     "StudyRequest",
+    # P0-DeepStudy
+    "BehaviorPatternQuery",
+    "DeepStudyGraphEdgeRead",
+    "DeepStudyGraphNodeRead",
+    "KnowledgeGraphResponse",
+    "KnowledgeGraphStats",
+    "LibraryItem",
+    "LibraryResponse",
+    "LibrarySummary",
+    "NodeDetailResponse",
+    "StudyRunCreate",
+    "StudyRunRead",
+    "StudyRunStartResponse",
+    "WritingTechniqueQuery",
 ]
