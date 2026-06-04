@@ -692,3 +692,281 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* R23: 交互式图谱 (GraphPage) — pan/zoom/drag/filter/search */
+.graph-svg {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.graph-svg:active { cursor: grabbing; }
+.graph-svg.edge-mode { cursor: crosshair; }
+.graph-svg.edge-mode .graph-node { cursor: crosshair; }
+
+/* 节点状态 */
+.graph-node {
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+.graph-node-label {
+  font-size: 11px;
+  fill: #0a0a0a;
+  font-weight: 600;
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.6);
+  stroke-width: 2;
+}
+.graph-node-degree {
+  font-size: 9px;
+  fill: #fff;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 1.5;
+}
+
+/* 选中节点: 节点 + 边保持全亮, 其它 dim */
+.graph-node.dimmed,
+.graph-node.search-hit { opacity: 1; }
+.graph-node.selected circle { filter: drop-shadow(0 0 6px var(--accent-gold, #d6a64e)); }
+.graph-node.dimmed { opacity: 0.18; }
+.graph-node.edge-source circle { filter: drop-shadow(0 0 8px var(--accent, #6a83f0)); }
+
+/* 边样式 */
+.graph-edge { cursor: pointer; }
+.graph-edge.selected line { filter: drop-shadow(0 0 4px var(--accent-gold, #d6a64e)); }
+.graph-edge.dimmed { opacity: 1; }  /* opacity 由 line 上的 strokeOpacity 控制 */
+.graph-edge-label {
+  font-size: 10px;
+  fill: var(--text-primary);
+  pointer-events: none;
+  user-select: none;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 2.5;
+}
+.graph-edge-label.dimmed { fill: var(--text-muted); opacity: 0.4; }
+.graph-edge-label.selected {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--accent-gold, #d6a64e);
+}
+
+/* 缩放控制 + 工具栏 */
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-paper-soft, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.graph-toolbar .spacer { flex: 1; }
+.graph-toolbar button {
+  padding: 4px 10px;
+  font-size: 13px;
+  min-width: 28px;
+}
+.graph-search {
+  flex: 0 1 280px;
+  min-width: 180px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.graph-search-jump {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  flex-wrap: wrap;
+}
+.graph-search-jump .link {
+  background: transparent;
+  border: 1px solid var(--accent-line);
+  color: var(--accent-gold);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.graph-search-jump .link:hover {
+  background: var(--bg-paper-soft);
+}
+
+/* 类型过滤 chip */
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 10px;
+  background: var(--bg-paper-soft, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--accent-line);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+.legend-chip.active {
+  color: var(--text-primary);
+  border-color: var(--accent-gold-dim);
+}
+.legend-chip:not(.active) { opacity: 0.4; }
+.legend-chip .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+.legend-clear {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* 画布内提示 */
+.graph-hint {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated, rgba(20, 26, 40, 0.85));
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  pointer-events: none;
+  z-index: 10;
+  border: 1px solid var(--accent-line-soft);
+}
+
+/* 关系名 prompt (从节点拖到节点后弹出的输入框) */
+.graph-prompt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  background: var(--bg-elevated, rgba(20, 26, 40, 0.97));
+  border: 1px solid var(--accent-gold-dim);
+  border-radius: 8px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+.graph-prompt .input {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.graph-prompt .row {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* 详情侧栏 (右侧 slide-in) */
+.graph-side-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--bg-elevated, rgba(15, 20, 32, 0.98));
+  border-left: 1px solid var(--accent-line);
+  padding: 16px 18px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+  animation: graph-panel-in 0.18s ease-out;
+}
+.graph-side-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  border: 0;
+  padding: 0;
+}
+.graph-side-panel header h3 {
+  margin: 0;
+  font-size: 15px;
+  word-break: break-all;
+}
+.graph-side-panel .close-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}
+.graph-side-panel h4 {
+  margin: 14px 0 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.side-row {
+  margin: 6px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+.side-actions {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0 6px 0;
+}
+.side-actions button.small {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.side-edge-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+.side-edge-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--accent-line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side-edge-list .link {
+  background: transparent;
+  border: 0;
+  color: var(--accent-gold);
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  font-weight: 500;
+}
+.side-edge-list .link:hover { color: var(--accent-gold-soft); }
+.chip-mini {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 10px;
+  border-radius: 8px;
+  background: var(--bg-paper-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--text-secondary);
+}
+@keyframes graph-panel-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
