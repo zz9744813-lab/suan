@@ -588,6 +588,49 @@ export type MaterialiseSummary = {
   edges_created: number;
 };
 
+// R24: relationship LLM enrichment. The endpoint
+// ``POST /api/study/materials/{id}/relationships/enrich`` runs
+// one LLM call per co-occurrence pair to classify it into a
+// semantic relation (师父/对手/恋人/...) instead of the default
+// "同章节出现" co-occurrence label.
+export type StudyRelationshipEnrichRequest = {
+  // Reserved for future use — the backend currently re-uses the
+  // R22 co-occurrence scanner. Pass empty list to mean "all
+  // pairs above min_co_chapter_count".
+  suggestion_ids?: number[];
+  min_co_chapter_count?: number;
+  max_pairs?: number;
+};
+
+export type StudyRelationshipEnrichedItem = {
+  char_a_id: number;
+  char_a_name: string;
+  char_b_id: number;
+  char_b_name: string;
+  co_chapter_count: number;
+  last_chapter_no: number;
+  last_chapter_title: string;
+  // Carried over from R22 — useful for tooltips / diff
+  sample_quote: string;
+  // New in R24: the LLM's verdict. ``llm_inferred=false`` means
+  // the LLM returned "未知" / empty / failed; we fell back to
+  // "同章节出现".
+  relation: string;
+  confidence: number;
+  evidence: string;
+  llm_inferred: boolean;
+};
+
+export type StudyRelationshipEnrichResponse = {
+  material_id: number;
+  enriched_count: number;
+  skipped_count: number;
+  fallback_count: number;
+  duration_ms: number;
+  cost_usd: number;
+  items: StudyRelationshipEnrichedItem[];
+};
+
 // Memory-side foreshadow summary, returned by
 // ``GET /api/study/materials/{id}/foreshadows``. Only the columns
 // the Study page actually renders — fuller columns are available

@@ -141,3 +141,47 @@ class StudyBehaviorPatternAgent(BaseAgent):
             "raw_preview": (raw or "")[:1000],
             "summary": "StudyBehaviorPatternAgent JSON 解析失败。",
         }
+
+
+# R24: 真实关系抽取 (跟前面 R22 的纯 co-occurrence 不同 — 这次用
+# LLM 看章节正文, 给出 师父/对手/恋人/朋友/家人/仇人/师徒/同门
+# 等语义标签, 而不是「同章节出现」这种纯共现)。
+# 用户反馈 (R23): 「相互的联系不要之说出现在同一章节啊」—
+# 之前 R22 的 relationships 端点只数两人是否同章, 标签全默认
+# 「同章节出现」, 看起来没意义。
+class StudyRelationshipExtractionAgent(BaseAgent):
+    """R24: 给一对 (char_a, char_b) + 章节正文, 让 LLM 抽取
+    关系类型。
+
+    输入是路由拼好的 prompt: 列出两个角色名 + 共同出现的章节摘要
+    (前 1500 字) + 我们从同章出现推导出的最相关章节标题。
+    输出 JSON envelope: ``{"relations": [{"relation", "evidence",
+    "confidence"}], "summary": "..."}``。
+
+    关系类型限制在以下枚举, 路由会照此在 UI 里配色:
+      师父 / 弟子 / 师徒
+      对手 / 仇人
+      恋人 / 夫妻
+      朋友 / 同门
+      家人 / 兄弟 / 姐妹 / 父子 / 母子
+      主仆 / 势力
+      同盟 / 合作
+      敌人
+      同章节出现   (兜底 — 如果 LLM 判不出更具体的)
+    """
+    name = "StudyRelationshipExtractionAgent"
+    role = "StudyAgent"
+    prompt_key = "study_relationship"  # 后面 seed.py 会加
+    step_name = "study_relationship"
+    extra_temperature = 0.0
+    extra_max_tokens = 1500
+    allow_json_fallback = True
+
+    def _build_json_fallback(self, raw: str) -> dict[str, Any]:
+        return {
+            "relations": [],
+            "parse_failed": True,
+            "fallback": True,
+            "raw_preview": (raw or "")[:1000],
+            "summary": "StudyRelationshipExtractionAgent JSON 解析失败。",
+        }

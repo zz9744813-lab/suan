@@ -41,6 +41,9 @@ from app.schemas import (
     StudyMaterialUpdate,
     StudyRelationshipApplyRequest,
     StudyRelationshipApplyResponse,
+    StudyRelationshipEnrichRequest,
+    StudyRelationshipEnrichResponse,
+    StudyRelationshipEnrichedItem,
     StudyRelationshipsResponse,
     StudyRelationshipSuggestion,
     StudyRequest,
@@ -1905,6 +1908,214 @@ async def list_relationship_suggestions(
             chapters_scanned=len(chapter_ids_seen),
             suggestions=suggestions,
             total_characters=len(char_rows),
+        ),
+    }
+
+
+# R24: 把 R22 纯 co-occurrence 的 suggestions 跑 LLM, 抽出真实
+# 语义关系 (师父/对手/恋人/家人/...) 替代「同章节出现」。
+# 用户 R23 反馈: 「相互的联系不要之说出现在同一章节啊」。
+@router.post(
+    "/materials/{material_id}/relationships/enrich",
+    response_model=APIResponse[StudyRelationshipEnrichResponse],
+)
+async def enrich_relationships(
+    material_id: int,
+    body: StudyRelationshipEnrichRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[StudyRelationshipEnrichResponse]:
+    """R24: LLM 抽语义关系。
+
+    这个端点跟 ``/relationships`` 走同一条数据路径 (co-occurrence
+    先筛出候选对), 但额外对每对调用 LLM 判关系类型。运行时间跟
+    对数线性 — 30 对约 1-2 分钟, 100 对约 4-6 分钟, 所以默认
+    cap 在 30 对。
+
+    输入: ``StudyRelationshipEnrichRequest`` with optional
+    ``max_pairs`` cap (default 30) and ``min_co_chapter_count``。
+    输出: 同形状的 items, 但 ``relation`` 字段是 LLM 给的真实
+    关系, 带 ``confidence`` 和 ``evidence``。LLM 抽不出的标
+    「同章节出现」+ confidence=0。
+    """
+    import asyncio
+    import time as _time
+    from app.agents.study import StudyRelationshipExtractionAgent
+
+    t0 = _time.time()
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    # 1) 复用 /relationships 端的候选对生成逻辑 (抽出去共享 — 后面
+    #    重构, 现在内联以减小 diff 体积)。
+    from app.models.study import StudyCharacter as _SC, StudyChapter as _SCh
+    from collections import defaultdict
+
+    char_rows = (await db.execute(
+        select(_SC).where(
+            _SC.material_id == material_id,
+            _SC.source_chapter_id.is_not(None),
+        )
+    )).scalars().all()
+    if not char_rows:
+        return {
+            "ok": True,
+            "data": StudyRelationshipEnrichResponse(
+                material_id=material_id,
+                enriched_count=0, skipped_count=0, fallback_count=0,
+                duration_ms=0, cost_usd=0.0, items=[],
+            ),
+        }
+
+    chapter_to_chars: dict[int, list[_SC]] = defaultdict(list)
+    for c in char_rows:
+        chapter_to_chars[c.source_chapter_id].append(c)
+
+    pair_acc: dict[tuple[int, int], dict[str, Any]] = {}
+    chapter_ids_seen: set[int] = set()
+    for chap_id, chars_in_chap in chapter_to_chars.items():
+        chapter_ids_seen.add(chap_id)
+        chars_capped = chars_in_chap[:20]
+        for i, a in enumerate(chars_capped):
+            for b in chars_in_chap[i + 1:]:
+                lo, hi = (a, b) if a.id < b.id else (b, a)
+                key = (lo.id, hi.id)
+                acc = pair_acc.setdefault(key, {
+                    "char_a": lo, "char_b": hi,
+                    "co_chapter_count": 0,
+                    "last_chapter_id": chap_id, "last_chapter_no": 0,
+                })
+                acc["co_chapter_count"] += 1
+
+    # 2) 取章节信息 (序号 + 标题)
+    chap_rows = (await db.execute(
+        select(_SCh).where(_SCh.id.in_(list(chapter_ids_seen)))
+    )).scalars().all()
+    by_chap_id: dict[int, _SCh] = {c.id: c for c in chap_rows}
+    for acc in pair_acc.values():
+        ch = by_chap_id.get(acc["last_chapter_id"])
+        if ch is not None:
+            acc["last_chapter_no"] = ch.chapter_index
+            acc["last_chapter_title"] = ch.title or ""
+    # 排序 + cap
+    rows = sorted(
+        pair_acc.values(),
+        key=lambda x: (-x["co_chapter_count"], -x["last_chapter_no"]),
+    )
+    if body.min_co_chapter_count > 1:
+        rows = [r for r in rows if r["co_chapter_count"] >= body.min_co_chapter_count]
+    rows = rows[: max(1, body.max_pairs)]
+
+    # 3) Synthesise one parent AgentTask so the per-pair AgentStep
+    #    rows share a parent (consistent with the rest of the audit
+    #    trail). Each pair becomes one AgentStep with its own inputs.
+    study_task = AgentTask(
+        project_id=material.project_id or 0,
+        chapter_id=None,
+        task_type="study_relationship",
+        status="running",
+        priority=50,
+        payload={
+            "material_id": material_id,
+            "max_pairs": body.max_pairs,
+            "min_co_chapter_count": body.min_co_chapter_count,
+            "pair_count": len(rows),
+        },
+        started_at=datetime.utcnow(),
+    )
+    db.add(study_task)
+    await db.flush()
+
+    # 4) Run the LLM agent — one call per pair, sequential
+    #    (avoids prompt 互踩; cheap model 1-2s/call so 30 pairs
+    #    = ~30-60s total). Each call creates one AgentStep
+    #    (audit row) and we capture cost/tokens via AgentRunResult.
+    agent = StudyRelationshipExtractionAgent(
+        router=get_llm_router(),
+        engine=get_prompt_engine(),
+    )
+    items: list[StudyRelationshipEnrichedItem] = []
+    enriched = 0
+    fallback = 0
+    skipped = 0
+    cost_sum = 0.0
+    for r in rows:
+        ch = by_chap_id.get(r["last_chapter_id"])
+        excerpt = (ch.content or "")[:1500] if ch is not None else ""
+        sample_quote = excerpt[:200]
+        # 解析默认值 (走 fallback / 失败路径时用)
+        relation = "同章节出现"
+        confidence = 0.0
+        evidence = ""
+        llm_inferred = False
+        try:
+            result = await agent.run(
+                AgentContext(
+                    db=db,
+                    task=study_task,
+                    project_id=material.project_id or 0,
+                    chapter_id=None,
+                    inputs={
+                        "char_a_name": r["char_a"].name,
+                        "char_b_name": r["char_b"].name,
+                        "char_a_role": r["char_a"].role or "其他",
+                        "char_b_role": r["char_b"].role or "其他",
+                        "chapter_excerpt": excerpt or "(无章节正文)",
+                    },
+                )
+            )
+            cost_sum += float(result.cost_usd or 0.0)
+            parsed = result.parsed or {}
+            relations = parsed.get("relations") or []
+            if relations and isinstance(relations, list) and len(relations) > 0:
+                top = relations[0]
+                relation = (top.get("relation") or "同章节出现").strip() or "同章节出现"
+                confidence = float(top.get("confidence") or 0.0)
+                evidence = (top.get("evidence") or "").strip()
+                if relation == "未知" or confidence <= 0.0:
+                    relation = "同章节出现"
+                    confidence = 0.0
+                    fallback += 1
+                else:
+                    llm_inferred = True
+                    enriched += 1
+            else:
+                fallback += 1
+        except Exception:
+            # LLM 调用本身失败 → 跳过, 但仍然 emit 一条 item 维持
+            # 候选对完整 (用户在前端看到 "抽取失败" 仍能看 co-occurrence)
+            skipped += 1
+        items.append(StudyRelationshipEnrichedItem(
+            char_a_id=r["char_a"].id,
+            char_a_name=r["char_a"].name,
+            char_b_id=r["char_b"].id,
+            char_b_name=r["char_b"].name,
+            co_chapter_count=r["co_chapter_count"],
+            last_chapter_no=r["last_chapter_no"],
+            last_chapter_title=r.get("last_chapter_title", ""),
+            sample_quote=sample_quote,
+            relation=relation,
+            confidence=confidence,
+            evidence=evidence,
+            llm_inferred=llm_inferred,
+        ))
+
+    # 5) Mark parent task as succeeded
+    study_task.status = "succeeded"
+    study_task.finished_at = datetime.utcnow()
+    await db.flush()
+
+    duration_ms = int((_time.time() - t0) * 1000)
+    return {
+        "ok": True,
+        "data": StudyRelationshipEnrichResponse(
+            material_id=material_id,
+            enriched_count=enriched,
+            skipped_count=skipped,
+            fallback_count=fallback,
+            duration_ms=duration_ms,
+            cost_usd=cost_sum,
+            items=items,
         ),
     }
 

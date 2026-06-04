@@ -16,6 +16,13 @@ from email.generator import BytesGenerator
 
 BASE = "http://127.0.0.1:8000"
 
+# Track material ids created during this test run so we can
+# clean them up at the end. Otherwise the user's "我的书库" page
+# gets cluttered with test data: book_1..4, clean, with_bom,
+# short. (R23 用户反馈: 「拆书这里又多出一堆你测试用的东西」。
+#  用 track-and-cleanup 模式避免再发生。)
+_TEST_MATERIAL_IDS: list[int] = []
+
 
 def make_multipart(files: list[tuple[str, bytes, str]]) -> bytes:
     """Build a multipart/form-data body matching how the
@@ -49,6 +56,31 @@ def post_multipart(path: str, files: list[tuple[str, bytes, str]]) -> tuple[int,
         return e.code, json.loads(e.read().decode("utf-8"))
 
 
+def delete_material(material_id: int) -> None:
+    """Delete a material and its chapters / characters / graph
+    nodes (cascade). Silently 404s if the material was already
+    removed by another test."""
+    req = urllib.request.Request(
+        f"{BASE}/api/study/materials/{material_id}",
+        method="DELETE",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            pass
+    except urllib.error.HTTPError:
+        pass
+
+
+def cleanup_test_materials() -> None:
+    """Delete all materials this test run created. We use the
+    material id range as a filter rather than title name (the
+    real bug we hit in R23 was that user-created materials with
+    the same title overlap)."""
+    for mid in _TEST_MATERIAL_IDS:
+        delete_material(mid)
+    _TEST_MATERIAL_IDS.clear()
+
+
 def fmt_result(r: dict) -> str:
     if r.get("ok"):
         m = r["data"]
@@ -80,6 +112,7 @@ def test_batch_4_valid():
         assert r["ok"] is True, f"expected success: {r}"
         assert r["data"]["chapter_count"] == 1
         assert r["data"]["status"] == "ready"
+        _TEST_MATERIAL_IDS.append(r["data"]["id"])
         print(fmt_result(r))
     print("  PASS")
 
@@ -109,6 +142,10 @@ def test_batch_with_bom():
         print(fmt_result(r))
     # All three should parse without error (the short one just yields 0 chapters)
     assert all(r["ok"] for r in results)
+    # Track for cleanup.
+    for r in results:
+        if r.get("data", {}).get("id"):
+            _TEST_MATERIAL_IDS.append(r["data"]["id"])
     # The BOM file should still get 1 chapter (BOM stripped by _parse_txt)
     bom_result = next(r for r in results if r["data"]["title"] == "with_bom")
     assert bom_result["data"]["chapter_count"] == 1, f"BOM file not chapterized: {bom_result}"
@@ -147,8 +184,16 @@ def test_batch_too_many():
 
 
 if __name__ == "__main__":
-    test_batch_4_valid()
-    test_batch_with_bom()
-    test_batch_oversize()
-    test_batch_too_many()
-    print("\n=== ALL TESTS PASSED ===")
+    try:
+        test_batch_4_valid()
+        test_batch_with_bom()
+        test_batch_oversize()
+        test_batch_too_many()
+        print("\n=== ALL TESTS PASSED ===")
+    finally:
+        # Always clean up, even if a test fails mid-run, so the
+        # user never sees a "我的书库" full of book_1 / clean /
+        # with_bom / short again.
+        cleanup_test_materials()
+        if _TEST_MATERIAL_IDS:
+            print(f"\n(cleanup removed {len(_TEST_MATERIAL_IDS)} test materials)")

@@ -42,6 +42,8 @@ import type {
   StudyRelationshipApplyRequest,
   StudyRelationshipApplyResponse,
   StudyRelationshipsResponse,
+  StudyRelationshipEnrichRequest,
+  StudyRelationshipEnrichResponse,
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
@@ -334,6 +336,15 @@ export const getStudyRelationships = (materialId: number, params: { min_co_chapt
 export const applyStudyRelationships = (materialId: number, body: StudyRelationshipApplyRequest) =>
   api.post<StudyRelationshipApplyResponse>(
     `/api/study/materials/${materialId}/relationships/apply`,
+    body,
+  );
+
+// R24: upgrade the R22 "同章节出现" placeholder labels to real
+// semantic relations (师父/对手/恋人/...) using a per-pair LLM
+// call. ``body`` is optional; defaults to 30 pairs / co-occur ≥ 1.
+export const enrichStudyRelationships = (materialId: number, body: StudyRelationshipEnrichRequest = {}) =>
+  api.post<StudyRelationshipEnrichResponse>(
+    `/api/study/materials/${materialId}/relationships/enrich`,
     body,
   );
 

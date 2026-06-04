@@ -488,6 +488,52 @@ WRITING_PROMPTS: dict[str, dict] = {
             "}\n"
         ),
     },
+    "study_relationship": {
+        "template_key": "study_relationship",
+        "name": "拆书·人物关系抽取",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "根据一对人物的共同章节正文,抽取他们的具体关系类型(师父/对手/恋人/...)。",
+        "allowed_inputs": ["char_a_name", "char_b_name", "char_a_role", "char_b_role", "chapter_excerpt"],
+        "forbidden_inputs": [],
+        "output_schema": "study_relationships",
+        "can_modify": ["study_relationships"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "关系类型必须能直接在证据章节中找到对应原文支撑。",
+            "不要给「同章节出现」这种纯共现标签 — 必须是语义关系(师徒/对手/恋人/...)。",
+            "如果章节证据不足,confidence 标 0.0,relation 标「未知」。",
+            "evidence 必须是从 chapter_excerpt 截取的原文 1-2 句,不能改写。",
+        ],
+        "body": (
+            "请根据下面这两个角色共同出现的章节正文,判断他们的具体关系类型。\n\n"
+            "【角色 A】\n"
+            "  姓名: {{char_a_name}}\n"
+            "  定位: {{char_a_role}}\n\n"
+            "【角色 B】\n"
+            "  姓名: {{char_b_name}}\n"
+            "  定位: {{char_b_role}}\n\n"
+            "【章节正文(截取自他们共同出现的章节)】\n"
+            "{{chapter_excerpt}}\n\n"
+            "输出 JSON:\n"
+            "{\n"
+            '  "relations": [\n'
+            "    {\n"
+            '      "relation": "师父|弟子|师徒|对手|仇人|恋人|夫妻|朋友|同门|家人|兄弟|姐妹|父子|母子|主仆|势力|同盟|合作|敌人|未知",\n'
+            '      "evidence": "原文 1-2 句作为依据(必须来自上面的章节正文)",\n'
+            '      "confidence": 0.0-1.0 的小数\n'
+            "    }\n"
+            "  ],\n"
+            '  "summary": "一句话说明判断理由(50 字内)"\n'
+            "}\n\n"
+            "注意:\n"
+            "1. 关系必须是语义关系,不是「同章节出现」这种纯共现\n"
+            "2. 如果章节正文不足以判断,confidence 标 0.0,relation 标「未知」\n"
+            "3. evidence 必须是原文 1-2 句,不能改写\n"
+        ),
+    },
     "behavior_pattern_extract": {
         "template_key": "behavior_pattern_extract",
         "name": "行为模式归纳",

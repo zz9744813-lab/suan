@@ -970,3 +970,294 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
   from { transform: translateX(20px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+
+/* ============================================================
+ * R24: 神经网络感图谱
+ *  - 深色背景 + 点阵
+ *  - 节点径向渐变 + 选中时外发光
+ *  - focus 模式 pill
+ *  - enrich toast
+ * ============================================================ */
+
+.graph-page.graph-neural {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(110,158,207,0.06), transparent 40%),
+    radial-gradient(circle at 80% 100%, rgba(214,166,78,0.05), transparent 40%),
+    var(--bg-base);
+  position: relative;
+}
+
+/* 点阵背景 */
+.graph-page.graph-neural .graph-canvas-wrap {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+  background-size: 28px 28px;
+  background-position: 0 0;
+}
+
+.graph-page.graph-neural .graph-svg {
+  background:
+    radial-gradient(ellipse at center, rgba(20,28,42,0.4), rgba(10,16,27,0.85));
+  border-radius: 6px;
+  border: 1px solid var(--accent-line-soft);
+}
+
+/* focus pill (R24: 显示当前 focus 模式) */
+.graph-page .focus-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(214,166,78,0.15);
+  border: 1px solid rgba(214,166,78,0.4);
+  color: var(--accent-gold);
+  font-size: 12px;
+}
+.graph-page .focus-pill button.link {
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  color: var(--accent-gold-soft);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* 节点外发光 (R24 神经网络感) */
+.graph-page .graph-node-glow {
+  animation: graph-node-pulse 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes graph-node-pulse {
+  0%, 100% { opacity: 0.18; transform: scale(1); }
+  50%      { opacity: 0.32; transform: scale(1.08); }
+}
+
+/* dimmed 节点 (R24: 多选/单选时其他节点半透明) */
+.graph-page .graph-node.dimmed circle:nth-child(2),
+.graph-page .graph-node.dimmed text {
+  opacity: 0.18;
+}
+.graph-page .graph-node.dimmed.search-hit circle:nth-child(2),
+.graph-page .graph-node.dimmed.search-hit text {
+  opacity: 0.85;
+}
+
+/* focus root — 永远不 dim, 描金边 */
+.graph-page .graph-node.focus-root circle:nth-child(2) {
+  filter: drop-shadow(0 0 6px rgba(214,166,78,0.6));
+}
+
+/* 节点搜索命中脉冲 */
+.graph-page .graph-node.search-hit circle:nth-child(2) {
+  animation: graph-search-pulse 1.2s ease-in-out infinite;
+}
+@keyframes graph-search-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(229,143,207,0.4)); }
+  50%      { filter: drop-shadow(0 0 8px rgba(229,143,207,0.9)); }
+}
+
+/* dimmed 边 */
+.graph-page .graph-edge.dimmed line {
+  opacity: 0.08;
+}
+
+/* 选中边的强调 */
+.graph-page .graph-edge.selected line {
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+/* 边标签 (R24: 不显示 "同章节出现" 兜底, 只在选中/上下文相关时显示) */
+.graph-page .graph-edge-label {
+  font-size: 10px;
+  fill: var(--text-primary);
+  paint-order: stroke;
+  stroke: var(--bg-base);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
+}
+.graph-page .graph-edge-label.selected {
+  font-weight: 700;
+  font-size: 11px;
+}
+
+/* 节点上的度数小标 */
+.graph-page .graph-node-degree {
+  font-size: 9px;
+  fill: var(--text-primary);
+  paint-order: stroke;
+  stroke: var(--bg-base);
+  stroke-width: 2;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 节点 label */
+.graph-page .graph-node-label {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--text-primary);
+  paint-order: stroke;
+  stroke: var(--bg-base);
+  stroke-width: 3;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 边模式 cursor */
+.graph-page .graph-svg.edge-mode {
+  cursor: crosshair;
+}
+.graph-page .graph-node.edge-source circle:nth-child(2) {
+  stroke: var(--accent-gold) !important;
+  stroke-width: 3;
+}
+
+/* 关系类型颜色条 (legend) */
+.graph-page .legend-bar {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.graph-page .legend-item {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-right: 8px;
+}
+
+/* search 跳转链接 */
+.graph-page .graph-search-jump {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.graph-page .graph-search-jump .link {
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--accent-line-soft);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.graph-page .graph-search-jump .link:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+/* enrich toast (R24: LLM 抽关系结果) */
+.graph-page .graph-enrich-toast {
+  position: absolute;
+  bottom: 60px;
+  right: 20px;
+  max-width: 360px;
+  background: rgba(20,28,42,0.95);
+  border: 1px solid var(--accent-gold);
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  cursor: pointer;
+  z-index: 20;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  animation: graph-panel-in 0.2s ease-out;
+}
+.graph-page .graph-enrich-toast pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+/* 顶部 legend */
+.graph-page .graph-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-paper-soft);
+  border-bottom: 1px solid var(--accent-line-soft);
+  font-size: 12px;
+}
+.graph-page .graph-legend .legend-title {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-right: 4px;
+}
+.graph-page .graph-legend .legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-base);
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.graph-page .graph-legend .legend-chip.active {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.05);
+}
+.graph-page .graph-legend .legend-chip:not(.active) {
+  opacity: 0.5;
+}
+.graph-page .graph-legend .legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.graph-page .graph-legend .legend-clear {
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  color: var(--accent-gold-soft);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* hint 行 */
+.graph-page .graph-hint {
+  position: absolute;
+  bottom: 4px;
+  left: 12px;
+  pointer-events: none;
+  background: rgba(10,16,27,0.5);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* prompt 输入 (R23 沿用) */
+.graph-page .graph-prompt {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-paper);
+  border: 1px solid var(--accent-gold);
+  border-radius: 6px;
+  padding: 12px 16px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+.graph-page .graph-prompt .row {
+  display: flex;
+  gap: 6px;
+}

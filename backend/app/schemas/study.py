@@ -338,6 +338,52 @@ class StudyForeshadowSummary(BaseModel):
     related_characters: list[str] = Field(default_factory=list)
 
 
+# -------------------- R24: 关系语义抽取 --------------------
+
+class StudyRelationshipEnrichRequest(BaseModel):
+    """R24: 对 R22 的纯 co-occurrence suggestions 跑 LLM 抽取
+    真正的语义关系 (师父/对手/恋人/朋友/家人/... 而不是「同
+    章节出现」)。"""
+    suggestion_ids: list[int] = Field(
+        default_factory=list,
+        description=(
+            "要 LLM 重新分类的 suggestion ids (后端是顺序对, 不是 "
+            "真用 id; 传了就只跑这些, 传空就跑全部"
+        ),
+    )
+    min_co_chapter_count: int = 1
+    max_pairs: int = 30  # 一次最多跑 30 对, 防止 LLM 调用爆炸
+
+
+class StudyRelationshipEnrichedItem(BaseModel):
+    """R24: 一对 (char_a, char_b) 的语义关系结果。"""
+    char_a_id: int
+    char_a_name: str
+    char_b_id: int
+    char_b_name: str
+    co_chapter_count: int
+    last_chapter_no: int
+    last_chapter_title: str
+    # R22 的旧字段, 保留以便前端能 diff
+    sample_quote: str
+    # R24 新增
+    relation: str = "同章节出现"   # 实际语义关系
+    confidence: float = 0.0
+    evidence: str = ""
+    llm_inferred: bool = False     # True = LLM 抽出来的, False = 纯 co-occurrence 兜底
+
+
+class StudyRelationshipEnrichResponse(BaseModel):
+    """R24: LLM 抽取完成后的回包。"""
+    material_id: int
+    enriched_count: int
+    skipped_count: int           # 没 LLM 调用 (sample 之外 / 已知关系 / 错误)
+    fallback_count: int          # LLM 返回空 / 关系标 "未知" 的
+    duration_ms: int
+    cost_usd: float
+    items: list[StudyRelationshipEnrichedItem]
+
+
 # -------------------- BehaviorPattern --------------------
 
 class BehaviorPatternRead(BaseModel):
