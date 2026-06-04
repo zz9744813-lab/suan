@@ -260,7 +260,14 @@ async def seed() -> None:
                 row = AgentRole(**spec)
                 db.add(row)
                 await db.flush()
-                # 默认 model binding: 走 stub provider
+            # 默认 model binding: 走 stub provider
+            # Idempotent: AgentModelBinding.agent_role_id UNIQUE, 只在缺时创建
+            existing_binding = (await db.execute(
+                select(AgentModelBinding).where(
+                    AgentModelBinding.agent_role_id == row.id
+                )
+            )).scalar_one_or_none()
+            if existing_binding is None:
                 db.add(AgentModelBinding(
                     agent_role_id=row.id,
                     provider_id=stub.id,
