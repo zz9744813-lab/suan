@@ -111,6 +111,21 @@ code, .mono { font-family: var(--font-mono); }
   padding-bottom: 14px;
   border-bottom: 1px solid var(--accent-line);
 }
+/* P0-OCCLUSION-1 (R25 followup): 让 header 在窄窗口 (< 700px)
+ * 下自动换行, 而不是把右侧按钮挤出可视范围. 通用 .page-header
+ * 加 flex-wrap: wrap, 触发条件: 整个 main 区域 < 700px. */
+@container (max-width: 700px) {
+  .page-header {
+    flex-wrap: wrap;
+  }
+  .page-header > .spacer {
+    flex-basis: 0;
+  }
+  .page-header h1,
+  .page-header h2 {
+    font-size: 18px;
+  }
+}
 .page-header h1 {
   font-size: 22px;
   font-weight: 600;
@@ -985,19 +1000,11 @@ button.link:hover { color: var(--accent-gold-dim); text-decoration: underline; }
     radial-gradient(circle at 80% 100%, rgba(214,166,78,0.05), transparent 40%),
     var(--bg-base);
   position: relative;
-  /* P0-OCCLUSION-1 (R25 followup): 在窄窗口(<1280) 下, 标题/过滤
-   * 搜索那一行会被左侧 rail 盖住. 加 16px padding-left 让内容
-   * 离 rail 边缘有点呼吸距离, 不会被遮.
-   *
-   * 32px 是个保守值: rail 56px 已经有 8px 内边距, 16px 视觉间隔
-   * + 8px 防御 buffer, 合计刚好在 main 区域靠左但不会被盖.
-   */
-  padding-left: 32px;
-  padding-right: 16px;
-  /* 防 svg 横向溢出: 页面 grid 已经管 main 宽度, 这里 min-width
-   * 0 配合 minmax(0, 1fr) 强制 main 可收缩, 不会被 svg 撑爆. */
+  /* P0-OCCLUSION-1: 防御性 — 防 svg 或子元素撑爆 main cell. */
   min-width: 0;
   overflow-x: hidden;
+  /* 让 header/toolbar 在窄窗口下能换行而不是被切掉 */
+  container-type: inline-size;
 }
 
 /* 点阵背景 */
