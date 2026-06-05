@@ -26,9 +26,9 @@ def mask_api_key(key: str | None) -> str:
 class ModelProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     base_url: str = Field(..., min_length=1)
-    api_key: str = Field(..., min_length=1)
+    api_key: str = ""  # optional: can add later
     default_model: str = ""
-    enabled: bool = True
+    enabled: bool | None = None
     extra: dict | None = None
 
 
@@ -244,14 +244,15 @@ class ModelProviderUpdate(BaseModel):
     router treats an empty string as "leave the existing key in place"
     — otherwise editing any other field would silently wipe the key.
 
-    ``base_url`` and ``name`` stay required to match the create schema
-    (you can re-send the same value if you don't want to change them).
+    ``name`` and ``base_url`` are optional to support partial updates
+    from the frontend (e.g. changing just ``base_url`` without re-sending
+    ``name``). None values are skipped by the router.
     """
-    name: str = Field(..., min_length=1, max_length=80)
-    base_url: str = Field(..., min_length=1)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    base_url: str | None = Field(default=None, min_length=1)
     api_key: str = ""  # empty => keep existing
-    default_model: str = ""
-    enabled: bool = True
+    default_model: str | None = None
+    enabled: bool | None = None
     extra: dict | None = None
 
 

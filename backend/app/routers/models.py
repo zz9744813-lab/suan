@@ -97,7 +97,8 @@ async def update_provider(
         row.api_key = new_key
     # else: keep existing api_key untouched
     for k, v in data.items():
-        setattr(row, k, v)
+        if v is not None:
+            setattr(row, k, v)
     await db.flush()
     return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
@@ -250,15 +251,6 @@ _ROLE_REQUIREMENTS: dict[str, dict[str, Any]] = {
 }
 
 
-def _suggest_for_error(exc: Exception) -> str:
-    msg = str(exc)
-    if "401" in msg or "Unauthorized" in msg:
-        return "API Key 无效，请检查后重试。"
-    if "404" in msg:
-        return "Base URL 路径不正确，请检查是否需要在末尾追加 /v1 等版本路径。"
-    if "无法连接" in msg or "Connection" in msg:
-        return "请检查 Base URL 是否可访问，或网络代理是否畅通。"
-    return "请稍后重试或更换 Provider。"
 
 
 def _classify_health_error(exc: Exception) -> tuple[HealthStatus, str, str | None]:
