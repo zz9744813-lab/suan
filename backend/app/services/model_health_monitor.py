@@ -125,7 +125,7 @@ class ModelHealthMonitor:
         result: "ModelProbeResult",
     ) -> ModelHealthSnapshot:
         """Update or create a ModelHealthSnapshot for a provider+model pair."""
-        from app.models.model_probe_service import ModelProbeResult
+        from app.services.model_probe_service import ModelProbeResult
 
         async with session_scope() as db:
             row = (await db.execute(

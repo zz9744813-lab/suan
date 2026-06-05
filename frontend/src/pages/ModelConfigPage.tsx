@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { createProvider, getAgentRoleMatrix } from "../api";
+import { createProvider, getAgentRoleMatrix, testProvider } from "../api";
 import type { AgentRoleMatrixItem, AgentRoleMatrixResponse, ModelProvider } from "../types";
 import { AgentRoleEditorModal } from "../components/models";
 
@@ -143,8 +143,17 @@ export default function ModelConfigPage() {
         default_model: providerForm.default_model.trim(),
         enabled: true,
       } as Partial<ModelProvider>);
+      let pulledCount: number | null = null;
+      if (providerForm.api_key.trim() || providerForm.base_url.trim().startsWith("mock://")) {
+        const testResult = await testProvider(provider.id);
+        if (testResult.ok) {
+          pulledCount = testResult.models.length;
+        } else {
+          setError(testResult.suggestion ? `${testResult.message}；${testResult.suggestion}` : testResult.message);
+        }
+      }
       setAddOpen(false);
-      setNotice(`已添加 ${provider.name}`);
+      setNotice(pulledCount == null ? `已添加 ${provider.name}` : `已添加 ${provider.name}，已拉取 ${pulledCount} 个模型`);
       await fetchOverview();
       navigate(`/models/providers/${provider.id}`);
     } catch (e: any) {

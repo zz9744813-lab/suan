@@ -10,7 +10,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import type { ModelProvider } from "../../types";
-import { previewProviderModels, healthCheckProvider } from "../../api";
+import { healthCheckProvider, testProvider } from "../../api";
 
 interface ProviderModelPickerProps {
   providers: ModelProvider[];
@@ -37,23 +37,31 @@ export function ProviderModelPicker({
   const enabledProviders = providers.filter((p) => p.enabled);
   const currentProvider = providers.find((p) => p.id === providerId);
 
-  // 当选中 Provider 变化时，尝试拉取模型列表
-  const fetchModels = useCallback(async () => {
+  // 当选中 Provider 变化时优先使用缓存；用户点击「拉取」时强制走后端，
+  // 让后端使用数据库中保存的真实 API Key。前端拿到的是掩码 key，
+  // 不能再拿它去请求 preview-models。
+  const fetchModels = useCallback(async (forceRefresh = false) => {
     const p = currentProvider;
     if (!p) {
       setModelList([]);
       return;
     }
     // 如果 Provider 已有缓存的模型列表，直接使用
-    if (p.model_list && p.model_list.length > 0) {
+    if (!forceRefresh && p.model_list && p.model_list.length > 0) {
       setModelList(p.model_list.filter((m) => typeof m === "string") as string[]);
       return;
     }
-    // 尝试拉取模型列表
+    // 已保存的 Provider 用 /test 刷新模型列表；该端点会使用后端保存的真实 key。
     setLoadingModels(true);
     setErrorMsg(null);
     try {
-      const r = await previewProviderModels(p.base_url, p.api_key ?? "");
+      const r = await testProvider(p.id);
+      if (!r.ok) {
+        throw new Error(r.suggestion ? `${r.message}；${r.suggestion}` : r.message);
+      }
+      if (!r.models || r.models.length === 0) {
+        throw new Error(r.message || "Provider 未返回模型列表");
+      }
       setModelList(r.models);
     } catch (e: any) {
       setErrorMsg(`无法拉取模型列表: ${e?.message ?? String(e)}`);
@@ -165,7 +173,7 @@ export function ProviderModelPicker({
         {currentProvider && (
           <button
             className="tiny"
-            onClick={fetchModels}
+            onClick={() => fetchModels(true)}
             disabled={loadingModels}
             title="刷新模型列表"
             style={{ fontSize: 11 }}

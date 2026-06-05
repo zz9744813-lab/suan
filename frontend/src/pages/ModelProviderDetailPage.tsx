@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { testProvider } from "../api";
 
 interface ProviderInfo {
   id: number; name: string; base_url: string;
@@ -57,7 +58,9 @@ export default function ModelProviderDetailPage() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("models");
   const [probing, setProbing] = useState(false);
+  const [pullingModels, setPullingModels] = useState(false);
   const [probeResults, setProbeResults] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState("");
 
   const fetchDetail = async () => {
     try {
@@ -76,6 +79,8 @@ export default function ModelProviderDetailPage() {
 
   const probeAll = async () => {
     setProbing(true);
+    setError("");
+    setNotice("");
     try {
       await api.post(`/api/model-control/providers/${providerId}/probe-all`);
       await fetchDetail();
@@ -83,6 +88,25 @@ export default function ModelProviderDetailPage() {
       setError(e?.message || "探测失败");
     } finally {
       setProbing(false);
+    }
+  };
+
+  const pullModels = async () => {
+    if (!providerId) return;
+    setPullingModels(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await testProvider(Number(providerId));
+      if (!result.ok) {
+        throw new Error(result.suggestion ? `${result.message}；${result.suggestion}` : result.message);
+      }
+      setNotice(`已拉取 ${result.models.length} 个模型`);
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message || "拉取模型列表失败");
+    } finally {
+      setPullingModels(false);
     }
   };
 
@@ -123,6 +147,13 @@ export default function ModelProviderDetailPage() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={pullModels} disabled={pullingModels} style={{
+            padding: "6px 14px", borderRadius: 6, border: "1px solid #334155",
+            background: "#1e293b", color: "#e2e8f0", cursor: pullingModels ? "not-allowed" : "pointer",
+            fontSize: 12,
+          }}>
+            {pullingModels ? "拉取中..." : "拉取模型列表"}
+          </button>
           <button onClick={probeAll} disabled={probing} style={{
             padding: "6px 14px", borderRadius: 6, border: "1px solid #334155",
             background: "#1e293b", color: "#e2e8f0", cursor: probing ? "not-allowed" : "pointer",
@@ -138,6 +169,16 @@ export default function ModelProviderDetailPage() {
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div style={{
+          marginBottom: 12, padding: "8px 12px", borderRadius: 6,
+          border: "1px solid rgba(34,197,94,0.35)", color: "#22c55e",
+          background: "rgba(34,197,94,0.08)", fontSize: 12,
+        }}>
+          {notice}
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid #334155" }}>
@@ -189,7 +230,7 @@ function ModelsTab({
   probeResults: Record<string, string>;
 }) {
   if (models.length === 0) {
-    return <div style={{ color: "#64748b", fontSize: 13, padding: "20px 0" }}>暂无模型数据，请先「测试全部」</div>;
+    return <div style={{ color: "#64748b", fontSize: 13, padding: "20px 0" }}>暂无模型数据，请先「拉取模型列表」</div>;
   }
   return (
     <div>

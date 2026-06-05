@@ -279,7 +279,7 @@ async def get_provider_detail(
 # Probe
 # ============================================================
 
-@router.post("/providers/{provider_id}/models/{model_name}/probe")
+@router.post("/providers/{provider_id}/models/{model_name:path}/probe")
 async def probe_single_model(
     provider_id: int,
     model_name: str,
