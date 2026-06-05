@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../../api";
+import { api } from "../api";
 import { useNavigate } from "react-router-dom";
 
 interface ProviderSummary {
@@ -43,8 +43,8 @@ export default function ModelConfigPage() {
 
   const fetchOverview = async () => {
     try {
-      const res = await api.get<{ ok: boolean; data: OverviewData }>("/api/model-control/overview");
-      if (res.data.ok) setData(res.data.data);
+      const data = await api.get<OverviewData>("/api/model-control/overview");
+      setData(data);
     } catch (e: any) {
       setError(e?.message || "加载失败");
     } finally {

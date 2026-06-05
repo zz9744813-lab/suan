@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api } from "../../api";
+import { api } from "../api";
 
 interface ProviderInfo {
   id: number; name: string; base_url: string;
@@ -61,10 +61,10 @@ export default function ModelProviderDetailPage() {
 
   const fetchDetail = async () => {
     try {
-      const res = await api.get<{ ok: boolean; data: ProviderDetail }>(
+      const detail = await api.get<ProviderDetail>(
         `/api/model-control/providers/${providerId}`
       );
-      if (res.data.ok) setData(res.data.data);
+      setData(detail);
     } catch (e: any) {
       setError(e?.message || "加载失败");
     } finally {
