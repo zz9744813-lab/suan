@@ -783,3 +783,398 @@ export const deletePromptTemplate = (id: number) =>
 
 export const getTemplateUsage = (id: number) =>
   api.get<TemplateUsageRead>(`/api/genre-prompts/templates/${id}/usage`);
+
+// ---------------------------------------------------------------------------
+// P8: Behavior Card knowledge base
+// ---------------------------------------------------------------------------
+
+export interface BehaviorCategoryRead {
+  id: number; name: string; slug: string; description: string | null;
+  icon: string | null; sort_order: number; is_collapsed: boolean;
+  card_count: number; created_at: string; updated_at: string;
+}
+
+export interface CardTagRead { id: number; tag_type: string; tag_name: string; weight: number; }
+export interface CardTechniqueRead { id: number; title: string; content: string; example: string | null; priority: number; }
+export interface CardSourceRead { id: number; book_id: number | null; book_title: string | null; chapter_title: string | null; source_type: string; source_excerpt: string | null; extracted_summary: string | null; confidence: number; }
+export interface CardUsageLogRead { id: number; project_id: number | null; chapter_id: number | null; task_id: number | null; agent_role: string | null; usage_type: string | null; prompt_excerpt: string | null; output_excerpt: string | null; feedback_score: number | null; created_at: string; }
+
+export interface BehaviorCardSummary {
+  id: number; category_id: number | null; name: string; role_type: string | null;
+  status: string; avatar_symbol: string | null; color_theme: string | null;
+  summary: string | null; behavior_chain: string | null; fit_score: number;
+  source_count: number; technique_count: number; usage_count: number;
+  sort_order: number; last_used_at: string | null; updated_at: string;
+  tags: CardTagRead[];
+}
+
+export interface BehaviorCardDetail extends BehaviorCardSummary {
+  typical_behavior: string | null; emotion_chain: string | null;
+  dialogue_style: string | null; suitable_scenes: string | null;
+  unsuitable_scenes: string | null; injection_hint: string | null;
+  stability_score: number; dialogue_score: number; generalization_score: number;
+  created_at: string; category: BehaviorCategoryRead | null;
+  techniques: CardTechniqueRead[]; sources: CardSourceRead[];
+  usage_logs: CardUsageLogRead[];
+}
+
+export interface BehaviorCardListResponse {
+  items: BehaviorCardSummary[]; total: number;
+}
+
+export const listBehaviorCategories = () =>
+  api.get<BehaviorCategoryRead[]>("/api/behavior-categories");
+
+export const collapseBehaviorCategory = (id: number, is_collapsed: boolean) =>
+  api.patch<BehaviorCategoryRead>(`/api/behavior-categories/${id}/collapse`, { is_collapsed });
+
+export const listBehaviorCards = (q?: {
+  keyword?: string; category_id?: number; role_tags?: string[];
+  scene_tags?: string[]; status?: string; sort?: string;
+  page?: number; page_size?: number;
+}) => {
+  const params = new URLSearchParams();
+  if (q) {
+    if (q.keyword) params.set("keyword", q.keyword);
+    if (q.category_id != null) params.set("category_id", String(q.category_id));
+    if (q.status) params.set("status", q.status);
+    if (q.sort) params.set("sort", q.sort);
+    if (q.page) params.set("page", String(q.page));
+    if (q.page_size) params.set("page_size", String(q.page_size));
+    q.role_tags?.forEach((t) => params.append("role_tags", t));
+    q.scene_tags?.forEach((t) => params.append("scene_tags", t));
+  }
+  const qs = params.toString();
+  return api.get<BehaviorCardListResponse>(`/api/behavior-cards${qs ? "?" + qs : ""}`);
+};
+
+export const getBehaviorCardDetail = (id: number) =>
+  api.get<BehaviorCardDetail>(`/api/behavior-cards/${id}`);
+
+export const createBehaviorCard = (body: Record<string, unknown>) =>
+  api.post<BehaviorCardDetail>("/api/behavior-cards", body);
+
+export const updateBehaviorCard = (id: number, body: Record<string, unknown>) =>
+  api.put<BehaviorCardDetail>(`/api/behavior-cards/${id}`, body);
+
+export const moveBehaviorCard = (id: number, target_category_id: number, sort_order?: number) =>
+  api.patch<BehaviorCardSummary>(`/api/behavior-cards/${id}/move`, { target_category_id, sort_order });
+
+export const archiveBehaviorCard = (id: number) =>
+  api.post<{ id: number; status: string }>(`/api/behavior-cards/${id}/archive`);
+
+// ---------------------------------------------------------------------------
+// P9: Discussion Auto-Trace
+// ---------------------------------------------------------------------------
+
+export interface DiscussionStats {
+  active_count: number; converged_count: number;
+  pending_skill_count: number; recycle_soon_count: number; total_skill_count: number;
+}
+export interface ThreadSummary {
+  id: number; project_id: number | null; chapter_id: number | null;
+  title: string; summary: string | null;
+  source_type: string; source_agent_role: string | null;
+  issue_type: string; risk_level: string; status: string;
+  requires_user_review: boolean; final_decision: string | null;
+  recycle_at: string; recycled_at: string | null;
+  rewrite_task_id: number | null; skill_draft_id: number | null;
+  issue_fingerprint: string | null;
+  created_at: string; updated_at: string;
+  message_count: number; has_rewrite_task: boolean; has_skill_draft: boolean;
+  remaining_seconds: number | null;
+}
+export interface ThreadListResponse { items: ThreadSummary[]; total: number; }
+export interface IssueSourceRead {
+  id: number; thread_id: number; source_type: string; source_id: number | null;
+  chapter_id: number | null; chapter_index: number | null;
+  quote: string | null; problem_summary: string; severity: string;
+  payload_json: Record<string, unknown> | null; created_at: string;
+}
+export interface DiscussionMsgRead {
+  id: number; thread_id: number; speaker_type: string; speaker_role: string;
+  speaker_name: string | null; content: string;
+  evidence_json: Record<string, unknown> | null; decision_tags_json: string[] | null;
+  confidence: number | null; accepted_by_chief: boolean;
+  provider_role: string | null; provider_name: string | null;
+  model_name: string | null; error_message: string | null;
+  token_in: number; token_out: number; cost_usd: number; created_at: string;
+}
+export interface SkillDraftRead {
+  id: number; thread_id: number; project_id: number;
+  title: string; skill_type: string; status: string;
+  trigger_conditions_json: string[]; applicable_scenes_json: string[];
+  anti_patterns_json: string[]; execution_template: string;
+  prompt_snippet: string | null; applicable_agent_roles_json: string[];
+  source_summary: string | null; source_thread_summary: string | null;
+  quality_score: number; usage_count: number;
+  created_at: string; solidified_at: string | null; solidified_skill_id: number | null;
+}
+export interface ThreadDetail extends ThreadSummary {
+  task_id: number | null; final_reason: string | null;
+  final_action_json: Record<string, unknown> | null;
+  archive_payload_json: Record<string, unknown> | null;
+  issue_sources: IssueSourceRead[]; messages: DiscussionMsgRead[];
+  skill_draft: SkillDraftRead | null;
+}
+export interface SkillRead {
+  id: number; title: string; skill_type: string;
+  trigger_conditions_json: string[]; applicable_scenes_json: string[];
+  anti_patterns_json: string[]; execution_template: string;
+  prompt_snippet: string | null; applicable_agent_roles_json: string[];
+  source_type: string; source_thread_id: number | null;
+  quality_score: number; usage_count: number;
+  created_at: string; updated_at: string;
+}
+
+export const listDiscussionThreads = (q?: {
+  project_id?: number; status?: string; issue_type?: string;
+  risk_level?: string; q?: string; page?: number; page_size?: number;
+}) => {
+  const params = new URLSearchParams();
+  if (q) {
+    if (q.project_id != null) params.set("project_id", String(q.project_id));
+    if (q.status) params.set("status", q.status);
+    if (q.issue_type) params.set("issue_type", q.issue_type);
+    if (q.risk_level) params.set("risk_level", q.risk_level);
+    if (q.q) params.set("q", q.q);
+    if (q.page) params.set("page", String(q.page));
+    if (q.page_size) params.set("page_size", String(q.page_size));
+  }
+  const qs = params.toString();
+  return api.get<ThreadListResponse>(`/api/discussions${qs ? "?" + qs : ""}`);
+};
+
+export const getDiscussionStats = (project_id?: number) => {
+  const p = project_id != null ? `?project_id=${project_id}` : "";
+  return api.get<DiscussionStats>(`/api/discussions/stats${p}`);
+};
+
+export const getDiscussionThreadDetail = (id: number) =>
+  api.get<ThreadDetail>(`/api/discussions/${id}`);
+
+export const getDiscussionMessages = (id: number, page = 1, page_size = 50) =>
+  api.get<DiscussionMsgRead[]>(`/api/discussions/${id}/messages?page=${page}&page_size=${page_size}`);
+
+export const createDiscussionThread = (body: {
+  project_id?: number; chapter_id?: number; title: string;
+  issue_type?: string; risk_level?: string; user_note?: string;
+}) => api.post<ThreadSummary>("/api/discussions", body);
+
+export const runDiscussionThread = (id: number) =>
+  api.post<ThreadSummary>(`/api/discussions/${id}/run`);
+
+export const solidifySkill = (threadId: number, draftId: number, force = false) =>
+  api.post<SkillRead>(`/api/discussions/${threadId}/solidify-skill`, { draft_id: draftId, force });
+
+export const extendRecycle = (threadId: number, days: number, reason?: string) =>
+  api.post<ThreadSummary>(`/api/discussions/${threadId}/extend-recycle`, { days, reason });
+
+export const recycleNow = (threadId: number) =>
+  api.post<ThreadSummary>(`/api/discussions/${threadId}/recycle-now`);
+
+export const restoreThread = (threadId: number) =>
+  api.post<ThreadSummary>(`/api/discussions/${threadId}/restore`);
+
+// ============================================================
+// P10: Agent Memory Layered Pool
+// ============================================================
+
+export interface AgentMemoryStats {
+  agent_role: string;
+  agent_name: string | null;
+  memory_count: number;
+  temporary_count: number;
+  task_count: number;
+  long_term_count: number;
+  permanent_count: number;
+  conflict_count: number;
+  health_score: number;
+  last_written_at: string | null;
+  has_pending_audit: boolean;
+}
+
+export interface MemoryProjectStats {
+  project_id: number;
+  total: number;
+  by_layer: Record<string, number>;
+  by_agent: Record<string, number>;
+  conflict_count: number;
+  duplicate_candidate_count: number;
+  health_score: number;
+}
+
+export interface MemoryEntryListItem {
+  id: number;
+  agent_role: string;
+  visibility: string;
+  memory_layer: string;
+  memory_type: string;
+  title: string;
+  content_preview: string;
+  tags: string[];
+  confidence: number;
+  importance: number;
+  health_score: number;
+  usage_count: number;
+  last_used_at: string | null;
+  is_locked: boolean;
+  is_conflicted: boolean;
+  is_duplicate_candidate: boolean;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryEntryDetail {
+  id: number;
+  project_id: number;
+  agent_role: string;
+  agent_name: string | null;
+  visibility: string;
+  memory_layer: string;
+  memory_type: string;
+  title: string;
+  content: string;
+  summary: string | null;
+  tags: string[];
+  chapter_id: number | null;
+  task_id: number | null;
+  discussion_thread_id: number | null;
+  skill_id: number | null;
+  source_type: string;
+  source_id: string | null;
+  source_quote: string | null;
+  source_payload: Record<string, unknown> | null;
+  confidence: number;
+  importance: number;
+  health_score: number;
+  usage_count: number;
+  last_used_at: string | null;
+  ttl_seconds: number | null;
+  expires_at: string | null;
+  archived_at: string | null;
+  deleted_at: string | null;
+  is_locked: boolean;
+  is_user_pinned: boolean;
+  is_conflicted: boolean;
+  is_duplicate_candidate: boolean;
+  content_fingerprint: string | null;
+  created_at: string;
+  updated_at: string;
+  links: MemoryLinkRead[];
+  audit_logs: MemoryAuditLogRead[];
+  recent_access_logs: MemoryAccessLogRead[];
+}
+
+export interface MemoryLinkRead {
+  id: number;
+  source_memory_id: number;
+  target_memory_id: number;
+  relation_type: string;
+  description: string | null;
+  confidence: number;
+  created_by_agent_role: string | null;
+  created_at: string;
+}
+
+export interface MemoryAuditLogRead {
+  id: number;
+  memory_id: number;
+  project_id: number;
+  action: string;
+  before_json: Record<string, unknown> | null;
+  after_json: Record<string, unknown> | null;
+  actor_type: string;
+  actor_role: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface MemoryAccessLogRead {
+  id: number;
+  memory_id: number;
+  project_id: number;
+  agent_role: string;
+  task_id: number | null;
+  chapter_id: number | null;
+  access_reason: string | null;
+  injected_into_prompt: boolean;
+  prompt_section: string | null;
+  created_at: string;
+}
+
+export interface ChangeRequestRead {
+  id: number;
+  project_id: number;
+  memory_id: number;
+  request_type: string;
+  requested_by_agent_role: string | null;
+  reason: string;
+  proposed_content: string | null;
+  proposed_patch_json: Record<string, unknown> | null;
+  status: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_note: string | null;
+  created_at: string;
+}
+
+export const getAgentMemoryStats = (projectId: number) =>
+  api.get<MemoryProjectStats>(`/api/agent-memory/projects/${projectId}/stats`);
+
+export const getAgentMemoryAgents = (projectId: number) =>
+  api.get<{ items: AgentMemoryStats[] }>(`/api/agent-memory/projects/${projectId}/agents`);
+
+export const listAgentMemoryEntries = (projectId: number, params?: Record<string, string | number | boolean | undefined>) => {
+  const qs = new URLSearchParams();
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    }
+  }
+  const query = qs.toString();
+  return api.get<{ items: MemoryEntryListItem[]; total: number }>(
+    `/api/agent-memory/projects/${projectId}/entries${query ? "?" + query : ""}`,
+  );
+};
+
+export const getAgentMemoryDetail = (memoryId: number) =>
+  api.get<MemoryEntryDetail>(`/api/agent-memory/entries/${memoryId}`);
+
+export const createAgentMemory = (projectId: number, body: Record<string, unknown>) =>
+  api.post<MemoryEntryDetail>(`/api/agent-memory/projects/${projectId}/entries`, body);
+
+export const updateAgentMemory = (memoryId: number, body: Record<string, unknown>) =>
+  api.patch<MemoryEntryDetail>(`/api/agent-memory/entries/${memoryId}/update`, body);
+
+export const promoteAgentMemory = (memoryId: number, body: { target_layer: string; reason: string; actor_type?: string }) =>
+  api.post<MemoryEntryDetail>(`/api/agent-memory/entries/${memoryId}/promote`, body);
+
+export const demoteAgentMemory = (memoryId: number, body: { target_layer: string; reason: string; actor_type?: string }) =>
+  api.post<MemoryEntryDetail>(`/api/agent-memory/entries/${memoryId}/demote`, body);
+
+export const archiveAgentMemory = (memoryId: number, body: { reason: string }) =>
+  api.post<MemoryEntryDetail>(`/api/agent-memory/entries/${memoryId}/archive`, body);
+
+export const mergeAgentMemories = (body: { source_ids: number[]; merged_title: string; merged_content: string; target_layer: string; reason: string }) =>
+  api.post<MemoryEntryDetail>("/api/agent-memory/entries/merge", body);
+
+export const markAgentMemoryConflict = (memoryId: number, body: { conflict_with_memory_id: number; reason: string }) =>
+  api.post(`/api/agent-memory/entries/${memoryId}/mark-conflict`, body);
+
+export const consolidateAgentMemory = (projectId: number, body: { agent_role?: string; job_types: string[] }) =>
+  api.post(`/api/agent-memory/projects/${projectId}/consolidate`, body);
+
+export const getAgentMemoryGraph = (projectId: number, agentRole?: string) => {
+  const p = agentRole ? `?agent_role=${agentRole}` : "";
+  return api.get<{ nodes: Record<string, unknown>[]; edges: Record<string, unknown>[] }>(
+    `/api/agent-memory/projects/${projectId}/graph${p}`,
+  );
+};
+
+export const createChangeRequest = (body: { memory_id: number; request_type: string; reason: string; proposed_content?: string }) =>
+  api.post<ChangeRequestRead>("/api/agent-memory/change-requests/", body);
+
+export const reviewChangeRequest = (requestId: number, body: { status: string; review_note?: string }) =>
+  api.post<ChangeRequestRead>(`/api/agent-memory/change-requests/${requestId}/review`, body);

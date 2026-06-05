@@ -13,12 +13,15 @@ from app.core.database import init_db
 from app.core.errors import APIError
 from app.core.events import Event, event_bus
 from app.routers import (
+    agent_memory,
     agent_roles,
     behavior,
+    behavior_card,
     chapters,
     chief_agent,
     deepstudy,
     discussion,
+    discussion_trace,
     events,
     genre_prompts,
     graph,
@@ -105,5 +108,8 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           events.router, study.router, behavior.router, graph.router,
           discussion.router, search.router, deepstudy.router,
           project_memory.router, agent_roles.router, agent_roles.agent_runs_router,
-          reviews.router, genre_prompts.router):
+          reviews.router, genre_prompts.router,
+          behavior_card.router, behavior_card.cat_router,
+          discussion_trace.router,
+          agent_memory.router, agent_memory.change_router):
     app.include_router(r, prefix=PREFIX)

@@ -66,6 +66,30 @@ from app.models.genre_prompt_map import (
     GenrePromptMapping,
     ProjectPromptSnapshot,
 )
+from app.models.behavior_card import (
+    BehaviorCard,
+    BehaviorCardTag,
+    BehaviorCardTechnique,
+    BehaviorCardSource,
+    BehaviorCardUsageLog,
+    BehaviorCategory,
+)
+from app.models.discussion_trace import (
+    DiscussionThread,
+    DiscussionMessage,
+    DiscussionIssueSource,
+    DiscussionSkillDraft,
+    DiscussionRecycleJob,
+    Skill,
+)
+from app.models.agent_memory import (
+    AgentMemoryEntry,
+    AgentMemoryLink,
+    AgentMemoryAuditLog,
+    AgentMemoryConsolidationJob,
+    AgentMemoryAccessLog,
+    MemoryChangeRequest,
+)
 
 __all__ = [
     "Project",
@@ -127,4 +151,25 @@ __all__ = [
     # P7: Genre-Prompt mapping + traceability
     "GenrePromptMapping",
     "ProjectPromptSnapshot",
+    # P8: Behavior Card knowledge base
+    "BehaviorCategory",
+    "BehaviorCard",
+    "BehaviorCardTag",
+    "BehaviorCardTechnique",
+    "BehaviorCardSource",
+    "BehaviorCardUsageLog",
+    # P9: Discussion Auto-Trace + Skill
+    "DiscussionThread",
+    "DiscussionMessage",
+    "DiscussionIssueSource",
+    "DiscussionSkillDraft",
+    "DiscussionRecycleJob",
+    "Skill",
+    # P10: Agent Memory Layered Pool
+    "AgentMemoryEntry",
+    "AgentMemoryLink",
+    "AgentMemoryAuditLog",
+    "AgentMemoryConsolidationJob",
+    "AgentMemoryAccessLog",
+    "MemoryChangeRequest",
 ]

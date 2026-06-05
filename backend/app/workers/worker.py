@@ -45,6 +45,7 @@ SUPPORTED_TASKS: frozenset[str] = frozenset({
     "comment_triage",       # P3, CommentTriageService — 主 Agent 分流
     "comment_discussion",   # P3 + P4, CommentDiscussionRunner — 跑讨论室
     "comment_cleanup",      # P4, CommentCleanupService — 7 天过期清理
+    "rewrite_from_discussion",  # P9, Chief 结论触发的修改任务
 })
 
 
@@ -164,6 +165,17 @@ class WorkerController:
     async def _run_forever(self) -> None:
         try:
             await self._set_state("running")
+            # P9: 启动讨论 worker 和回收 worker 作为后台任务
+            self._discussion_task = asyncio.create_task(
+                self._discussion_worker_loop(), name="novelforge-discussion-worker"
+            )
+            self._recycle_task = asyncio.create_task(
+                self._recycle_worker_loop(), name="novelforge-recycle-worker"
+            )
+            # P10: 启动记忆整理 worker 作为后台任务
+            self._memory_consolidation_task = asyncio.create_task(
+                self._memory_consolidation_worker_loop(), name="novelforge-memory-consolidation"
+            )
             while not self._stop.is_set():
                 await self._pause_event.wait()
                 if self._stop.is_set():
@@ -177,6 +189,65 @@ class WorkerController:
                         pass
         except Exception as exc:  # pragma: no cover
             await self._set_state("error", error=str(exc))
+        finally:
+            # cancel background tasks
+            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None)]:
+                if t and not t.done():
+                    t.cancel()
+
+    async def _discussion_worker_loop(self) -> None:
+        """P9: 每 20 秒轮询 pending_discussion 线程。"""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=20.0)
+                return  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                from app.workers.discussion_worker import discussion_worker_tick
+                await discussion_worker_tick()
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(f"Discussion worker tick error: {exc}")
+
+    async def _recycle_worker_loop(self) -> None:
+        """P9: 每 60 秒扫描到期讨论线程。"""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=60.0)
+                return  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                from app.workers.discussion_recycle_worker import discussion_recycle_tick
+                await discussion_recycle_tick()
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(f"Recycle worker tick error: {exc}")
+
+    async def _memory_consolidation_worker_loop(self) -> None:
+        """P10: 每 60 秒运行记忆整理 (过期清理)."""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=60.0)
+                return  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                from app.services.agent_memory_service import MemoryConsolidatorService
+                async with session_scope() as db:
+                    svc = MemoryConsolidatorService()
+                    await svc.expire_temporary_memories(db)
+                    await db.commit()
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(f"Memory consolidation tick error: {exc}")
 
     async def _tick(self) -> bool:
         # P6 §5.1: pick 5 种支持任务类型中的下一个 pending
@@ -270,6 +341,8 @@ class WorkerController:
                 await self._run_comment_discussion(task_row, ws)
             elif task_row.task_type == "comment_cleanup":
                 await self._run_comment_cleanup(task_row, ws)
+            elif task_row.task_type == "rewrite_from_discussion":
+                await self._run_rewrite_from_discussion(task_row, ws)
             else:
                 # 不应发生, _pick 已经过滤 SUPPORTED_TASKS
                 raise RuntimeError(
@@ -465,6 +538,48 @@ class WorkerController:
                 "retention_days": outcome.retention_days,
             },
         ))
+
+    async def _run_rewrite_from_discussion(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+    ) -> None:
+        """P9: 讨论结论触发的 rewrite 任务。复用 chapter_pipeline 逻辑。"""
+        chapter_id = task_row.chapter_id
+        target_task_id = task_row.id
+        if chapter_id is None:
+            await self._mark_task_failed(target_task_id, "Chapter missing for rewrite_from_discussion")
+            return
+
+        pipeline = ChapterPipeline()
+        try:
+            async with session_scope() as db:
+                task = await db.get(AgentTask, target_task_id)
+                chapter = await db.get(Chapter, chapter_id)
+                if chapter is None:
+                    await self._mark_task_failed(target_task_id, "Chapter missing")
+                    return
+                policy = await self._active_policy(db, task_row.project_id)
+                if policy is None:
+                    policy = await self._ensure_default_policy(db, task_row.project_id)
+                # Inject discussion instruction into task if present
+                instruction = task_row.instruction or ""
+                result = await asyncio.wait_for(
+                    pipeline.run(db, task=task, chapter=chapter, policy=policy),
+                    timeout=1800,
+                )
+                ws2 = await self._get_or_create_status(db)
+                ws2.today_words += len(result.final_text)
+                ws2.today_cost_usd = round(ws2.today_cost_usd + result.total_cost_usd, 4)
+                ws2.consecutive_failures = 0
+                task.status = "succeeded"
+                task.finished_at = datetime.utcnow()
+                task.cost_usd = result.total_cost_usd
+                ws2.current_task_id = None
+                await db.flush()
+        except Exception as exc:
+            err_text = str(exc)
+            await self._mark_task_failed(target_task_id, err_text)
 
     # ----- 老 chapter_pipeline 逻辑 (抽出来) -----
 

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.database import AsyncSessionLocal, init_db
 from app.models.agent_role import AgentModelBinding, AgentPromptBinding, AgentRole
@@ -15,6 +15,7 @@ from app.models.comment_review import (
 from app.models.model_provider import ModelProvider, ModelRoleAssignment
 from app.models.prompt import PromptTemplate, PromptVersion
 from app.models.genre_prompt_map import GenrePromptMapping
+from app.models.agent_memory import AgentMemoryEntry
 from app.models.project import Project
 from app.models.task import WorkerStatus
 from app.prompts.default import WRITING_PROMPTS
@@ -442,6 +443,259 @@ async def seed() -> None:
                     priority=0,
                     sort_order=0,
                 ))
+
+        # 10. P8: Behavior Card knowledge base — default categories + seed cards
+        from app.models.behavior_card import (
+            BehaviorCard, BehaviorCardTag, BehaviorCardTechnique,
+            BehaviorCategory,
+        )
+
+        DEFAULT_BEHAVIOR_CATEGORIES: list[dict] = [
+            {"name": "主角成长型", "slug": "protagonist_growth", "icon": "🔥", "sort_order": 0},
+            {"name": "反派压迫型", "slug": "villain_pressure", "icon": "👁", "sort_order": 1},
+            {"name": "女主拉扯型", "slug": "heroine_tension", "icon": "🌙", "sort_order": 2},
+            {"name": "配角功能型", "slug": "side_character", "icon": "🧩", "sort_order": 3},
+            {"name": "关系冲突型", "slug": "relationship_scene", "icon": "⚡", "sort_order": 4},
+            {"name": "待清洗", "slug": "pending_clean", "icon": "🧹", "sort_order": 99},
+        ]
+        cat_map: dict[str, int] = {}  # slug -> id
+        for spec in DEFAULT_BEHAVIOR_CATEGORIES:
+            existing_cat = (await db.execute(
+                select(BehaviorCategory).where(BehaviorCategory.slug == spec["slug"])
+            )).scalar_one_or_none()
+            if existing_cat is None:
+                cat = BehaviorCategory(**spec)
+                db.add(cat)
+                await db.flush()
+                cat_map[spec["slug"]] = cat.id
+            else:
+                cat_map[spec["slug"]] = existing_cat.id
+
+        SEED_BEHAVIOR_CARDS: list[dict] = [
+            {
+                "name": "热血逆袭男主",
+                "role_type": "主角",
+                "category_slug": "protagonist_growth",
+                "avatar_symbol": "🔥",
+                "color_theme": "red",
+                "summary": "受辱、压抑、爆发、立誓型主角行为模板",
+                "behavior_chain": "沉默忍受 → 观察破绽 → 当众反问 → 用结果打脸",
+                "emotion_chain": "压抑 → 愤怒 → 冷静 → 爆发 → 立誓",
+                "dialogue_style": "短句、硬回应、少解释、结果导向",
+                "suitable_scenes": "低谷开局、退婚冲突、师门审判、擂台反杀",
+                "unsuitable_scenes": "纯日常、低冲突慢生活、复杂权谋长线",
+                "injection_hint": "当章节出现公开打压场景时，优先注入该行为链。",
+                "fit_score": 91, "stability_score": 84, "dialogue_score": 78, "generalization_score": 88,
+                "tags": [
+                    {"tag_type": "role", "tag_name": "主角"},
+                    {"tag_type": "role", "tag_name": "热血"},
+                    {"tag_type": "scene", "tag_name": "废柴逆袭"},
+                    {"tag_type": "scene", "tag_name": "公开受辱"},
+                ],
+                "techniques": [
+                    {"title": "先压尊严，再给反击理由", "content": "先用围观、误解、权威否定制造情绪债。", "example": "长老否定主角资格后，主角抓住规则漏洞反击。", "priority": 0},
+                    {"title": "对白短，动作硬", "content": "热血型主角少说话，用行动兑现。对白压缩到6字以内。", "example": "主角不解释，直接把结果甩到对方脸上。", "priority": 1},
+                ],
+            },
+            {
+                "name": "理智苟道主角",
+                "role_type": "主角",
+                "category_slug": "protagonist_growth",
+                "avatar_symbol": "🧠",
+                "color_theme": "blue",
+                "summary": "观察、试探、留后手、小胜型主角行为模板",
+                "behavior_chain": "观察风险 → 低成本试探 → 保留退路 → 小幅获利",
+                "emotion_chain": "警惕 → 克制 → 推演 → 出手",
+                "dialogue_style": "谨慎、留白、少承诺、多反问",
+                "suitable_scenes": "资源博弈、信息差利用、密室逃脱、阵营暗战",
+                "unsuitable_scenes": "热血擂台、直接对抗、快节奏战斗",
+                "injection_hint": "当章节需要主角做判断和取舍时，注入该行为链。",
+                "fit_score": 87, "stability_score": 90, "dialogue_score": 72, "generalization_score": 82,
+                "tags": [
+                    {"tag_type": "role", "tag_name": "主角"},
+                    {"tag_type": "role", "tag_name": "理智"},
+                    {"tag_type": "scene", "tag_name": "信息差"},
+                    {"tag_type": "scene", "tag_name": "资源博弈"},
+                ],
+                "techniques": [
+                    {"title": "先保命，再占便宜", "content": "不要让理智型主角一上来硬刚，先让他判断代价。", "example": "主角先评估三种退路，选代价最小的方案。", "priority": 0},
+                ],
+            },
+            {
+                "name": "笑面权谋反派",
+                "role_type": "反派",
+                "category_slug": "villain_pressure",
+                "avatar_symbol": "🎭",
+                "color_theme": "purple",
+                "summary": "表面示好、暗中设局、借刀杀人的压迫型反派",
+                "behavior_chain": "示好 → 套话 → 借刀 → 反咬",
+                "emotion_chain": "温和 → 试探 → 冷眼 → 收网",
+                "dialogue_style": "礼貌、含蓄、夹枪带棒、暗藏威胁",
+                "suitable_scenes": "宫廷权谋、商业暗战、宗门内斗、师徒博弈",
+                "unsuitable_scenes": "纯武打擂台、低智热血、单线叙事",
+                "injection_hint": "当章节需要反派施加心理压力时，优先使用此卡。",
+                "fit_score": 85, "stability_score": 80, "dialogue_score": 90, "generalization_score": 76,
+                "tags": [
+                    {"tag_type": "role", "tag_name": "反派"},
+                    {"tag_type": "role", "tag_name": "腹黑"},
+                    {"tag_type": "scene", "tag_name": "高压"},
+                    {"tag_type": "scene", "tag_name": "人情陷阱"},
+                ],
+                "techniques": [
+                    {"title": "明夸暗贬，让对手自露破绽", "content": "反派不用直接威胁，用赞美和关心让对方放松警惕。", "example": "反派称赞主角天赋，同时在话语中暗示已掌控主角底牌。", "priority": 0},
+                    {"title": "借别人的手，脏自己的刀", "content": "权谋型反派不亲自出手，让第三方代为施压。", "example": "反派通过长老传话，主角的困境全部来自'规则'而非个人。", "priority": 1},
+                ],
+            },
+        ]
+        for spec in SEED_BEHAVIOR_CARDS:
+            existing_card = (await db.execute(
+                select(BehaviorCard).where(BehaviorCard.name == spec["name"])
+            )).scalar_one_or_none()
+            if existing_card is not None:
+                continue
+            cat_id = cat_map.get(spec.get("category_slug", ""))
+            card = BehaviorCard(
+                category_id=cat_id,
+                name=spec["name"],
+                role_type=spec.get("role_type"),
+                avatar_symbol=spec.get("avatar_symbol"),
+                color_theme=spec.get("color_theme"),
+                summary=spec.get("summary"),
+                behavior_chain=spec.get("behavior_chain"),
+                emotion_chain=spec.get("emotion_chain"),
+                dialogue_style=spec.get("dialogue_style"),
+                suitable_scenes=spec.get("suitable_scenes"),
+                unsuitable_scenes=spec.get("unsuitable_scenes"),
+                injection_hint=spec.get("injection_hint"),
+                fit_score=spec.get("fit_score", 0),
+                stability_score=spec.get("stability_score", 0),
+                dialogue_score=spec.get("dialogue_score", 0),
+                generalization_score=spec.get("generalization_score", 0),
+                status="ready",
+            )
+            db.add(card)
+            await db.flush()
+            # tags
+            for t in spec.get("tags", []):
+                db.add(BehaviorCardTag(
+                    card_id=card.id,
+                    tag_type=t["tag_type"],
+                    tag_name=t["tag_name"],
+                ))
+            # techniques
+            for idx, tech in enumerate(spec.get("techniques", [])):
+                db.add(BehaviorCardTechnique(
+                    card_id=card.id,
+                    title=tech["title"],
+                    content=tech["content"],
+                    example=tech.get("example"),
+                    priority=tech.get("priority", idx),
+                ))
+            card.technique_count = len(spec.get("techniques", []))
+            card.source_count = 0
+
+        # ------------------------------------------------------------------
+        # 11. P10: Agent Memory Layered Pool — 种子记忆
+        # ------------------------------------------------------------------
+        from app.services.agent_memory_service import (
+            _fingerprint, TEMPORARY_TTL_SECONDS, TASK_TTL_SECONDS,
+        )
+
+        _projects_mem = (await db.execute(select(Project))).scalars().all()
+        if _projects_mem:
+            first_project = _projects_mem[0]
+            pid = first_project.id
+            # 检查是否已有种子记忆
+            existing = (await db.execute(
+                select(func.count()).where(AgentMemoryEntry.project_id == pid)
+            )).scalar() or 0
+            if existing == 0:
+                SEED_AGENT_MEMORIES = [
+                    # 永久记忆
+                    {
+                        "agent_role": "planner", "agent_name": "Planner Agent",
+                        "visibility": "permanent_project", "memory_layer": "permanent",
+                        "memory_type": "world_rule",
+                        "title": "世界规则：修炼境界体系",
+                        "content": "本世界修炼体系分九境：炼气、筑基、金丹、元婴、化神、合体、大乘、渡劫、飞升。每个大境界分初、中、后、巅峰四期。跨境界战斗需要至少两个小境界的差距才有可能。",
+                        "tags": ["世界规则", "境界体系", "修炼"],
+                        "source_type": "user", "confidence": 1.0, "importance": 1.0,
+                        "is_locked": True,
+                    },
+                    {
+                        "agent_role": "planner", "agent_name": "Planner Agent",
+                        "visibility": "permanent_project", "memory_layer": "permanent",
+                        "memory_type": "character",
+                        "title": "主线目标：查清母亲失踪真相",
+                        "content": "主角的长期目标是查清母亲失踪的真相。母亲在主角幼年时神秘失踪，留下的唯一线索是一块玉佩。这个目标贯穿全书，是主角行动的核心驱动力。",
+                        "tags": ["主线", "母亲", "失踪", "玉佩"],
+                        "source_type": "user", "confidence": 1.0, "importance": 1.0,
+                        "is_locked": True,
+                    },
+                    # 长时记忆
+                    {
+                        "agent_role": "planner", "agent_name": "Planner Agent",
+                        "visibility": "shared_project", "memory_layer": "long_term",
+                        "memory_type": "character",
+                        "title": "主角核心人设：隐忍但有底线",
+                        "content": "主角不会为了面子主动冒险，但当亲人遗物被触碰时会爆发。平时隐忍克制，但底线一旦触发会毫不犹豫反击。这种隐忍不是懦弱，而是一种战略性的等待。",
+                        "tags": ["主角", "隐忍", "底线触发"],
+                        "source_type": "discussion", "confidence": 0.97, "importance": 0.91,
+                    },
+                    {
+                        "agent_role": "continuity", "agent_name": "Continuity Agent",
+                        "visibility": "shared_project", "memory_layer": "long_term",
+                        "memory_type": "foreshadowing",
+                        "title": "母亲玉佩：底线触发器",
+                        "content": "母亲留下的玉佩是主角的底线触发器。当玉佩受到威胁时，主角会从隐忍状态切换到爆发状态。这个设定在第9章和第12章已经使用过。",
+                        "tags": ["伏笔", "玉佩", "底线", "主角"],
+                        "source_type": "discussion", "confidence": 0.95, "importance": 0.88,
+                    },
+                    {
+                        "agent_role": "drafter", "agent_name": "Drafter Agent",
+                        "visibility": "shared_project", "memory_layer": "long_term",
+                        "memory_type": "style",
+                        "title": "文风设定：热血但不油腻",
+                        "content": "主角爆发时不使用长段内心独白，而用短句+动作兑现。爆发后的后果必须承接，不能爽完就忘。对白风格偏口语化，避免过度文言。",
+                        "tags": ["文风", "热血", "短句", "后果承接"],
+                        "source_type": "agent", "confidence": 0.9, "importance": 0.85,
+                    },
+                    # 任务记忆
+                    {
+                        "agent_role": "critic", "agent_name": "Critic Agent",
+                        "visibility": "shared_project", "memory_layer": "task",
+                        "memory_type": "critique",
+                        "title": "第12章 Critic 扣分点",
+                        "content": "逻辑分 72，主要问题是主角爆发缺少触发器。建议增加长老触碰玉佩的细节作为导火索。节奏分 80，前半段铺垫较好但转折略显突兀。",
+                        "tags": ["第12章", "Critic", "扣分"],
+                        "source_type": "agent", "confidence": 0.84, "importance": 0.7,
+                    },
+                    # 临时记忆
+                    {
+                        "agent_role": "planner", "agent_name": "Planner Agent",
+                        "visibility": "shared_project", "memory_layer": "temporary",
+                        "memory_type": "chapter_context",
+                        "title": "本轮第12章规划上下文",
+                        "content": "主角当前处于被宗门怀疑阶段，需要在长老会上自证清白。本轮规划需要考虑：1) 主角如何应对质疑 2) 是否揭露部分实力 3) 长老态度的转折点。",
+                        "tags": ["第12章", "规划", "上下文"],
+                        "source_type": "agent", "confidence": 0.92, "importance": 0.8,
+                    },
+                ]
+                for spec in SEED_AGENT_MEMORIES:
+                    fp = _fingerprint(pid, spec["agent_role"], spec["memory_type"], spec["content"])
+                    expires_at = None
+                    if spec["memory_layer"] == "temporary":
+                        expires_at = datetime.utcnow() + timedelta(seconds=TEMPORARY_TTL_SECONDS)
+                    elif spec["memory_layer"] == "task":
+                        expires_at = datetime.utcnow() + timedelta(seconds=TASK_TTL_SECONDS)
+
+                    entry = AgentMemoryEntry(
+                        project_id=pid,
+                        content_fingerprint=fp,
+                        expires_at=expires_at,
+                        **spec,
+                    )
+                    db.add(entry)
 
         await db.commit()
 

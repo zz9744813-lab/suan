@@ -12,6 +12,7 @@ import { StudyLibraryPage, StudyBookGraphPage } from "./pages/StudyLibraryPage";
 import { StudyPage } from "./pages/StudyPage";
 import { DiscussionPage } from "./pages/DiscussionPage";
 import { MemoryShelfPage, MemoryArchivePage } from "./pages/MemoryShelfPage";
+import { AgentMemoryPage } from "./pages/AgentMemoryPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
@@ -82,10 +83,11 @@ export default function App() {
         <Route path="/behavior" element={<BehaviorPage />} />
         <Route path="/graph" element={<GraphPage />} />
         <Route path="/discussion" element={<DiscussionPage />} />
-        {/* P0 (01 §6): 旧 /memory 仍可访问 (P0 §8 禁 8). 新增
-         *  /memory/:projectId (记忆档案馆) 在 P3 替换为真正的实现. */}
-        <Route path="/memory" element={<MemoryShelfPage />} />
-        <Route path="/memory/:projectId" element={<MemoryArchivePage />} />
+        {/* P10: Agent 分层记忆池 (三栏布局) */}
+        <Route path="/memory" element={<AgentMemoryPage />} />
+        {/* P3: 旧版记忆书架/档案馆保留 */}
+        <Route path="/memory-shelf" element={<MemoryShelfPage />} />
+        <Route path="/memory-shelf/:projectId" element={<MemoryArchivePage />} />
         {/* P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7) */}
         <Route path="/reviews" element={<ReviewCommentsPage />} />
         {/* P7: Genre-Prompt matrix with drag-drop */}
