@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api } from "../api/client";
 
 interface ProviderInfo {
   id: number; name: string; base_url: string;
@@ -89,10 +89,9 @@ export default function ModelProviderDetailPage() {
   const probeOne = async (modelName: string) => {
     setProbeResults((prev) => ({ ...prev, [modelName]: "probing..." }));
     try {
-      const res = await api.post(
+      const r = await api.post<any>(
         `/api/model-control/providers/${providerId}/models/${encodeURIComponent(modelName)}/probe`
       );
-      const r = res.data.data;
       setProbeResults((prev) => ({
         ...prev,
         [modelName]: `${r.status} (${r.latency_ms}ms, score:${r.health_score})`,
