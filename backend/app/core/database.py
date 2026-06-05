@@ -212,6 +212,8 @@ async def init_db() -> None:
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     UNIQUE(project_id, material_id)
 )"""),
+        # B1: unify old behavior_patterns → behavior_cards
+        ("behavior_cards", "source_pattern_id", "INTEGER"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

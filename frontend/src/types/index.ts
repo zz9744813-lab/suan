@@ -144,6 +144,37 @@ export type WorkerStatus = {
   is_loop_alive: boolean;
 };
 
+/** B3: per-domain worker status from /api/worker/multi-status */
+export type MultiWorkerStatus = {
+  writing_worker: {
+    status: string;
+    current_task: number | null;
+    tasks_processed: number;
+    worker_state?: string;
+  };
+  deepstudy_worker: {
+    status: string;
+    current_run: number | null;
+    tasks_processed: number;
+  };
+  discussion_worker: {
+    status: string;
+    current_thread: number | null;
+    tasks_processed: number;
+  };
+  memory_worker: {
+    status: string;
+    current_job: number | null;
+    tasks_processed: number;
+  };
+  model_router: {
+    status: string;
+    providers_up: number;
+    providers_total: number;
+    tasks_processed: number;
+  };
+};
+
 export type WorkerPolicy = {
   id: number;
   project_id: number;

@@ -50,6 +50,9 @@ class BehaviorCard(Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("behavior_categories.id", ondelete="SET NULL"), default=None,
     )
+    # FK to old behavior_patterns.id — populated by migration when a card
+    # was auto-generated from the legacy table. ``None`` for hand-authored cards.
+    source_pattern_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     name: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
     role_type: Mapped[str | None] = mapped_column(String(80), default=None)
     status: Mapped[str] = mapped_column(String(40), default="ready")

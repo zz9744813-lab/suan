@@ -47,6 +47,8 @@ import type {
   TaskDiagnosis,
   WorkerPolicy,
   WorkerStatus,
+  // B3
+  MultiWorkerStatus,
   // P7
   GenrePromptMapping,
   GenrePromptMatrixResponse,
@@ -161,6 +163,7 @@ export const getTaskDiagnosis = (id: number) =>
   api.get<TaskDiagnosis>(`/api/tasks/${id}/diagnosis`);
 
 export const workerStatus = () => api.get<WorkerStatus>("/api/worker/status");
+export const multiWorkerStatus = () => api.get<MultiWorkerStatus>("/api/worker/multi-status");
 export const workerStart = () => api.post<any>("/api/worker/start");
 export const workerPause = () => api.post<any>("/api/worker/pause");
 export const workerResume = () => api.post<any>("/api/worker/resume");
@@ -368,12 +371,13 @@ export const enrichStudyRelationships = (materialId: number, body: StudyRelation
 export const getStudyMaterialOverview = (materialId: number) =>
   api.get<StudyMaterialOverview>(`/api/study/materials/${materialId}/overview`);
 
-// ----- Round 5: behavior patterns -----
+// ----- Round 5: behavior patterns (B1 unified → behavior_cards) -----
 export const listBehaviorPatterns = (q: {
   character?: string[];
   situation?: string[];
   search?: string;
   source_material_id?: number;
+  source?: "all" | "cards" | "legacy";
   limit?: number;
 } = {}) => {
   const params = new URLSearchParams();
@@ -381,6 +385,7 @@ export const listBehaviorPatterns = (q: {
   (q.situation ?? []).forEach((s) => params.append("situation", s));
   if (q.search) params.set("search", q.search);
   if (q.source_material_id != null) params.set("source_material_id", String(q.source_material_id));
+  if (q.source) params.set("source", q.source);
   if (q.limit != null) params.set("limit", String(q.limit));
   const qs = params.toString();
   return api.get<BehaviorPattern[]>(`/api/behavior/patterns${qs ? "?" + qs : ""}`);

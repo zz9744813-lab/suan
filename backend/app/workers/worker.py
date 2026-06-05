@@ -18,10 +18,10 @@ P4 改造: 不再只跑 chapter_pipeline, 改成多任务 dispatcher (P6 spec §
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_scope
@@ -30,6 +30,55 @@ from app.core.events import Event, event_bus
 from app.models.project import Chapter
 from app.models.task import AgentTask, WorkerPolicy, WorkerStatus
 from app.workers.pipeline import ChapterPipeline
+
+# ================================================================
+# B3: Worker horizontal scaling — domain partitioning
+# ================================================================
+
+WorkerDomain = Literal["writing", "deepstudy", "discussion", "memory", "model", "all"]
+
+
+class DomainWorkerStatus:
+    """Per-domain (horizontal partition) worker status.
+
+    Tracks the current task, processed count, error count, and
+    uptime for a single domain partition (e.g. "writing",
+    "deepstudy").  This is an in-memory structure, NOT a DB model.
+    (The DB model ``WorkerStatus`` lives in ``app.models.task``.)
+    """
+
+    def __init__(self, domain: WorkerDomain) -> None:
+        self.domain: WorkerDomain = domain
+        self.running: bool = False
+        self.current_task_id: int | None = None
+        self.current_run_id: int | None = None
+        self.tasks_processed: int = 0
+        self.errors_count: int = 0
+        self.last_active_at: datetime | None = None
+        self.uptime_started_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "domain": self.domain,
+            "running": self.running,
+            "current_task_id": self.current_task_id,
+            "current_run_id": self.current_run_id,
+            "tasks_processed": self.tasks_processed,
+            "errors_count": self.errors_count,
+            "last_active_at": self.last_active_at.isoformat() if self.last_active_at else None,
+            "uptime_seconds": (datetime.now(timezone.utc) - self.uptime_started_at).total_seconds() if self.uptime_started_at else 0,
+        }
+
+
+# Global registry for domain status (written by WorkerController,
+# read by the /multi-status API endpoint in routers/worker.py).
+worker_domain_status: dict[str, dict[str, Any]] = {
+    "writing_worker": {"status": "idle", "current_task": None, "tasks_processed": 0},
+    "deepstudy_worker": {"status": "idle", "current_run": None, "tasks_processed": 0},
+    "discussion_worker": {"status": "idle", "current_thread": None, "tasks_processed": 0},
+    "memory_worker": {"status": "idle", "current_job": None, "tasks_processed": 0},
+    "model_router": {"status": "healthy", "providers_up": 0, "providers_total": 0, "tasks_processed": 0},
+}
 
 
 def _today() -> str:
@@ -63,6 +112,25 @@ class WorkerController:
         self._pause_event.set()
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
+
+        # B3: per-domain in-memory status tracking
+        self.domain_statuses: dict[WorkerDomain, DomainWorkerStatus] = {
+            "writing": DomainWorkerStatus("writing"),
+            "deepstudy": DomainWorkerStatus("deepstudy"),
+            "discussion": DomainWorkerStatus("discussion"),
+            "memory": DomainWorkerStatus("memory"),
+            "model": DomainWorkerStatus("model"),
+            "all": DomainWorkerStatus("all"),
+        }
+
+        # B3: domain-specific concurrency limits (configurable)
+        self.domain_concurrency: dict[WorkerDomain, int] = {
+            "writing": 2,      # Allow 2 concurrent writing tasks
+            "deepstudy": 1,    # 1 deepstudy at a time (heavy)
+            "discussion": 3,   # Discussions are lightweight
+            "memory": 1,       # 1 consolidation at a time
+            "model": 2,        # 2 health checks concurrently
+        }
 
     @property
     def is_running(self) -> bool:
@@ -214,11 +282,17 @@ class WorkerController:
             if not self._pause_event.is_set():
                 continue
             try:
+                self.domain_statuses["discussion"].running = True
+                self.domain_statuses["discussion"].last_active_at = datetime.now(timezone.utc)
                 from app.workers.discussion_worker import discussion_worker_tick
                 await discussion_worker_tick()
             except Exception as exc:
+                self.domain_statuses["discussion"].errors_count += 1
                 import logging
                 logging.getLogger(__name__).warning(f"Discussion worker tick error: {exc}")
+            finally:
+                self.domain_statuses["discussion"].running = False
+                self._sync_domain_to_global()
 
     async def _recycle_worker_loop(self) -> None:
         """P9: 每 60 秒扫描到期讨论线程。"""
@@ -248,13 +322,19 @@ class WorkerController:
             if not self._pause_event.is_set():
                 continue
             try:
+                self.domain_statuses["memory"].running = True
+                self.domain_statuses["memory"].last_active_at = datetime.now(timezone.utc)
                 from app.services.agent_memory_service import MemoryConsolidatorService
                 async with session_scope() as db:
                     svc = MemoryConsolidatorService()
                     await svc.expire_temporary_memories(db)
                     await db.commit()
             except Exception as exc:
+                self.domain_statuses["memory"].errors_count += 1
                 logger.warning(f"Memory consolidation tick error: {exc}")
+            finally:
+                self.domain_statuses["memory"].running = False
+                self._sync_domain_to_global()
 
     async def _provider_health_worker_loop(self) -> None:
         """P3-Model-Failover: 每 300 秒轻量健康检查 + half_open 恢复."""
@@ -267,17 +347,36 @@ class WorkerController:
             if not self._pause_event.is_set():
                 continue
             try:
+                self.domain_statuses["model"].running = True
+                self.domain_statuses["model"].last_active_at = datetime.now(timezone.utc)
                 from app.services.provider_health import ProviderHealthService
                 from app.services.model_circuit_breaker import CircuitBreakerService
+                from app.models.model_provider import ModelProvider
                 async with session_scope() as db:
                     await ProviderHealthService().check_all_enabled(db, lightweight=True)
                     # 检查 half_open 恢复
                     await CircuitBreakerService().check_half_open(db)
+                    # B3: update model_router global status provider counts
+                    providers_up = await db.execute(
+                        select(func.count(ModelProvider.id)).where(
+                            ModelProvider.enabled.is_(True),
+                            ModelProvider.circuit_state == "closed",
+                        )
+                    )
+                    up = providers_up.scalar() or 0
+                    providers_total = await db.execute(
+                        select(func.count(ModelProvider.id))
+                    )
+                    total = providers_total.scalar() or 0
+                    worker_domain_status["model_router"]["providers_up"] = up
+                    worker_domain_status["model_router"]["providers_total"] = total
+                    worker_domain_status["model_router"]["status"] = "healthy" if up > 0 else "degraded"
             except Exception as exc:
+                self.domain_statuses["model"].errors_count += 1
                 logger.warning(f"Provider health tick error: {exc}")
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning(f"Memory consolidation tick error: {exc}")
+            finally:
+                self.domain_statuses["model"].running = False
+                self._sync_domain_to_global()
 
     async def _deepstudy_worker_loop(self) -> None:
         """P0-DeepStudy: 每 10 秒轮询 queued/running StudyRun 并推进 DAG。"""
@@ -290,11 +389,17 @@ class WorkerController:
             if not self._pause_event.is_set():
                 continue
             try:
+                self.domain_statuses["deepstudy"].running = True
+                self.domain_statuses["deepstudy"].last_active_at = datetime.now(timezone.utc)
                 from app.workers.deepstudy_worker import deepstudy_tick
                 await deepstudy_tick()
             except Exception as exc:
+                self.domain_statuses["deepstudy"].errors_count += 1
                 import logging
                 logging.getLogger(__name__).warning(f"DeepStudy worker tick error: {exc}")
+            finally:
+                self.domain_statuses["deepstudy"].running = False
+                self._sync_domain_to_global()
 
     async def _tick(self) -> bool:
         # P6 §5.1: pick 5 种支持任务类型中的下一个 pending
@@ -307,6 +412,23 @@ class WorkerController:
                 ws.today_cost_usd = 0.0
                 ws.last_reset_date = today
 
+            # B3: domain-specific concurrency limits.
+            # Count running tasks by domain so we don't pick a task
+            # from a domain that is already at capacity.
+            running_tasks = (
+                await db.execute(
+                    select(AgentTask).where(
+                        AgentTask.status == "running",
+                        AgentTask.task_type.in_(SUPPORTED_TASKS),
+                    )
+                )
+            ).scalars().all()
+
+            domain_counts: dict[str, int] = {"writing": 0, "deepstudy": 0, "discussion": 0, "memory": 0, "model": 0}
+            for t in running_tasks:
+                d = t.domain if hasattr(t, 'domain') and t.domain else "writing"
+                domain_counts[d] = domain_counts.get(d, 0) + 1
+
             # P1-2 fix: pick the next task FIRST, then load its
             # project's policy. Previously the worker called
             # ``_active_policy(db)`` with ``project_id=None`` which
@@ -315,8 +437,9 @@ class WorkerController:
             # task's own project_id.
             # P6 §5.1: 改用 SUPPORTED_TASKS in_(...) 派发
             # BUG-3 fix: 排除尚未到重试时间的任务 (not_before_at > now)
+            # B3: pick up to 10 pending tasks, then filter by domain concurrency
             _now = datetime.utcnow()
-            task_row = (
+            pending_tasks = (
                 await db.execute(
                     select(AgentTask)
                     .where(
@@ -325,9 +448,17 @@ class WorkerController:
                         (AgentTask.not_before_at == None) | (AgentTask.not_before_at <= _now),  # noqa: E711
                     )
                     .order_by(AgentTask.priority.desc(), AgentTask.id.asc())
-                    .limit(1)
+                    .limit(10)
                 )
-            ).scalar_one_or_none()
+            ).scalars().all()
+
+            # B3: only pick tasks from domains that are under the concurrency limit
+            eligible_tasks = [
+                t for t in pending_tasks
+                if domain_counts.get(t.domain or "writing", 0)
+                < self.domain_concurrency.get(t.domain or "writing", 1)  # type: ignore[arg-type]
+            ]
+            task_row = eligible_tasks[0] if eligible_tasks else None
             if task_row is None:
                 await self._heartbeat(db, ws)
                 return False
@@ -358,6 +489,13 @@ class WorkerController:
             project_id = task_row.project_id
             await db.flush()
 
+        # B3: track domain status when picking a task
+        task_domain: WorkerDomain = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"  # type: ignore[assignment]
+        self.domain_statuses[task_domain].current_task_id = task_row.id
+        self.domain_statuses[task_domain].last_active_at = datetime.now(timezone.utc)
+        self.domain_statuses[task_domain].running = True
+        self.domain_statuses["all"].current_task_id = task_row.id
+
         # P6 §5.2: dispatch by task_type. chapter_pipeline 走老路径
         # (重 timeout / cancel / auto_continue), 其它 4 种走对应 service.
         if task_row.task_type == "chapter_pipeline":
@@ -380,6 +518,7 @@ class WorkerController:
           - 失败时把 task 标 failed, 发 task.failed 事件
         """
         target_task_id = task_row.id
+        task_domain = self._domain_from_task(task_row)
         # event task 跟 project 的 daily_budget / daily_word_goal 解耦
         # (P6 §4 任务不等同 chapter pipeline 的产出, 不算 word).
         try:
@@ -398,6 +537,7 @@ class WorkerController:
                 raise RuntimeError(
                     f"_dispatch_event_task: 不支持 task_type={task_row.task_type}"
                 )
+            self._clear_domain_task(task_domain)
             return True
         except Exception as exc:
             err_text = str(exc)
@@ -417,6 +557,7 @@ class WorkerController:
                     "task_type": task_row.task_type,
                 })
             )
+            self._clear_domain_task(task_domain)
             return False
 
     async def _run_reader_review(
@@ -650,15 +791,18 @@ class WorkerController:
           - 成功: 入队下一章 (auto_continue) + P6 §5.3 入队 reader_review
         """
         chapter_id = task_row.chapter_id
+        task_domain = self._domain_from_task(task_row)
         if chapter_id is None:
             # 没 chapter 关联的 pipeline 任务不该存在
             await self._mark_task_failed(task_row.id, "Chapter missing")
+            self._clear_domain_task(task_domain)
             return False
         # 单独 session 校验 chapter
         async with session_scope() as db:
             chapter = await db.get(Chapter, chapter_id)
             if chapter is None:
                 await self._mark_task_failed(task_row.id, "Chapter missing")
+                self._clear_domain_task(task_domain)
                 return False
             chapter_no = chapter.chapter_no
 
@@ -750,6 +894,7 @@ class WorkerController:
                     },
                 ))
         except asyncio.TimeoutError:
+            self._clear_domain_task(task_domain)
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
                 t.status = "failed"
@@ -775,6 +920,7 @@ class WorkerController:
                 await event_bus.publish(
                     Event(event_type="task.cancelled", payload={"task_id": target_task_id})
                 )
+                self._clear_domain_task(task_domain)
                 return False
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
@@ -795,6 +941,7 @@ class WorkerController:
             await event_bus.publish(
                 Event(event_type="task.failed", payload={"task_id": target_task_id, "error": err_text})
             )
+        self._clear_domain_task(task_domain)
         return True
 
     async def _mark_task_failed(self, task_id: int, error: str) -> None:
@@ -839,6 +986,47 @@ class WorkerController:
         await event_bus.publish(Event(event_type=event_type, payload=payload))
 
     # ----- helpers -----
+
+    def _sync_domain_to_global(self) -> None:
+        """Push in-memory domain status to the global registry (read by router)."""
+        worker_domain_status["writing_worker"]["status"] = (
+            "running" if self.domain_statuses["writing"].running else "idle"
+        )
+        worker_domain_status["writing_worker"]["current_task"] = self.domain_statuses["writing"].current_task_id
+        worker_domain_status["writing_worker"]["tasks_processed"] = self.domain_statuses["writing"].tasks_processed
+        worker_domain_status["deepstudy_worker"]["status"] = (
+            "running" if self.domain_statuses["deepstudy"].running else "idle"
+        )
+        worker_domain_status["deepstudy_worker"]["current_run"] = self.domain_statuses["deepstudy"].current_run_id
+        worker_domain_status["deepstudy_worker"]["tasks_processed"] = self.domain_statuses["deepstudy"].tasks_processed
+        worker_domain_status["discussion_worker"]["status"] = (
+            "running" if self.domain_statuses["discussion"].running else "idle"
+        )
+        worker_domain_status["discussion_worker"]["current_thread"] = self.domain_statuses["discussion"].current_task_id
+        worker_domain_status["discussion_worker"]["tasks_processed"] = self.domain_statuses["discussion"].tasks_processed
+        worker_domain_status["memory_worker"]["status"] = (
+            "running" if self.domain_statuses["memory"].running else "idle"
+        )
+        worker_domain_status["memory_worker"]["current_job"] = self.domain_statuses["memory"].current_task_id
+        worker_domain_status["memory_worker"]["tasks_processed"] = self.domain_statuses["memory"].tasks_processed
+        worker_domain_status["model_router"]["tasks_processed"] = self.domain_statuses["model"].tasks_processed
+
+    def _domain_from_task(self, task_row: AgentTask) -> WorkerDomain:
+        """Resolve the domain for a task row."""
+        domain_val: str = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"
+        # Validate that it's a known WorkerDomain; fall back to "writing"
+        if domain_val not in {"writing", "deepstudy", "discussion", "memory", "model", "all"}:
+            domain_val = "writing"
+        return domain_val  # type: ignore[return-value]
+
+    def _clear_domain_task(self, domain: WorkerDomain) -> None:
+        """Clear a domain's current task and mark it idle."""
+        ds = self.domain_statuses[domain]
+        ds.current_task_id = None
+        ds.running = False
+        ds.tasks_processed += 1
+        self.domain_statuses["all"].current_task_id = None
+        self._sync_domain_to_global()
 
     async def _get_or_create_status(self, db: AsyncSession) -> WorkerStatus:
         ws = await db.get(WorkerStatus, 1)

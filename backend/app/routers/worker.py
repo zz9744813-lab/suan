@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import bad_request
-from app.models.task import WorkerPolicy, WorkerStatus, AgentTask
-from app.models.model_provider import ModelProvider
+from app.models.task import WorkerPolicy, WorkerStatus
 from app.schemas import APIResponse, WorkerPolicyRead, WorkerPolicyUpdate, WorkerStatusRead
 from app.workers.worker import get_worker
 
@@ -22,50 +21,28 @@ async def status() -> APIResponse[dict]:
 
 
 @router.get("/multi-status")
-async def get_multi_worker_status(db: AsyncSession = Depends(get_db)):
-    """Return separate status for Writing/DeepStudy/Model workers."""
+async def get_multi_worker_status():
+    """Return separate status for Writing/DeepStudy/Discussion/Memory/Model workers.
 
-    # Writing worker status from the singleton
+    Powered by the global ``worker_domain_status`` registry that is
+    kept up-to-date by the WorkerController's horizontal partitioning
+    (B3 multi-domain scaling).
+    """
+    from app.workers.worker import worker_domain_status, get_worker
+
+    # Merge the global domain registry with the singleton's top-level
+    # status (which carries today_words / today_cost_usd / rate).
     worker_status = await get_worker().status()
-
-    # DeepStudy: count active study tasks
-    deepstudy_running = await db.execute(
-        select(func.count(AgentTask.id)).where(
-            AgentTask.domain == "deepstudy",
-            AgentTask.status == "running",
-        )
-    )
-    deepstudy_active_count = deepstudy_running.scalar() or 0
-
-    # Model router: count providers
-    providers_total = await db.execute(
-        select(func.count(ModelProvider.id))
-    )
-    total = providers_total.scalar() or 0
-    providers_up = await db.execute(
-        select(func.count(ModelProvider.id)).where(
-            ModelProvider.enabled.is_(True),
-            ModelProvider.circuit_state == "closed",
-        )
-    )
-    up = providers_up.scalar() or 0
 
     return {
         "writing_worker": {
-            "status": worker_status.get("state", "unknown"),
-            "current_task": worker_status.get("current_task_id"),
-            "uptime_seconds": 0,
+            **worker_domain_status.get("writing_worker", {}),
+            "worker_state": worker_status.get("state", "unknown"),
         },
-        "deepstudy_worker": {
-            "status": "running" if deepstudy_active_count > 0 else "idle",
-            "current_run": None,
-            "uptime_seconds": 0,
-        },
-        "model_router": {
-            "status": "healthy" if up > 0 else "degraded",
-            "providers_up": up,
-            "providers_total": total,
-        },
+        "deepstudy_worker": worker_domain_status.get("deepstudy_worker", {}),
+        "discussion_worker": worker_domain_status.get("discussion_worker", {}),
+        "memory_worker": worker_domain_status.get("memory_worker", {}),
+        "model_router": worker_domain_status.get("model_router", {}),
     }
 
 

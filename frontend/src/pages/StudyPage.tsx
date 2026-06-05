@@ -778,7 +778,7 @@ function DeepStudyProgressCard({ run, material, overview }: { run: any; material
   );
 }
 
-/* ===================== 行为模式库 ===================== */
+/* ===================== 行为模式库 (B1 unified: behavior_cards) ===================== */
 
 function PatternLibrary() {
   const [patterns, setPatterns] = useState<BehaviorPattern[]>([]);
@@ -793,18 +793,21 @@ function PatternLibrary() {
   const [npSits, setNpSits] = useState("");
   const [npBehavior, setNpBehavior] = useState("");
   const [npConfidence, setNpConfidence] = useState(0.5);
+  // B1: data source picker
+  const [dataSource, setDataSource] = useState<"all" | "cards" | "legacy">("all");
 
   const refreshPatterns = () => {
     listBehaviorPatterns({
       character: charFilter ? [charFilter] : undefined,
       situation: sitFilter ? [sitFilter] : undefined,
       search: search || undefined,
+      source: dataSource,
     })
       .then(setPatterns)
       .catch((e) => setErrorMsg(String(e?.message ?? e)));
   };
 
-  useEffect(refreshPatterns, [charFilter, sitFilter, search]);
+  useEffect(refreshPatterns, [charFilter, sitFilter, search, dataSource]);
 
   const allCharTags = useMemo(
     () => Array.from(new Set(patterns.flatMap((p) => p.character_tags))).sort(),
@@ -859,15 +862,31 @@ function PatternLibrary() {
       )}
 
       <div className="card">
+        {/* B1: unified system banner */}
+        <div className="banner info" style={{ marginBottom: 12, padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: 6, borderLeft: "3px solid var(--accent)", fontSize: 12 }}>
+          <b>B1 统一行为模式系统</b> — 数据已合并到 <code>behavior_cards</code> 表。
+          旧 <code>behavior_patterns</code> 表保留兼容性查询（运行迁移脚本后可安全废弃）。
+          当前数据源: <b>{dataSource === "all" ? "全部 (cards + legacy)" : dataSource === "cards" ? "行为卡 (cards)" : "仅旧表 (legacy)"}</b>
+        </div>
+
         <div className="row" style={{ marginBottom: 8 }}>
           <h3 style={{ margin: 0 }}>行为模式库（{patterns.length}）</h3>
           <span className="spacer" />
+          <select
+            value={dataSource}
+            onChange={(e) => setDataSource(e.target.value as "all" | "cards" | "legacy")}
+            style={{ fontSize: 12, marginRight: 8 }}
+          >
+            <option value="all">全部数据源</option>
+            <option value="cards">行为卡 (cards)</option>
+            <option value="legacy">旧表 (legacy)</option>
+          </select>
           <button onClick={() => setShowNewPattern(!showNewPattern)}>
             {showNewPattern ? "取消" : "+ 新建模式"}
           </button>
         </div>
         <p className="muted small">
-          模式按 <b>人物标签</b> × <b>情境标签</b> 检索。PlannerAgent 会把命中的模式卡注入章节规划 prompt。
+          B1 统一系统 — 模式按 <b>人物标签</b> × <b>情境标签</b> 检索。PlannerAgent 会把命中的模式卡注入章节规划 prompt。
         </p>
 
         <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
