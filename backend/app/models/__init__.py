@@ -90,6 +90,8 @@ from app.models.agent_memory import (
     AgentMemoryAccessLog,
     MemoryChangeRequest,
 )
+from app.models.model_runtime import ModelRuntimeStat
+from app.models.model_call_event import ModelCallEvent
 
 __all__ = [
     "Project",
@@ -172,4 +174,7 @@ __all__ = [
     "AgentMemoryConsolidationJob",
     "AgentMemoryAccessLog",
     "MemoryChangeRequest",
+    # P0-Model-Failover: model runtime stats + call events
+    "ModelRuntimeStat",
+    "ModelCallEvent",
 ]

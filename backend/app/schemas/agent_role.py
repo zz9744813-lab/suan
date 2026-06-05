@@ -82,6 +82,21 @@ class AgentModelBindingRead(BaseModel):
     temperature: float | None
     max_tokens: int | None
     extra_body: dict[str, Any] | None = None
+    # ── P0-Model-Failover 新增字段 ──
+    selection_mode: str = "auto"
+    auto_strategy: str = "quality_first"
+    candidate_provider_ids: list[int] | None = None
+    candidate_models_json: list[dict[str, Any]] | None = None
+    fallback_candidates_json: list[dict[str, Any]] | None = None
+    allow_auto_fallback: bool = True
+    failure_threshold: int = 2
+    cooldown_seconds: int = 300
+    locked_reason: str | None = None
+    last_selected_provider_id: int | None = None
+    last_selected_model_name: str | None = None
+    last_selection_reason: str | None = None
+    last_selection_score: float | None = None
+    last_selection_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -98,6 +113,19 @@ class AgentModelBindingUpdate(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     extra_body: dict[str, Any] | None = None
+    # ── P0-Model-Failover 新增字段 ──
+    selection_mode: Literal["auto", "manual", "manual_with_fallback"] | None = None
+    auto_strategy: Literal[
+        "quality_first", "cost_first", "speed_first",
+        "long_context_first", "json_stable_first",
+    ] | None = None
+    candidate_provider_ids: list[int] | None = None
+    candidate_models_json: list[dict[str, Any]] | None = None
+    fallback_candidates_json: list[dict[str, Any]] | None = None
+    allow_auto_fallback: bool | None = None
+    failure_threshold: int | None = None
+    cooldown_seconds: int | None = None
+    locked_reason: str | None = None
 
 
 # ============================================================

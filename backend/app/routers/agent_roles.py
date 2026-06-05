@@ -371,3 +371,141 @@ async def get_agent_run_events(
         .limit(limit)
     )).scalars().all()
     return [AgentRunEventRead.model_validate(r) for r in rows]
+
+
+# ── P4-Model-Failover: 新增端点 ──────────────────────────────
+
+from app.schemas.model_failover import (
+    AutoConfigureItem,
+    AutoConfigureRequest,
+    AutoConfigureResponse,
+    CircuitResetResponse,
+    PreviewSelectionRequest,
+    PreviewSelectionResponse,
+    ModelCandidateItem,
+)
+
+
+@router.post("/{role_id}/model-binding/preview-selection", response_model=PreviewSelectionResponse)
+async def preview_model_selection(
+    role_id: int,
+    payload: PreviewSelectionRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PreviewSelectionResponse:
+    """预览系统会选哪个模型 (不保存)."""
+    role = await db.get(AgentRole, role_id)
+    if role is None:
+        raise not_found("AgentRole", role_id)
+
+    from app.services.model_selector import get_model_selector
+    try:
+        selected = await get_model_selector().select_for_agent(
+            db,
+            agent_role_key=payload.agent_role_key or role.key,
+        )
+        best = ModelCandidateItem(
+            provider_id=selected.provider.id,
+            provider_name=selected.provider.name,
+            model_name=selected.model_name,
+            score=selected.selection_score or 0,
+            reason=selected.selection_reason or "",
+        )
+        candidates = [
+            ModelCandidateItem(
+                provider_id=c.provider_id,
+                provider_name=c.provider_name,
+                model_name=c.model_name,
+                score=c.score,
+                health=c.health,
+                success_rate=c.success_rate,
+                latency_ms=c.latency_ms,
+                cost_score=c.cost_score,
+                risk=c.risk,
+            )
+            for c in selected.candidates[:10]
+        ]
+        return PreviewSelectionResponse(selected=best, candidates=candidates)
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/auto-configure", response_model=AutoConfigureResponse)
+async def auto_configure_agents(
+    payload: AutoConfigureRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AutoConfigureResponse:
+    """一键自动配置: 为所有/自动模式 Agent 分配推荐模型."""
+    from app.services.model_selector import get_model_selector
+
+    q = select(AgentRole)
+    if payload.scope == "auto_only":
+        q = q.join(AgentModelBinding).where(AgentModelBinding.selection_mode == "auto")
+    if not payload.include_disabled:
+        q = q.where(AgentRole.enabled == True)  # noqa: E712
+    roles = (await db.execute(q)).scalars().all()
+
+    updated = 0
+    skipped = 0
+    failed = 0
+    items: list[AutoConfigureItem] = []
+
+    for role in roles:
+        binding = (await db.execute(
+            select(AgentModelBinding).where(AgentModelBinding.agent_role_id == role.id)
+        )).scalar_one_or_none()
+
+        # 跳过手动锁定 (除非 overwrite)
+        if binding and binding.selection_mode == "manual" and not payload.overwrite_manual:
+            skipped += 1
+            continue
+
+        try:
+            selected = await get_model_selector().select_for_agent(
+                db, agent_role_key=role.key,
+            )
+            if binding is None:
+                binding = AgentModelBinding(
+                    agent_role_id=role.id,
+                    selection_mode="auto",
+                    auto_strategy=payload.strategy,
+                )
+                db.add(binding)
+                await db.flush()
+
+            binding.provider_id = selected.provider.id
+            binding.model_name = selected.model_name
+            binding.temperature = selected.temperature
+            binding.max_tokens = selected.max_tokens
+            binding.extra_body = selected.extra_body
+            binding.selection_mode = "auto"
+            binding.auto_strategy = payload.strategy
+            binding.last_selected_provider_id = selected.provider.id
+            binding.last_selected_model_name = selected.model_name
+            binding.last_selection_score = selected.selection_score
+            binding.last_selection_reason = selected.selection_reason
+            binding.last_selection_at = datetime.utcnow()
+
+            updated += 1
+            items.append(AutoConfigureItem(
+                agent_role_key=role.key,
+                selection_mode="auto",
+                provider=selected.provider.name,
+                model=selected.model_name,
+                score=selected.selection_score,
+                reason=selected.selection_reason,
+            ))
+        except Exception as exc:
+            failed += 1
+            items.append(AutoConfigureItem(
+                agent_role_key=role.key,
+                selection_mode="auto",
+                provider=None,
+                model=None,
+                score=None,
+                reason=f"失败: {exc}",
+            ))
+
+    await db.commit()
+    return AutoConfigureResponse(
+        updated=updated, skipped_manual=skipped, failed=failed, items=items,
+    )

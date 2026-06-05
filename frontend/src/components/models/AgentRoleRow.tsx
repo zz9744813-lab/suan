@@ -51,6 +51,12 @@ export function AgentRoleRow({
                 <span className="muted small">Model</span>
                 <span>{item.model_name ?? "—"}</span>
               </div>
+              {/* P0-MODEL-FAILOVER: 选模模式徽章 */}
+              <div className="agent-role-row-mode">
+                <span className={`pill tiny mode-${item.binding.selection_mode ?? "auto"}`} title={`auto_strategy: ${item.binding.auto_strategy ?? "—"}`}>
+                  {item.binding.selection_mode === "manual" ? "🔒 手动" : item.binding.selection_mode === "manual_with_fallback" ? "🔒+备" : "⚙ 自动"}
+                </span>
+              </div>
             </>
           ) : (
             <span className="muted small">未绑定</span>

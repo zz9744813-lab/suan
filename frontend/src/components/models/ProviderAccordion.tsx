@@ -31,6 +31,15 @@ export function ProviderAccordion({
     return "gray";
   })();
 
+  // P0-MODEL-FAILOVER: circuit-breaker badge. Open = red stripe, half_open
+  // = orange pulse, closed = green dot.
+  const circuitBadge = (() => {
+    const c = provider.circuit_state ?? "closed";
+    if (c === "open") return { color: "red", text: "熔断中" };
+    if (c === "half_open") return { color: "gold", text: "半开" };
+    return { color: "green", text: "" };
+  })();
+
   return (
     <div className={`provider-accordion ${expanded ? "expanded" : ""}`} data-health={healthColor}>
       <button className="provider-accordion-head" onClick={() => setExpanded((v) => !v)}>
@@ -39,6 +48,22 @@ export function ProviderAccordion({
         <span className="provider-accordion-model">{provider.default_model}</span>
         <span className="provider-accordion-count">{provider.model_list?.length ?? 0} 模型</span>
         <span className="provider-accordion-baseurl" title={provider.base_url}>{provider.base_url}</span>
+        {/* P0-MODEL-FAILOVER: 健康分 + 1h 成功率 + 熔断徽章 */}
+        {typeof provider.health_score === "number" && (
+          <span className="provider-accordion-score" title="健康分 0..1">
+            健 {provider.health_score.toFixed(2)}
+          </span>
+        )}
+        {typeof provider.success_rate_1h === "number" && (
+          <span className="provider-accordion-sr" title="1h 成功率">
+            {(provider.success_rate_1h * 100).toFixed(0)}%
+          </span>
+        )}
+        {circuitBadge.text && (
+          <span className={`provider-accordion-circuit provider-accordion-circuit-${circuitBadge.color}`} title={`熔断器: ${provider.circuit_state}`}>
+            {circuitBadge.text}
+          </span>
+        )}
         <span className={`provider-accordion-dot provider-accordion-dot-${healthColor}`} title={provider.last_health_status ?? "未测"} />
         <span className="provider-accordion-enabled" data-on={provider.enabled}>{provider.enabled ? "启用" : "禁用"}</span>
       </button>
@@ -80,7 +105,33 @@ export function ProviderAccordion({
             >
               {busy.preview ? "拉取中..." : "拉取模型列表"}
             </button>
+            {provider.circuit_state === "open" && (
+              <button
+                className="circuit-reset"
+                onClick={async () => {
+                  try {
+                    const { resetProviderCircuit } = await import("../../api");
+                    await resetProviderCircuit(provider.id);
+                    onChange({});  // 触发父组件 reload
+                  } catch (e) { /* swallow */ }
+                }}
+                title="把熔断器重置为 closed"
+              >
+                重置熔断
+              </button>
+            )}
             <button onClick={onDelete} className="danger">删除</button>
+          </div>
+          {/* P0-MODEL-FAILOVER: 监控数据行 */}
+          <div className="provider-accordion-stats">
+            <span>1h 成功率: <b>{(provider.success_rate_1h * 100 || 0).toFixed(0)}%</b></span>
+            <span>24h 成功率: <b>{(provider.success_rate_24h * 100 || 0).toFixed(0)}%</b></span>
+            <span>平均延迟: <b>{provider.avg_latency_ms ?? "—"} ms</b></span>
+            <span>连续成功/失败: <b>{provider.consecutive_successes}/{provider.consecutive_failures}</b></span>
+            <span>日用量: <b>{provider.daily_request_count} 次 / {provider.daily_token_count} tokens / ${(provider.daily_cost_usd || 0).toFixed(3)}</b></span>
+            {provider.last_failure_message && (
+              <span className="last-fail">最近失败 ({provider.last_failure_type}): {provider.last_failure_message.slice(0, 100)}</span>
+            )}
           </div>
           {provider.last_test_message && (
             <div className="provider-accordion-hint">{provider.last_test_message}</div>

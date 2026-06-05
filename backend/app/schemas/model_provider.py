@@ -61,6 +61,22 @@ class ModelProviderRead(BaseModel):
     # without re-running the probe on every page load).
     last_health_full: dict[str, Any] | None = None
     extra: dict[str, Any] | None = None
+    # P0-MODEL-FAILOVER: circuit-breaker + runtime stats.
+    health_score: float | None = None
+    success_rate_1h: float | None = None
+    success_rate_24h: float | None = None
+    avg_latency_ms: int | None = None
+    consecutive_failures: int = 0
+    consecutive_successes: int = 0
+    circuit_state: str = "closed"
+    circuit_open_until: datetime | None = None
+    last_failure_type: str | None = None
+    last_failure_message: str | None = None
+    last_success_at: datetime | None = None
+    daily_cost_usd: float = 0.0
+    daily_request_count: int = 0
+    daily_token_count: int = 0
+    last_reset_date: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -91,6 +107,22 @@ class ModelProviderRead(BaseModel):
             # P15 / P0-HEALTH-1: pass through the per-test detail.
             last_health_full=obj.last_health_full,
             extra=obj.extra,
+            # P0-MODEL-FAILOVER: circuit-breaker + runtime stats.
+            health_score=obj.health_score,
+            success_rate_1h=obj.success_rate_1h,
+            success_rate_24h=obj.success_rate_24h,
+            avg_latency_ms=obj.avg_latency_ms,
+            consecutive_failures=obj.consecutive_failures,
+            consecutive_successes=obj.consecutive_successes,
+            circuit_state=obj.circuit_state or "closed",
+            circuit_open_until=obj.circuit_open_until,
+            last_failure_type=obj.last_failure_type,
+            last_failure_message=obj.last_failure_message,
+            last_success_at=obj.last_success_at,
+            daily_cost_usd=obj.daily_cost_usd or 0.0,
+            daily_request_count=obj.daily_request_count or 0,
+            daily_token_count=obj.daily_token_count or 0,
+            last_reset_date=obj.last_reset_date,
             created_at=obj.created_at,
             updated_at=obj.updated_at,
         )

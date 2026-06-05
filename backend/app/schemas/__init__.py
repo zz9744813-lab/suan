@@ -234,6 +234,19 @@ from app.schemas.agent_memory import (
     MemoryProjectStats,
     MemoryPromoteRequest,
 )
+from app.schemas.model_failover import (
+    ModelRuntimeStatRead,
+    ModelCallEventRead,
+    ModelCandidateItem,
+    PreviewSelectionRequest,
+    PreviewSelectionResponse,
+    AutoConfigureRequest,
+    AutoConfigureItem,
+    AutoConfigureResponse,
+    ProviderHealthFullModelItem,
+    ProviderHealthFullResponse,
+    CircuitResetResponse,
+)
 
 __all__ = [
     "APIError",
@@ -449,4 +462,16 @@ __all__ = [
     "MemoryMergeRequest",
     "MemoryProjectStats",
     "MemoryPromoteRequest",
+    # P0-Model-Failover
+    "ModelRuntimeStatRead",
+    "ModelCallEventRead",
+    "ModelCandidateItem",
+    "PreviewSelectionRequest",
+    "PreviewSelectionResponse",
+    "AutoConfigureRequest",
+    "AutoConfigureItem",
+    "AutoConfigureResponse",
+    "ProviderHealthFullModelItem",
+    "ProviderHealthFullResponse",
+    "CircuitResetResponse",
 ]

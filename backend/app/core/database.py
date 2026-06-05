@@ -121,6 +121,37 @@ async def init_db() -> None:
         # prompt editor doesn't let users "delete" the bundled
         # reader_/chief_comment prompts by accident.
         ("prompt_templates", "immutable", "BOOLEAN DEFAULT 0"),
+        # P0-MODEL-FAILOVER: Agent model binding selection fields.
+        ("agent_model_bindings", "selection_mode", "VARCHAR(30) DEFAULT 'auto'"),
+        ("agent_model_bindings", "auto_strategy", "VARCHAR(40) DEFAULT 'quality_first'"),
+        ("agent_model_bindings", "candidate_provider_ids", "JSON"),
+        ("agent_model_bindings", "candidate_models_json", "JSON"),
+        ("agent_model_bindings", "fallback_candidates_json", "JSON"),
+        ("agent_model_bindings", "allow_auto_fallback", "BOOLEAN DEFAULT 1"),
+        ("agent_model_bindings", "failure_threshold", "INTEGER DEFAULT 2"),
+        ("agent_model_bindings", "cooldown_seconds", "INTEGER DEFAULT 300"),
+        ("agent_model_bindings", "locked_reason", "TEXT"),
+        ("agent_model_bindings", "last_selected_provider_id", "INTEGER"),
+        ("agent_model_bindings", "last_selected_model_name", "VARCHAR(200)"),
+        ("agent_model_bindings", "last_selection_reason", "TEXT"),
+        ("agent_model_bindings", "last_selection_score", "FLOAT"),
+        ("agent_model_bindings", "last_selection_at", "DATETIME"),
+        # P0-MODEL-FAILOVER: Provider circuit-breaker and runtime stats.
+        ("model_providers", "health_score", "FLOAT DEFAULT 0.75"),
+        ("model_providers", "success_rate_1h", "FLOAT DEFAULT 1.0"),
+        ("model_providers", "success_rate_24h", "FLOAT DEFAULT 1.0"),
+        ("model_providers", "avg_latency_ms", "INTEGER"),
+        ("model_providers", "consecutive_failures", "INTEGER DEFAULT 0"),
+        ("model_providers", "consecutive_successes", "INTEGER DEFAULT 0"),
+        ("model_providers", "circuit_state", "VARCHAR(20) DEFAULT 'closed'"),
+        ("model_providers", "circuit_open_until", "DATETIME"),
+        ("model_providers", "last_failure_type", "VARCHAR(60)"),
+        ("model_providers", "last_failure_message", "TEXT"),
+        ("model_providers", "last_success_at", "DATETIME"),
+        ("model_providers", "daily_cost_usd", "FLOAT DEFAULT 0.0"),
+        ("model_providers", "daily_request_count", "INTEGER DEFAULT 0"),
+        ("model_providers", "daily_token_count", "INTEGER DEFAULT 0"),
+        ("model_providers", "last_reset_date", "VARCHAR(10)"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

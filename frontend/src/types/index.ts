@@ -212,6 +212,22 @@ export type ModelProvider = {
     recommended_roles: Record<string, string>;
     checked_at: string;
   } | null;
+  // P0-Model-Failover: Provider 级运行状态
+  health_score: number;
+  success_rate_1h: number;
+  success_rate_24h: number;
+  avg_latency_ms: number | null;
+  consecutive_failures: number;
+  consecutive_successes: number;
+  circuit_state: "closed" | "open" | "half_open";
+  circuit_open_until: string | null;
+  last_failure_type: string | null;
+  last_failure_message: string | null;
+  last_success_at: string | null;
+  daily_cost_usd: number;
+  daily_request_count: number;
+  daily_token_count: number;
+  last_reset_date: string | null;
   extra: Record<string, any> | null;
   created_at: string;
   updated_at: string;
@@ -1233,6 +1249,21 @@ export type AgentModelBinding = {
   temperature: number | null;
   max_tokens: number | null;
   extra_body: Record<string, any> | null;
+  // P0-Model-Failover 新增
+  selection_mode: "auto" | "manual" | "manual_with_fallback";
+  auto_strategy: "quality_first" | "cost_first" | "speed_first" | "long_context_first" | "json_stable_first";
+  candidate_provider_ids: number[] | null;
+  candidate_models_json: { provider_id: number; model: string; weight: number }[] | null;
+  fallback_candidates_json: { provider_id: number; model: string; weight: number }[] | null;
+  allow_auto_fallback: boolean;
+  failure_threshold: number;
+  cooldown_seconds: number;
+  locked_reason: string | null;
+  last_selected_provider_id: number | null;
+  last_selected_model_name: string | null;
+  last_selection_reason: string | null;
+  last_selection_score: number | null;
+  last_selection_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1333,6 +1364,16 @@ export type AgentModelBindingUpdateBody = {
   temperature?: number | null;
   max_tokens?: number | null;
   extra_body?: Record<string, any> | null;
+  // P0-Model-Failover 新增
+  selection_mode?: "auto" | "manual" | "manual_with_fallback" | null;
+  auto_strategy?: "quality_first" | "cost_first" | "speed_first" | "long_context_first" | "json_stable_first" | null;
+  candidate_provider_ids?: number[] | null;
+  candidate_models_json?: { provider_id: number; model: string; weight: number }[] | null;
+  fallback_candidates_json?: { provider_id: number; model: string; weight: number }[] | null;
+  allow_auto_fallback?: boolean | null;
+  failure_threshold?: number | null;
+  cooldown_seconds?: number | null;
+  locked_reason?: string | null;
 };
 
 export type AgentPromptBindingUpdateBody = {

@@ -42,6 +42,25 @@ class ModelProvider(Base):
     # bindings (e.g. Critic bound to a model that failed critic_schema).
     last_health_full: Mapped[dict | None] = mapped_column(JSON, default=None)
     extra: Mapped[dict | None] = mapped_column(JSON, default=None)
+
+    # ── P0-Model-Failover: Provider 级运行状态 ──
+    health_score: Mapped[float] = mapped_column(Float, default=0.75)
+    success_rate_1h: Mapped[float] = mapped_column(Float, default=1.0)
+    success_rate_24h: Mapped[float] = mapped_column(Float, default=1.0)
+    avg_latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_successes: Mapped[int] = mapped_column(Integer, default=0)
+    # closed / open / half_open
+    circuit_state: Mapped[str] = mapped_column(String(20), default="closed", index=True)
+    circuit_open_until: Mapped[datetime | None] = mapped_column(default=None)
+    last_failure_type: Mapped[str | None] = mapped_column(String(60), default=None)
+    last_failure_message: Mapped[str | None] = mapped_column(Text, default=None)
+    last_success_at: Mapped[datetime | None] = mapped_column(default=None)
+    daily_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    daily_request_count: Mapped[int] = mapped_column(Integer, default=0)
+    daily_token_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_reset_date: Mapped[str | None] = mapped_column(String(10), default=None)
+
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

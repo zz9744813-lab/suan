@@ -92,6 +92,35 @@ class AgentModelBinding(Base):
     # 给 OpenAI-compatible 客户端透传的 extra_body (例如
     # step-3.7-flash 的 reasoning_effort=low).
     extra_body: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+
+    # ── P0-Model-Failover: 自动选模 / 手动锁定 / 混合模式 ──
+    # auto / manual / manual_with_fallback
+    selection_mode: Mapped[str] = mapped_column(String(30), default="auto", index=True)
+    # quality_first / cost_first / speed_first / long_context_first / json_stable_first
+    auto_strategy: Mapped[str] = mapped_column(String(40), default="quality_first")
+    # 自动模式可用 Provider 池；为空表示所有 enabled Provider
+    candidate_provider_ids: Mapped[list[int] | None] = mapped_column(JSON, default=None)
+    # 指定候选模型池 [{"provider_id":1,"model":"step-3.7-flash","weight":1.0}, ...]
+    candidate_models_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
+    # 手动模式失败后的备用模型池
+    fallback_candidates_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
+    # manual 模式下是否允许失效后自动切换
+    allow_auto_fallback: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 连续失败多少次触发切换
+    failure_threshold: Mapped[int] = mapped_column(Integer, default=2)
+    # 主模型失败后冷却多久（秒）
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    # 用户为什么手动锁定，UI 显示用
+    locked_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    # ── 最近一次自动选择结果 ──
+    last_selected_provider_id: Mapped[int | None] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="SET NULL"), default=None,
+    )
+    last_selected_model_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    last_selection_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    last_selection_score: Mapped[float | None] = mapped_column(Float, default=None)
+    last_selection_at: Mapped[datetime | None] = mapped_column(default=None)
+
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

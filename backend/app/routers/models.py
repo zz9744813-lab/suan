@@ -942,3 +942,64 @@ async def set_role(
         model=row.model, temperature=row.temperature, max_tokens=row.max_tokens,
         notes=row.notes,
     )}
+
+
+# ── P4-Model-Failover: Provider 熔断重置 ──────────────────
+
+@router.post("/providers/{provider_id}/circuit/reset")
+async def reset_provider_circuit(
+    provider_id: int, db: AsyncSession = Depends(get_db),
+) -> dict:
+    """手动解除 Provider 熔断."""
+    from app.services.model_circuit_breaker import CircuitBreakerService
+    from app.schemas.model_failover import CircuitResetResponse
+    try:
+        provider = await CircuitBreakerService().reset_circuit(db, provider_id)
+        await db.commit()
+        return CircuitResetResponse(
+            ok=True,
+            provider_id=provider_id,
+            circuit_state=provider.circuit_state,
+            message=f"Provider {provider.name} 熔断已重置为 closed",
+        ).model_dump()
+    except ValueError as e:
+        from fastapi import HTTPException
+        raise HTTPException(404, str(e))
+
+
+@router.post("/providers/{provider_id}/health/full")
+async def full_provider_health(
+    provider_id: int, db: AsyncSession = Depends(get_db),
+) -> dict:
+    """完整健康探针 (list_models + short chat + json + long)."""
+    from app.services.provider_health import ProviderHealthService
+    from app.schemas.model_failover import ProviderHealthFullResponse, ProviderHealthFullModelItem
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        from fastapi import HTTPException
+        raise HTTPException(404, f"Provider {provider_id} 不存在")
+
+    result = await ProviderHealthService().check_provider(db, provider, lightweight=False)
+    await db.commit()
+
+    # 构建模型结果
+    hf = provider.last_health_full or {}
+    model_items = []
+    for m in (provider.model_list or [])[:20]:
+        mr = hf.get("details", {}).get(m, {})
+        model_items.append(ProviderHealthFullModelItem(
+            model=m,
+            available=True,
+            json_score=mr.get("json_score"),
+            long_output_score=mr.get("long_output_score"),
+            speed_score=mr.get("speed_score"),
+            recommended_roles=mr.get("recommended_roles", []),
+        ))
+
+    return ProviderHealthFullResponse(
+        provider_id=provider_id,
+        status=provider.last_health_status or "unknown",
+        health_score=provider.health_score or 0.75,
+        latency_ms=provider.last_health_latency_ms,
+        models=model_items,
+    ).model_dump()

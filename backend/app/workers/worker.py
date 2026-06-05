@@ -176,6 +176,10 @@ class WorkerController:
             self._memory_consolidation_task = asyncio.create_task(
                 self._memory_consolidation_worker_loop(), name="novelforge-memory-consolidation"
             )
+            # P3-Model-Failover: 启动 Provider 健康检查 worker
+            self._provider_health_task = asyncio.create_task(
+                self._provider_health_worker_loop(), name="novelforge-provider-health"
+            )
             while not self._stop.is_set():
                 await self._pause_event.wait()
                 if self._stop.is_set():
@@ -191,7 +195,7 @@ class WorkerController:
             await self._set_state("error", error=str(exc))
         finally:
             # cancel background tasks
-            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None)]:
+            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None)]:
                 if t and not t.done():
                     t.cancel()
 
@@ -245,6 +249,28 @@ class WorkerController:
                     svc = MemoryConsolidatorService()
                     await svc.expire_temporary_memories(db)
                     await db.commit()
+            except Exception as exc:
+                logger.warning(f"Memory consolidation tick error: {exc}")
+
+    async def _provider_health_worker_loop(self) -> None:
+        """P3-Model-Failover: 每 300 秒轻量健康检查 + half_open 恢复."""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=300.0)
+                return  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                from app.services.provider_health import ProviderHealthService
+                from app.services.model_circuit_breaker import CircuitBreakerService
+                async with session_scope() as db:
+                    await ProviderHealthService().check_all_enabled(db, lightweight=True)
+                    # 检查 half_open 恢复
+                    await CircuitBreakerService().check_half_open(db)
+            except Exception as exc:
+                logger.warning(f"Provider health tick error: {exc}")
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning(f"Memory consolidation tick error: {exc}")

@@ -1178,3 +1178,57 @@ export const createChangeRequest = (body: { memory_id: number; request_type: str
 
 export const reviewChangeRequest = (requestId: number, body: { status: string; review_note?: string }) =>
   api.post<ChangeRequestRead>(`/api/agent-memory/change-requests/${requestId}/review`, body);
+
+// ── P4-Model-Failover: 新增 API ────────────────────────
+
+export type ModelCandidateItem = {
+  provider_id: number;
+  provider_name: string;
+  model_name: string;
+  score: number;
+  health?: number | null;
+  success_rate?: number | null;
+  latency_ms?: number | null;
+  cost_score?: number | null;
+  risk: string[];
+};
+
+export type PreviewSelectionResponse = {
+  selected: ModelCandidateItem;
+  candidates: ModelCandidateItem[];
+};
+
+export type AutoConfigureResponse = {
+  updated: number;
+  skipped_manual: number;
+  failed: number;
+  items: { agent_role_key: string; selection_mode: string; provider: string | null; model: string | null; score: number | null; reason: string | null }[];
+};
+
+export const previewModelSelection = (roleId: number, body: {
+  selection_mode?: "auto" | "manual" | "manual_with_fallback";
+  auto_strategy?: string;
+  candidate_provider_ids?: number[];
+  agent_role_key?: string;
+}) =>
+  api.post<PreviewSelectionResponse>(`/api/agent-roles/${roleId}/model-binding/preview-selection`, body);
+
+export const autoConfigureAgents = (body: {
+  project_id?: number;
+  scope?: "all" | "auto_only";
+  strategy?: string;
+  overwrite_manual?: boolean;
+  include_disabled?: boolean;
+}) =>
+  api.post<AutoConfigureResponse>("/api/agent-roles/auto-configure", body);
+
+export const resetProviderCircuit = (providerId: number) =>
+  api.post<{ ok: boolean; provider_id: number; circuit_state: string; message: string | null }>(
+    `/api/models/providers/${providerId}/circuit/reset`, {},
+  );
+
+export const fullProviderHealth = (providerId: number) =>
+  api.post<{
+    provider_id: number; status: string; health_score: number; latency_ms: number | null;
+    models: { model: string; available: boolean; json_score: number | null; long_output_score: number | null; speed_score: number | null; recommended_roles: string[] }[];
+  }>(`/api/models/providers/${providerId}/health/full`, {});
