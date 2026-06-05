@@ -114,7 +114,35 @@ class PromptEngine:
             if mapping:
                 tpl = await db.get(PromptTemplate, mapping.prompt_template_id)
 
-        # Step 3: no mapping found — return None signal (caller falls back)
+        # Step 3: no mapping found — trigger PromptAutoBinder to create one,
+        # then retry. If binder fails or finds no template, return None (caller
+        # falls back to hardcoded legacy prompt).
+        if tpl is None:
+            try:
+                from app.services.prompt_auto_binder import get_prompt_auto_binder
+                import logging
+                _logger = logging.getLogger(__name__)
+                genre_for_binder = project_genre or ""
+                binder_result = await get_prompt_auto_binder().auto_fill_for_agent_genre(
+                    db, agent_role_key, genre_for_binder,
+                )
+                if binder_result.get("action") in ("created", "updated"):
+                    # 绑定成功, 重新查找
+                    new_tpl_id = binder_result.get("selected_template_id")
+                    if new_tpl_id:
+                        tpl = await db.get(PromptTemplate, new_tpl_id)
+                        _logger.info(
+                            "PromptAutoBinder auto-bound template %s for (%s, %s)",
+                            binder_result.get("selected_template_key"),
+                            agent_role_key, genre_for_binder,
+                        )
+            except Exception as _binder_exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "PromptAutoBinder failed for (%s, %s): %s",
+                    agent_role_key, project_genre, _binder_exc,
+                )
+
         if tpl is None:
             return None  # type: ignore[return-value]
 

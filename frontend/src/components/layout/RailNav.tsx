@@ -33,6 +33,8 @@ const LEARN_ITEMS: Item[] = [
   { to: "/prompts",    label: "Prompt",   icon: "✎" },
   { to: "/prompts-matrix", label: "Prompt矩阵", icon: "▦" },
   { to: "/models",     label: "模型",     icon: "◈" },
+  { to: "/model-observability", label: "可观测性", icon: "◉" },
+  { to: "/audit-logs", label: "审计日志", icon: "⚲" },
   { to: "/study",      label: "拆书",     icon: "☷" },
   { to: "/behavior",   label: "行为模式", icon: "✺" },
   { to: "/graph",      label: "图谱",     icon: "◉" },
@@ -40,6 +42,9 @@ const LEARN_ITEMS: Item[] = [
   { to: "/memory",     label: "记忆库",   icon: "❖" },
   // P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7)
   { to: "/reviews",    label: "评论评审", icon: "✦" },
+  // NF2: 读者Agent + 审计
+  { to: "/reader-agents", label: "读者", icon: "📖" },
+  { to: "/audit",      label: "审计",   icon: "🔍" },
 ];
 
 export function RailNav() {

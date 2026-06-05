@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -46,6 +46,15 @@ class GenrePromptMapping(Base):
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)   # higher = preferred
     sort_order: Mapped[int] = mapped_column(Integer, default=0)  # UI drag order
+    # ── P11 (NF2 阶段 1): PromptAutoBinder 自动填充字段 ──
+    source: Mapped[str] = mapped_column(String(30), default="manual", index=True)
+    # manual / auto / system_seed
+    confidence_score: Mapped[float | None] = mapped_column(Float, default=None)
+    auto_bind_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    locked_by_user: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    auto_fill_batch_id: Mapped[str | None] = mapped_column(String(80), default=None, index=True)
+    last_effect_score: Mapped[float | None] = mapped_column(Float, default=None)
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

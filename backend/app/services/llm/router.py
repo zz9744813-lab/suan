@@ -246,7 +246,11 @@ class LLMRouter:
         recorder: Any = None,
         primary_failure_type: str | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult] | None:
-        """尝试 fallback 到下一个候选模型."""
+        """尝试 fallback 到候选列表中的下一个可用模型.
+
+        P0-Model-Failover fix: 不再只试一次, 而是循环遍历候选列表
+        (最多 MAX_FALLBACK_ATTEMPTS 次), 跳过已失败的 provider/model 组合.
+        """
         from app.services.model_selector import get_model_selector
 
         try:
@@ -257,67 +261,126 @@ class LLMRouter:
         except Exception:
             return None
 
-        # 跳过跟主模型相同的 provider+model
-        # (已在 ModelSelector 的 candidate 评分中降权)
+        # 收集主模型的 provider_id + model_name (在调用方已失败, 排除之)
+        # candidates 列表已按分数降序排列, 过滤掉主模型取前 MAX_FALLBACK_ATTEMPTS 个
+        primary_provider_id = selected.provider.id
+        primary_model_name = selected.model_name
 
-        fallback_resolved = ResolvedCall(
-            provider=selected.provider,
-            model=selected.model_name,
-            temperature=selected.temperature,
-            max_tokens=selected.max_tokens,
-            extra_body=selected.extra_body,
-            selection_mode="manual_with_fallback",
-            selection_score=selected.selection_score,
-            selection_reason=f"fallback: {selected.selection_reason}",
-        )
+        # 从候选列表取 fallback 序列
+        # (排除主模型自身, 保留其余最多 MAX_FALLBACK_ATTEMPTS 个)
+        fallback_candidates = [
+            c for c in selected.candidates
+            if not (c.provider_id == primary_provider_id and c.model_name == primary_model_name)
+        ][:MAX_FALLBACK_ATTEMPTS]
 
-        request = LLMRequest(
-            model=fallback_resolved.model,
-            messages=messages,
-            temperature=temperature if temperature is not None else fallback_resolved.temperature,
-            max_tokens=max_tokens if max_tokens is not None else fallback_resolved.max_tokens,
-            response_format=response_format,
-            extra=extra or {},
-            stream=stream,
-        )
-
-        # 记录 fallback 选择
-        if recorder:
-            event = await recorder.record_selection(
-                db,
-                provider_id=fallback_resolved.provider.id,
-                model_name=fallback_resolved.model,
-                agent_role_key=agent_key,
-                selection_mode="manual_with_fallback",
-                selection_score=fallback_resolved.selection_score,
-                selection_reason=f"fallback (主模型{primary_failure_type})",
-            )
-
-        try:
-            result = await self.client.chat(
-                base_url=fallback_resolved.provider.base_url,
-                api_key=fallback_resolved.provider.api_key,
-                request=request,
-                provider_extra=fallback_resolved.provider.extra or {},
-            )
-            if recorder and event:
-                await recorder.record_fallback_success(
-                    db, event,
-                    latency_ms=result.duration_ms,
-                    input_tokens=result.input_tokens,
-                    output_tokens=result.output_tokens,
-                    cost_usd=result.cost_usd,
+        # 如果候选列表仅有一个模型 (就是主模型), 就没有可用 fallback
+        if not fallback_candidates:
+            # 仍然把 selected 自身作为第一个候选尝试
+            # (选择器可能已挑了不同于主模型的最优候选)
+            from app.services.model_selector import ModelCandidate as MC
+            fallback_candidates = [
+                MC(
+                    provider_id=selected.provider.id,
+                    provider_name=selected.provider.name,
+                    base_url=selected.provider.base_url,
+                    api_key=selected.provider.api_key,
+                    model_name=selected.model_name,
+                    score=selected.selection_score,
+                    reason=selected.selection_reason,
                 )
-            logger.info(
-                f"fallback 成功: {fallback_resolved.provider.name}/{fallback_resolved.model}"
+            ]
+
+        # 已失败的 (provider_id, model) 集合, 避免重试
+        failed_set: set[tuple[int, str]] = set()
+
+        for attempt_no, cand in enumerate(fallback_candidates, start=1):
+            if (cand.provider_id, cand.model_name) in failed_set:
+                continue
+
+            # 实时加载 provider (候选里只有 id, 需要 ORM 对象)
+            from app.models.model_provider import ModelProvider as _MP
+            fb_provider = await db.get(_MP, cand.provider_id)
+            if fb_provider is None or not fb_provider.enabled:
+                logger.debug("fallback skip: provider %d not found/disabled", cand.provider_id)
+                continue
+
+            fallback_resolved = ResolvedCall(
+                provider=fb_provider,
+                model=cand.model_name,
+                temperature=cand.temperature or selected.temperature,
+                max_tokens=cand.max_tokens or selected.max_tokens,
+                extra_body=cand.extra_body or selected.extra_body,
+                selection_mode="manual_with_fallback",
+                selection_score=cand.score,
+                selection_reason=f"fallback#{attempt_no}: {cand.reason}",
             )
-            return fallback_resolved, result
-        except Exception as exc2:
-            if recorder and event:
-                failure_type2 = classify_llm_exception(exc2)
-                await recorder.record_failure(db, event, failure_type2, str(exc2)[:2000])
-            logger.warning(f"fallback 也失败: {exc2}")
-            return None
+
+            request = LLMRequest(
+                model=fallback_resolved.model,
+                messages=messages,
+                temperature=temperature if temperature is not None else fallback_resolved.temperature,
+                max_tokens=max_tokens if max_tokens is not None else fallback_resolved.max_tokens,
+                response_format=response_format,
+                extra=extra or {},
+                stream=stream,
+            )
+
+            # 记录 fallback 选择
+            event = None
+            if recorder:
+                event = await recorder.record_selection(
+                    db,
+                    provider_id=fallback_resolved.provider.id,
+                    model_name=fallback_resolved.model,
+                    agent_role_key=agent_key,
+                    selection_mode="manual_with_fallback",
+                    selection_score=fallback_resolved.selection_score,
+                    selection_reason=f"fallback#{attempt_no} (主模型{primary_failure_type})",
+                )
+
+            try:
+                result = await self.client.chat(
+                    base_url=fallback_resolved.provider.base_url,
+                    api_key=fallback_resolved.provider.api_key,
+                    request=request,
+                    provider_extra=fallback_resolved.provider.extra or {},
+                )
+                if recorder and event:
+                    await recorder.record_fallback_success(
+                        db, event,
+                        latency_ms=result.duration_ms,
+                        input_tokens=result.input_tokens,
+                        output_tokens=result.output_tokens,
+                        cost_usd=result.cost_usd,
+                    )
+                logger.info(
+                    "fallback#%d 成功: %s/%s",
+                    attempt_no, fallback_resolved.provider.name, fallback_resolved.model,
+                )
+                return fallback_resolved, result
+
+            except Exception as exc2:
+                failed_set.add((cand.provider_id, cand.model_name))
+                if recorder and event:
+                    failure_type2 = classify_llm_exception(exc2)
+                    await recorder.record_failure(db, event, failure_type2, str(exc2)[:2000])
+                # 更新熔断记录
+                try:
+                    from app.services.model_circuit_breaker import CircuitBreakerService
+                    await CircuitBreakerService().record_failure(
+                        db, cand.provider_id, cand.model_name, agent_key,
+                        classify_llm_exception(exc2), str(exc2)[:2000],
+                    )
+                except Exception:
+                    pass
+                logger.warning(
+                    "fallback#%d 失败 (%s/%s): %s",
+                    attempt_no, fb_provider.name, cand.model_name, exc2,
+                )
+                # 继续下一个候选
+
+        logger.warning("所有 fallback 候选均已耗尽")
+        return None
 
 
 _router_singleton: LLMRouter | None = None

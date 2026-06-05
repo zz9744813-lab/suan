@@ -92,6 +92,11 @@ from app.models.agent_memory import (
 )
 from app.models.model_runtime import ModelRuntimeStat
 from app.models.model_call_event import ModelCallEvent
+from app.models.prompt_auto_fill import (
+    PromptAutoFillBatch,
+    PromptRecommendationLog,
+    PromptTemplatePerformance,
+)
 
 __all__ = [
     "Project",
@@ -177,4 +182,8 @@ __all__ = [
     # P0-Model-Failover: model runtime stats + call events
     "ModelRuntimeStat",
     "ModelCallEvent",
+    # NF2: Prompt auto-fill audit models
+    "PromptAutoFillBatch",
+    "PromptRecommendationLog",
+    "PromptTemplatePerformance",
 ]

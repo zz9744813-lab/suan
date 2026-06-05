@@ -16,7 +16,12 @@ import { AgentMemoryPage } from "./pages/AgentMemoryPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
 import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
+import { ReaderAgentsPage } from "./pages/ReaderAgentsPage";
+import { ReaderAgentDetailPage } from "./pages/ReaderAgentDetailPage";
+import { AutomationAuditPage } from "./pages/AutomationAuditPage";
 import { GenrePromptMatrixPage } from "./pages/GenrePromptMatrixPage";
+import ModelObservabilityPanel from "./components/models/ModelObservabilityPanel";
+import { AuditLogPage } from "./pages/AuditLogPage";
 import { NotFound } from "./pages/NotFound";
 import { useBackendHealth } from "./hooks/useBackendHealth";
 
@@ -98,6 +103,7 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/models" element={<ModelsPage />} />
+        <Route path="/model-observability" element={<ModelObservabilityPanel projectId={undefined} />} />
         {/* P0 (01 §6) 路由基础规范: /study/library 是 P2 拆书书架
          * (主入口, 查书/启动 DeepStudy/看知识网络).
          * 旧 /study 重新挂上旧版 StudyPage, 给书架上的"📤 上传 /
@@ -120,6 +126,12 @@ export default function App() {
         <Route path="/reviews" element={<ReviewCommentsPage />} />
         {/* P7: Genre-Prompt matrix with drag-drop */}
         <Route path="/prompts-matrix" element={<GenrePromptMatrixPage />} />
+        <Route path="/audit-logs" element={<AuditLogPage />} />
+        {/* NF2: 读者Agent编辑中心 */}
+        <Route path="/reader-agents" element={<ReaderAgentsPage />} />
+        <Route path="/reader-agents/:readerKey" element={<ReaderAgentDetailPage />} />
+        {/* NF2: 自动化审计 */}
+        <Route path="/audit" element={<AutomationAuditPage />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppShell>

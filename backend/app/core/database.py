@@ -152,6 +152,21 @@ async def init_db() -> None:
         ("model_providers", "daily_request_count", "INTEGER DEFAULT 0"),
         ("model_providers", "daily_token_count", "INTEGER DEFAULT 0"),
         ("model_providers", "last_reset_date", "VARCHAR(10)"),
+        # P11 (NF2 阶段 1): GenrePromptMapping 扩展字段 — PromptAutoBinder 用
+        ("genre_prompt_mappings", "source", "VARCHAR(30) DEFAULT 'manual'"),
+        ("genre_prompt_mappings", "confidence_score", "FLOAT"),
+        ("genre_prompt_mappings", "auto_bind_reason", "TEXT"),
+        ("genre_prompt_mappings", "locked_by_user", "BOOLEAN DEFAULT 0"),
+        ("genre_prompt_mappings", "auto_fill_batch_id", "VARCHAR(80)"),
+        ("genre_prompt_mappings", "last_effect_score", "FLOAT"),
+        ("genre_prompt_mappings", "last_used_at", "DATETIME"),
+        # S5-T2: AgentTask 延迟重试字段
+        ("agent_tasks", "not_before_at", "DATETIME"),
+        # S5-T2: AgentTask 重试 + 回退摘要字段
+        ("agent_tasks", "retry_count", "INTEGER DEFAULT 0"),
+        ("agent_tasks", "max_retries", "INTEGER DEFAULT 3"),
+        ("agent_tasks", "last_failure_type", "VARCHAR(80)"),
+        ("agent_tasks", "last_fallback_summary", "JSON"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

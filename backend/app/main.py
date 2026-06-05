@@ -15,6 +15,7 @@ from app.core.events import Event, event_bus
 from app.routers import (
     agent_memory,
     agent_roles,
+    audit,
     behavior,
     behavior_card,
     chapters,
@@ -26,9 +27,11 @@ from app.routers import (
     genre_prompts,
     graph,
     memory,
+    model_observability,
     models,
     project_memory,
     projects,
+    prompt_matrix,
     prompts,
     reviews,
     search,
@@ -109,7 +112,10 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           discussion.router, search.router, deepstudy.router,
           project_memory.router, agent_roles.router, agent_roles.agent_runs_router,
           reviews.router, genre_prompts.router,
+          prompt_matrix.router,
           behavior_card.router, behavior_card.cat_router,
           discussion_trace.router,
-          agent_memory.router, agent_memory.change_router):
+          agent_memory.router, agent_memory.change_router,
+          model_observability.router,
+          audit.router):
     app.include_router(r, prefix=PREFIX)

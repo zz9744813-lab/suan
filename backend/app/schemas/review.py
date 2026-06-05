@@ -262,3 +262,40 @@ class ReaderAgentProfileRead(BaseModel):
     last_used_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+# ============================================================
+# Agent 自动创建评论 (评论自动流 S5-T1)
+# ============================================================
+class AgentAutoCreateRequest(BaseModel):
+    """Agent 任务完成后自动将输出写入评论区.
+
+    - agent_task_id:  触发该评论的 AgentTask.id
+    - agent_key:       agent role key (e.g. "critic", "reader_hook")
+    - content:         agent 生成的评论内容
+    - severity:        严重程度 (agent 输出中解析, 可选)
+    - tags:           标签列表 (可选)
+    """
+    agent_task_id: int = Field(..., ge=1, description="触发该评论的 AgentTask.id")
+    project_id: int = Field(..., ge=1)
+    chapter_id: int | None = None
+    chapter_version_id: int | None = None
+    content: str = Field(..., min_length=1, max_length=10000)
+    agent_key: str = Field(
+        ..., min_length=1, max_length=50,
+        description="agent role key, e.g. 'critic', 'reader_hook'",
+    )
+    severity: CommentSeverity | None = None
+    tags: list[str] = Field(default_factory=list)
+    priority: int = Field(50, ge=0, le=100)
+
+
+class AgentAutoCreateResponse(BaseModel):
+    """auto-create 的返回: 创建的评论 + 触发的 triage_run_id (如有)."""
+    comment: ReviewCommentRead
+    triage_enqueued: bool = Field(
+        ..., description="是否已入队 comment_triage 任务",
+    )
+    triage_run_id: int | None = Field(
+        None, description="若同步触发了 triage, 返回 run_id",
+    )

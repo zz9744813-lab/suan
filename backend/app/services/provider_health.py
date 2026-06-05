@@ -109,10 +109,21 @@ class ProviderHealthService:
         )
         provider.last_health_at = datetime.utcnow()
         provider.last_health_latency_ms = latency
+        # 统一 last_health_full 格式: 与 routers/models.py health_check_provider 保持一致.
+        # 轻量探针不运行全部 4 项测试, 但保留相同的顶层 key, 便于前端统一读取.
+        # 注意: 如果 UI 探针(手动触发的 4 步探针)刚跑过并写入了详细 results,
+        # 我们这里的轻量探针 **不覆盖** last_health_full, 只更新其中的 "auto_probe" 段.
+        existing_full = provider.last_health_full or {}
         provider.last_health_full = {
-            "scores": scores,
-            "details": details,
-            "checked_at": datetime.utcnow().isoformat(),
+            **existing_full,
+            "auto_probe": {
+                "scores": scores,
+                "details": details,
+                "checked_at": datetime.utcnow().isoformat(),
+                "lightweight": lightweight,
+            },
+            # 保留 UI 探针写入的 results / recommended_roles / score 段
+            "score": existing_full.get("score", round(health_score, 3)),
         }
 
         logger.info(f"Provider {provider.name} health={health_score:.2f}")

@@ -1232,3 +1232,81 @@ export const fullProviderHealth = (providerId: number) =>
     provider_id: number; status: string; health_score: number; latency_ms: number | null;
     models: { model: string; available: boolean; json_score: number | null; long_output_score: number | null; speed_score: number | null; recommended_roles: string[] }[];
   }>(`/api/models/providers/${providerId}/health/full`, {});
+
+// ----- model observability (S3) -----
+export const getObservabilitySummary = () =>
+  api.get<any>("/api/model-observability/summary");
+export const getObservabilityEvents = (params?: { provider_id?: number; model_name?: string; limit?: number }) =>
+  api.get<any>(`/api/model-observability/events?${new URLSearchParams(params as Record<string, string>)}`);
+export const getObservabilityProviders = () =>
+  api.get<any[]>("/api/model-observability/providers");
+export const getRuntimeStats = (providerId: number, modelName: string) =>
+  api.get<any>(`/api/model-observability/runtime-stats/${providerId}/${encodeURIComponent(modelName)}`);
+
+// ----- audit logs (S5-T2) -----
+export const listAuditLogs = (params?: { project_id?: number; event_type?: string; limit?: number; offset?: number }) =>
+  api.get<any>(`/api/audit/logs?${new URLSearchParams(params as Record<string, string>)}`);
+
+// ── Prompt Matrix Auto-Fill (NF2 阶段1) ──
+export const previewPromptAutoFill = (body: { project_id?: number; scope?: string; strategy?: string; genres?: string[]; agent_role_keys?: string[] }) =>
+  api.post<any>("/api/prompts/matrix/auto-fill/preview", body);
+
+export const applyPromptAutoFill = (body: { batch_key: string; apply_confidence?: string[]; overwrite_locked?: boolean }) =>
+  api.post<any>("/api/prompts/matrix/auto-fill/apply", body);
+
+export const rollbackPromptAutoFill = (batchKey: string) =>
+  api.post<any>(`/api/prompts/matrix/auto-fill/${batchKey}/rollback`, {});
+
+export const getCellRecommendations = (agentRoleKey: string, genre: string) =>
+  api.get<any>(`/api/prompts/matrix/cells/${agentRoleKey}/${encodeURIComponent(genre)}/recommendations`);
+
+export const lockPromptCell = (agentRoleKey: string, genre: string) =>
+  api.put<any>(`/api/prompts/matrix/cells/${agentRoleKey}/${encodeURIComponent(genre)}/lock`, {});
+
+export const unlockPromptCell = (agentRoleKey: string, genre: string) =>
+  api.put<any>(`/api/prompts/matrix/cells/${agentRoleKey}/${encodeURIComponent(genre)}/unlock`, {});
+
+export const getPromptMatrixCoverage = (projectId?: number) =>
+  api.get<any>(`/api/prompts/matrix/coverage${projectId ? `?project_id=${projectId}` : ""}`);
+
+export const getTemplatePerformance = (templateId: number) =>
+  api.get<any>(`/api/prompts/templates/${templateId}/performance`);
+
+// ── Reader Agents (NF2 阶段3) ──
+export const listReaderAgents = () =>
+  api.get<any[]>("/api/reviews/readers");
+
+export const getReaderAgent = (readerKey: string) =>
+  api.get<any>(`/api/reviews/readers/${readerKey}`);
+
+export const updateReaderAgent = (readerKey: string, body: Record<string, any>) =>
+  api.patch<any>(`/api/reviews/readers/${readerKey}`, body);
+
+export const getReaderComments = (readerKey: string, limit?: number) =>
+  api.get<any[]>(`/api/reviews/readers/${readerKey}/comments${limit ? `?limit=${limit}` : ""}`);
+
+export const getReaderStats = (readerKey: string) =>
+  api.get<any>(`/api/reviews/readers/${readerKey}/stats`);
+
+// ── Review Auto-Flow (NF2 阶段4) ──
+export const getAutoFlowStatus = (projectId: number, chapterId?: number) => {
+  const q = chapterId ? `?chapter_id=${chapterId}` : "";
+  return api.get<any>(`/api/reviews/projects/${projectId}/auto-flow${q}`);
+};
+
+// ── Audit Events (NF2 阶段6) ──
+export const getAuditStatsByEvent = (params?: { project_id?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.project_id) q.set("project_id", String(params.project_id));
+  return api.get<any>(`/api/audit/stats/by-event?${q.toString()}`);
+};
+
+// ----- Model Call Events (P0 Phase 8) -----
+export const listModelCallEvents = (params?: { agent_role_key?: string; provider_id?: number; task_id?: number; limit?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.agent_role_key) q.set("agent_role_key", params.agent_role_key);
+  if (params?.provider_id != null) q.set("provider_id", String(params.provider_id));
+  if (params?.task_id != null) q.set("task_id", String(params.task_id));
+  if (params?.limit != null) q.set("limit", String(params.limit));
+  return api.get<any[]>(`/api/model-observability/events?${q.toString()}`);
+};

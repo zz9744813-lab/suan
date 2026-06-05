@@ -18,12 +18,30 @@ import type {
 } from "../types";
 import "./GenrePromptMatrixPage.css";
 
-const GENRE_LIST = ["玄幻", "都市", "科幻", "历史", "悬疑", "言情"];
-const AGENT_ROWS = ["planner", "drafter", "critic", "rewriter", "continuity", "memory_update"];
+// NF2 fix: 不再硬编码 Agent 行和 Genre 列，从后端 matrix API 获取
+// 如果后端返回为空则使用默认值
+const FALLBACK_GENRE_LIST = ["玄幻", "都市", "科幻", "历史", "悬疑", "言情"];
+const FALLBACK_AGENT_ROWS = [
+  "planner", "drafter", "critic", "rewriter", "continuity", "memory_update",
+  "reader_hook", "reader_emotion", "reader_logic", "reader_commercial", "reader_toxic",
+  "chief_comment_moderator", "discussion", "learner", "study",
+];
 const AGENT_LABELS: Record<string, string> = {
   planner: "Planner", drafter: "Drafter", critic: "Critic",
   rewriter: "Rewriter", continuity: "Continuity", memory_update: "Memory",
+  reader_hook: "Reader·钩子", reader_emotion: "Reader·情绪",
+  reader_logic: "Reader·逻辑", reader_commercial: "Reader·商业",
+  reader_toxic: "Reader·毒点", chief_comment_moderator: "Chief·评论接入官",
+  discussion: "Discussion", learner: "Learner", study: "Study",
 };
+// Agent 分组 (NF2 §9.3)
+const AGENT_SECTIONS = [
+  { key: "writing", label: "写作 Agent", agents: ["planner", "drafter", "critic", "rewriter", "continuity"] },
+  { key: "reader", label: "读者评审 Agent", agents: ["reader_hook", "reader_emotion", "reader_logic", "reader_commercial", "reader_toxic"] },
+  { key: "chief", label: "主 Agent / 讨论", agents: ["chief_comment_moderator", "discussion"] },
+  { key: "memory", label: "记忆 Agent", agents: ["memory_update"] },
+  { key: "study", label: "拆书 Agent", agents: ["learner", "study"] },
+];
 
 export function GenrePromptMatrixPage() {
   const [matrix, setMatrix] = useState<GenrePromptMatrixResponse | null>(null);
@@ -71,7 +89,9 @@ export function GenrePromptMatrixPage() {
   const getCell = (agentKey: string, genre: string): MatrixCell | undefined =>
     matrix?.cells.find((c) => c.agent_role_key === agentKey && c.genre === genre);
 
-  const genresToShow = filter === "全部" ? GENRE_LIST : [filter];
+  const genreList = matrix?.genres?.length ? matrix.genres : FALLBACK_GENRE_LIST;
+  const agentRows = matrix?.agent_role_keys?.length ? matrix.agent_role_keys : FALLBACK_AGENT_ROWS;
+  const genresToShow = filter === "全部" ? genreList : [filter];
 
   const onDragStart = (e: DragStartEvent) => {
     const tpl = templates.find((t) => t.id === Number(e.active.id));
@@ -143,59 +163,68 @@ export function GenrePromptMatrixPage() {
           <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>拖拽模板到单元格绑定，双击空白格选择模板，右键解绑</p>
         </div>
 
-        {/* Genre filter tabs */}
+        {/* Genre filter tabs — 使用后端返回的 genre 列表 */}
         <div className="gpm-genre-tabs">
-          {["全部", ...GENRE_LIST].map((g) => (
+          {["全部", ...genreList].map((g) => (
             <button key={g} className={`gpm-genre-tab ${filter === g ? "active" : ""}`}
               onClick={() => setFilter(g)}>{g}</button>
           ))}
         </div>
 
         <div className="gpm-content">
-          {/* Matrix */}
+          {/* Matrix — 按 Section 分组渲染 (NF2 §9.3) */}
           <div className="gpm-matrix-wrap">
-            <table className="gpm-matrix">
-              <thead>
-                <tr>
-                  <th>角色 \ 类型</th>
-                  {genresToShow.map((g) => <th key={g}>{g}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {AGENT_ROWS.map((ak) => (
-                  <tr key={ak}>
-                    <th>{AGENT_LABELS[ak] || ak}</th>
-                    {genresToShow.map((g) => {
-                      const cell = getCell(ak, g);
-                      const state = cell?.state || "empty";
-                      return (
-                        <td key={`${ak}:${g}`}>
-                          <div
-                            id={`${ak}:${g}`}
-                            className={`gpm-cell ${state}`}
-                            onDoubleClick={(e) => handleDoubleClick(ak, g, e)}
-                            onContextMenu={(e) => {
-                              e.preventDefault();
-                              if (cell?.prompt_template_id) setCtxMenu({ x: e.clientX, y: e.clientY, cell });
-                            }}
-                          >
-                            {cell?.template_name ? (
-                              <>
-                                <span className="gpm-cell-name">{cell.template_name}</span>
-                              </>
-                            ) : state === "fallback" ? (
-                              <span className="gpm-cell-placeholder">继承通用</span>
-                            ) : (
-                              <span className="gpm-cell-placeholder">---</span>
-                            )}
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {AGENT_SECTIONS.map((section) => {
+              const sectionAgents = agentRows.filter((ak: string) => section.agents.includes(ak));
+              if (sectionAgents.length === 0) return null;
+              return (
+                <div key={section.key} style={{ marginBottom: 16 }}>
+                  <div className="muted small" style={{ padding: "6px 8px", fontWeight: 600, borderBottom: "1px solid var(--line)" }}>
+                    {section.label}
+                  </div>
+                  <table className="gpm-matrix">
+                    <thead>
+                      <tr>
+                        <th>角色 \ 类型</th>
+                        {genresToShow.map((g: string) => <th key={g}>{g}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sectionAgents.map((ak: string) => (
+                        <tr key={ak}>
+                          <th>{AGENT_LABELS[ak] || ak}</th>
+                          {genresToShow.map((g: string) => {
+                            const cell = getCell(ak, g);
+                            const state = cell?.state || "empty";
+                            return (
+                              <td key={`${ak}:${g}`}>
+                                <div
+                                  id={`${ak}:${g}`}
+                                  className={`gpm-cell ${state}`}
+                                  onDoubleClick={(e) => handleDoubleClick(ak, g, e)}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    if (cell?.prompt_template_id) setCtxMenu({ x: e.clientX, y: e.clientY, cell });
+                                  }}
+                                >
+                                  {cell?.template_name ? (
+                                    <span className="gpm-cell-name">{cell.template_name}</span>
+                                  ) : state === "fallback" ? (
+                                    <span className="gpm-cell-placeholder">继承通用</span>
+                                  ) : (
+                                    <span className="gpm-cell-placeholder">---</span>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
           </div>
 
           {/* Template pool */}
@@ -287,7 +316,7 @@ export function GenrePromptMatrixPage() {
                 </div>
                 <div><label>类型</label>
                   <select value={newTpl.genre} onChange={(e) => setNewTpl({ ...newTpl, genre: e.target.value })}>
-                    <option value="">通用</option>{GENRE_LIST.map((g) => <option key={g} value={g}>{g}</option>)}
+                    <option value="">通用</option>{genreList.map((g: string) => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
               </div>

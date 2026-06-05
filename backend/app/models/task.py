@@ -40,6 +40,8 @@ class AgentTask(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    # 延迟重试: 若该字段非 None 且 > now(), Worker 不拾取该任务
+    not_before_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 

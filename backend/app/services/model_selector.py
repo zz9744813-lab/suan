@@ -422,14 +422,46 @@ class ModelSelectorService:
             ):
                 fp = await db.get(ModelProvider, pid)
                 if fp and fp.enabled:
+                    # 计算真实评分，而非固定 0.1
+                    # fallback 候选本质上是"主候选之外的保险"，其分数上限比主候选
+                    # 低一档（乘以 0.75 衰减系数），确保正常候选优先被选中。
+                    fb_hlth = provider_health_score(fp)
+                    fb_stat = (await db.execute(
+                        select(ModelRuntimeStat).where(
+                            and_(
+                                ModelRuntimeStat.provider_id == fp.id,
+                                ModelRuntimeStat.model_name == mname,
+                                ModelRuntimeStat.agent_role_key == role_key,
+                                ModelRuntimeStat.window == "rolling_24h",
+                            )
+                        )
+                    )).scalar_one_or_none()
+                    fb_succ = _clamp(fb_stat.success_calls / max(fb_stat.total_calls, 1)) if fb_stat else 0.7
+                    fb_lat = latency_score(fb_stat.avg_latency_ms if fb_stat else fp.avg_latency_ms)
+                    fb_cst = cost_score(mname)
+                    fb_jsn = json_stability_score(fb_stat)
+                    fb_score = _clamp(
+                        (
+                            fb_hlth * weights.get("health", 0.25)
+                            + fb_succ * weights.get("success", 0.18)
+                            + fb_lat * weights.get("latency", 0.10)
+                            + fb_cst * weights.get("cost", 0.08)
+                            + fb_jsn * weights.get("json", 0.06)
+                        ) * 0.75,  # fallback 衰减系数，保证低于主候选
+                        0.05, 0.65,
+                    )
                     candidates.append(ModelCandidate(
                         provider_id=fp.id,
                         provider_name=fp.name,
                         base_url=fp.base_url,
                         api_key=fp.api_key,
                         model_name=mname,
-                        score=0.1,  # fallback 低分
-                        reason="fallback候选",
+                        score=fb_score,
+                        reason=f"fallback候选(健康:{fb_hlth:.0%} 成功:{fb_succ:.0%})",
+                        health=fb_hlth,
+                        success_rate=fb_succ,
+                        latency_ms=fb_stat.avg_latency_ms if fb_stat else fp.avg_latency_ms,
+                        cost_score=fb_cst,
                     ))
 
         # 按分数降序排列

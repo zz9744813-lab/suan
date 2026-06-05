@@ -648,36 +648,51 @@ class LLMClient:
         Extracted so the streaming branch can call it without
         duplicating the system-reminder + ``reasoning_effort``
         auto-inject logic. See :meth:`_do_chat` for the full story.
+
+        JSON 系统提示 **仅在** payload 明确要求 JSON 输出时注入:
+        - ``response_format.type == "json_object"`` 或
+        - ``provider_extra.require_json == True``
+
+        其他 agent (Drafter/Rewriter/Critic 等) 生成纯文本，不应被 JSON
+        格式化指令污染。
         """
-        messages = payload.get("messages") or []
-        has_system = any(m.get("role") == "system" for m in messages)
-        strict_system = (
-            "你是文本生成助手。严格遵守以下规则：\n"
-            "1. 直接给出最终答案，不要输出思考过程、推理步骤或自问自答。\n"
-            "2. 如果任务要求返回 JSON，你必须只输出一个合法 JSON 对象，"
-            "   以 { 开头、} 结尾，不要任何前缀文字、解释、Markdown 标记、"
-            "   ```json 围栏、注释或后置说明。\n"
-            "3. 任何不在 JSON 内的文字都会导致任务失败。"
+        # ── 判断是否需要 JSON 输出 ──────────────────────────────────────
+        rf = payload.get("response_format") or {}
+        need_json = (
+            rf.get("type") == "json_object"
+            or bool((provider_extra or {}).get("require_json"))
         )
-        if not has_system:
-            messages = [{"role": "system", "content": strict_system}] + messages
-        else:
-            messages = [
-                {
-                    "role": "system",
-                    "content": strict_system
-                    + "\n\n（以上规则优先于用户消息中的格式说明）",
-                }
-            ] + messages
-        if messages and messages[-1].get("role") == "user":
-            tail = messages[-1]
-            extra = (
-                "\n\n[系统提醒] 只输出一个 JSON 对象，"
-                "以 { 开头、} 结尾，不要任何其他文字。"
+
+        if need_json:
+            messages = payload.get("messages") or []
+            has_system = any(m.get("role") == "system" for m in messages)
+            strict_system = (
+                "你是文本生成助手。严格遵守以下规则：\n"
+                "1. 直接给出最终答案，不要输出思考过程、推理步骤或自问自答。\n"
+                "2. 你必须只输出一个合法 JSON 对象，"
+                "   以 { 开头、} 结尾，不要任何前缀文字、解释、Markdown 标记、"
+                "   ```json 围栏、注释或后置说明。\n"
+                "3. 任何不在 JSON 内的文字都会导致任务失败。"
             )
-            tail = {**tail, "content": (tail.get("content") or "") + extra}
-            messages = messages[:-1] + [tail]
-        payload = {**payload, "messages": messages}
+            if not has_system:
+                messages = [{"role": "system", "content": strict_system}] + messages
+            else:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": strict_system
+                        + "\n\n（以上规则优先于用户消息中的格式说明）",
+                    }
+                ] + messages
+            if messages and messages[-1].get("role") == "user":
+                tail = messages[-1]
+                extra = (
+                    "\n\n[系统提醒] 只输出一个 JSON 对象，"
+                    "以 { 开头、} 结尾，不要任何其他文字。"
+                )
+                tail = {**tail, "content": (tail.get("content") or "") + extra}
+                messages = messages[:-1] + [tail]
+            payload = {**payload, "messages": messages}
         pe = provider_extra or {}
         if pe.get("inject_reasoning_effort"):
             payload.setdefault(

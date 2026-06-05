@@ -293,12 +293,15 @@ class WorkerController:
             # were never enforced. Now we resolve policy against the
             # task's own project_id.
             # P6 §5.1: 改用 SUPPORTED_TASKS in_(...) 派发
+            # BUG-3 fix: 排除尚未到重试时间的任务 (not_before_at > now)
+            _now = datetime.utcnow()
             task_row = (
                 await db.execute(
                     select(AgentTask)
                     .where(
                         AgentTask.status == "pending",
                         AgentTask.task_type.in_(SUPPORTED_TASKS),
+                        (AgentTask.not_before_at == None) | (AgentTask.not_before_at <= _now),  # noqa: E711
                     )
                     .order_by(AgentTask.priority.desc(), AgentTask.id.asc())
                     .limit(1)
@@ -589,7 +592,8 @@ class WorkerController:
                 if policy is None:
                     policy = await self._ensure_default_policy(db, task_row.project_id)
                 # Inject discussion instruction into task if present
-                instruction = task_row.instruction or ""
+                payload = task_row.payload or {}
+                instruction = payload.get("rewrite_instruction", "")
                 result = await asyncio.wait_for(
                     pipeline.run(db, task=task, chapter=chapter, policy=policy),
                     timeout=1800,
@@ -775,8 +779,31 @@ class WorkerController:
     async def _mark_task_failed(self, task_id: int, error: str) -> None:
         async with session_scope() as db:
             t = await db.get(AgentTask, task_id)
-            t.status = "failed"
+            if t is None:
+                return
+            t.retry_count = (t.retry_count or 0) + 1
             t.error = error
+
+            # BUG-3 fix: 当 retry_count < max_retries 时,
+            # 将任务重置为 pending 并设置指数退避延迟, 而非直接标 failed.
+            # 退避: 2^(retry-1) * 30s = 30s / 60s / 120s / ...
+            if t.retry_count < (t.max_retries or 3):
+                from datetime import timedelta
+                delay_s = min(30 * (2 ** (t.retry_count - 1)), 300)  # 最大 5min
+                t.status = "pending"
+                t.not_before_at = datetime.utcnow() + timedelta(seconds=delay_s)
+                t.started_at = None
+                logger.info(
+                    "Task %d failed (attempt %d/%d), retry in %ds: %s",
+                    task_id, t.retry_count, t.max_retries, delay_s, error[:120],
+                )
+                ws2 = await self._get_or_create_status(db)
+                ws2.current_task_id = None
+                # 重试不算作 consecutive_failures
+                return
+
+            # 耗尽重试次数, 最终失败
+            t.status = "failed"
             t.finished_at = datetime.utcnow()
             ws2 = await self._get_or_create_status(db)
             ws2.consecutive_failures += 1

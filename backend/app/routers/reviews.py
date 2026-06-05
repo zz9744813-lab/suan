@@ -32,6 +32,8 @@ from app.models.comment_review import (
 from app.models.project import Chapter, Project
 from app.schemas import APIResponse
 from app.schemas.review import (
+    AgentAutoCreateRequest,
+    AgentAutoCreateResponse,
     GroupDecisionRequest,
     GroupDiscussRequest,
     ReaderAgentProfileRead,
@@ -59,6 +61,7 @@ from app.services.review import (
     get_discussion_bridge,
     get_weight_service,
 )
+from app.services.audit_service import log_review_action
 
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
@@ -406,6 +409,14 @@ async def reply_to_comment(
         parent.status = "replied"
     await db.commit()
     await db.refresh(reply)
+    # ── 审计 ─────────────────────────────────────────────
+    await log_review_action(
+        db,
+        actor_type="agent", actor_key="chief_agent",
+        project_id=parent.project_id,
+        chapter_id=parent.chapter_id,
+        comment_id=comment_id, action="reply", decision=None,
+    )
     return {"ok": True, "data": ReviewCommentRead.model_validate(reply)}
 
 
@@ -429,6 +440,17 @@ async def update_comment(
         setattr(c, k, v)
     await db.commit()
     await db.refresh(c)
+    # ── 审计 ──────────────────────────────────────────
+    await log_review_action(
+        db,
+        actor_type="agent" if c.agent_role_id else "user",
+        actor_key=None,
+        project_id=c.project_id,
+        chapter_id=c.chapter_id,
+        comment_id=comment_id,
+        action=f"update:{','.join(data.keys())}",
+        decision=None,
+    )
     return {"ok": True, "data": ReviewCommentRead.model_validate(c)}
 
 
@@ -900,4 +922,451 @@ async def cleanup_expired(
     return {
         "ok": True,
         "data": {"deleted": result.rowcount or 0},
+    }
+
+
+# ============================================================
+# §6.7 Agent 自动创建评论 (评论自动流 S5-T1)
+# ============================================================
+@router.post(
+    "/auto-create",
+    response_model=APIResponse[AgentAutoCreateResponse],
+    status_code=201,
+    summary="Agent 任务完成后自动将输出写入评论区",
+)
+async def auto_create_review(
+    body: AgentAutoCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[AgentAutoCreateResponse]:
+    """Agent 任务 (Critic / reader_* 等) 完成后, 自动将输出写入评论区.
+
+    逻辑:
+      1. 校验 project / chapter 存在
+      2. 按 agent_key 查找 AgentRole → agent_role_id + author_label
+      3. 判定 author_type (reader_* → "reader_agent", 其他 → "chief_agent")
+      4. 写 ReviewComment (status=new)
+      5. 自动入队 comment_triage (同 POST /comments)
+      6. 返回创建的评论
+    """
+    # 1. 校验 project
+    proj = await db.get(Project, body.project_id)
+    if proj is None:
+        raise not_found("Project", body.project_id)
+    # 2. 校验 chapter
+    if body.chapter_id is not None:
+        ch = await db.get(Chapter, body.chapter_id)
+        if ch is None:
+            raise not_found("Chapter", body.chapter_id)
+        if ch.project_id != body.project_id:
+            raise bad_request("Chapter does not belong to project")
+
+    # 3. 查找 AgentRole
+    role_row = (
+        await db.execute(
+            select(AgentRole).where(AgentRole.key == body.agent_key)
+        )
+    ).scalar_one_or_none()
+    agent_role_id = role_row.id if role_row else None
+    author_label = role_row.display_name if role_row else body.agent_key
+
+    # 4. 判定 author_type
+    if body.agent_key.startswith("reader_"):
+        author_type: AuthorType = "reader_agent"
+    else:
+        author_type = "chief_agent"
+
+    settings = await _get_or_create_settings(db, body.project_id)
+
+    # 5. 上限检查
+    if body.chapter_id is not None:
+        n = (await db.execute(
+            select(ReviewComment).where(
+                ReviewComment.chapter_id == body.chapter_id,
+            )
+        )).scalars().all()
+        if len(n) >= settings.max_comments_per_chapter:
+            raise bad_request(
+                f"Chapter reached max_comments_per_chapter "
+                f"({settings.max_comments_per_chapter})",
+            )
+
+    expires_at = _resolve_expiry_days(settings, None)
+
+    comment = ReviewComment(
+        project_id=body.project_id,
+        chapter_id=body.chapter_id,
+        chapter_version_id=body.chapter_version_id,
+        parent_id=None,
+        target_type="chapter",
+        author_type=author_type,
+        author_label=author_label,
+        agent_role_id=agent_role_id,
+        content=body.content,
+        evidence=None,
+        rating=None,
+        tags=body.tags or [],
+        weight_at_created=1.0,
+        status="new",
+        priority=body.priority,
+        expires_at=expires_at,
+    )
+    db.add(comment)
+    await db.flush()  # 拿到 comment.id
+
+    # 6. 自动入队 comment_triage (同 create_comment 逻辑)
+    triage_enqueued = False
+    triage_run_id: int | None = None
+    try:
+        from app.services.review import (
+            ENQUEUE_SOURCE_AUTO_COMMENT,
+            get_review_queue,
+        )
+        from app.core.database import session_scope
+        async with session_scope() as enq_db:
+            await get_review_queue().enqueue_triage(
+                enq_db,
+                project_id=comment.project_id,
+                chapter_id=comment.chapter_id,
+                source=ENQUEUE_SOURCE_AUTO_COMMENT,
+            )
+        triage_enqueued = True
+    except Exception as _exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "auto-create 评论 %s 入队 comment_triage 失败: %s",
+            comment.id, _exc,
+        )
+
+    await db.commit()
+    await db.refresh(comment)
+
+    return {
+        "ok": True,
+        "data": AgentAutoCreateResponse(
+            comment=ReviewCommentRead.model_validate(comment),
+            triage_enqueued=triage_enqueued,
+            triage_run_id=triage_run_id,
+        ),
+    }
+
+
+# ============================================================
+# §5 读者 Agent 编辑中心 API
+# ============================================================
+
+class ReaderAgentPatch(BaseModel):
+    """PATCH /reviews/readers/{reader_key} 的更新字段."""
+    display_name: str | None = Field(None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    weight: float | None = Field(None, ge=0.5, le=2.5)
+    dimension: str | None = Field(None, min_length=1, max_length=80)
+
+
+@router.get("/readers", response_model=APIResponse[list[ReaderAgentProfileRead]])
+async def list_reader_agents(
+    db: AsyncSession = Depends(get_db),
+):
+    """列出所有读者 Agent 配置."""
+    rows = (await db.execute(
+        select(ReaderAgentProfile).order_by(ReaderAgentProfile.id)
+    )).scalars().all()
+    return {
+        "ok": True,
+        "data": [ReaderAgentProfileRead.model_validate(r) for r in rows],
+    }
+
+
+@router.get(
+    "/readers/{reader_key}",
+    response_model=APIResponse[ReaderAgentProfileRead],
+)
+async def get_reader_agent(
+    reader_key: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取单个读者 Agent 配置."""
+    row = (await db.execute(
+        select(ReaderAgentProfile).where(
+            ReaderAgentProfile.reader_key == reader_key,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise not_found("ReaderAgentProfile", reader_key)
+    return {"ok": True, "data": ReaderAgentProfileRead.model_validate(row)}
+
+
+@router.patch(
+    "/readers/{reader_key}",
+    response_model=APIResponse[ReaderAgentProfileRead],
+)
+async def update_reader_agent(
+    reader_key: str,
+    body: ReaderAgentPatch,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新读者 Agent 配置 (display_name, enabled, weight, dimension 等)."""
+    row = (await db.execute(
+        select(ReaderAgentProfile).where(
+            ReaderAgentProfile.reader_key == reader_key,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise not_found("ReaderAgentProfile", reader_key)
+
+    data = body.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(row, k, v)
+    await db.flush()
+    return {"ok": True, "data": ReaderAgentProfileRead.model_validate(row)}
+
+
+@router.get(
+    "/readers/{reader_key}/comments",
+    response_model=APIResponse[list[dict]],
+)
+async def get_reader_comments(
+    reader_key: str,
+    limit: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取指定读者最近的评论."""
+    # 先找 reader_key 对应的 agent_role_id
+    profile = (await db.execute(
+        select(ReaderAgentProfile).where(
+            ReaderAgentProfile.reader_key == reader_key,
+        )
+    )).scalar_one_or_none()
+    if profile is None:
+        raise not_found("ReaderAgentProfile", reader_key)
+
+    comments = (await db.execute(
+        select(ReviewComment).where(
+            ReviewComment.agent_role_id == profile.agent_role_id,
+            ReviewComment.author_type == "reader_agent",
+        ).order_by(ReviewComment.created_at.desc()).limit(limit)
+    )).scalars().all()
+
+    return {
+        "ok": True,
+        "data": [
+            {
+                "id": c.id,
+                "project_id": c.project_id,
+                "chapter_id": c.chapter_id,
+                "content": c.content[:500],
+                "status": c.status,
+                "rating": c.rating,
+                "tags": c.tags,
+                "priority": c.priority,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in comments
+        ],
+    }
+
+
+@router.get(
+    "/readers/{reader_key}/stats",
+    response_model=APIResponse[dict],
+)
+async def get_reader_stats(
+    reader_key: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取指定读者的统计 (adopted/rejected/comment_count 等)."""
+    row = (await db.execute(
+        select(ReaderAgentProfile).where(
+            ReaderAgentProfile.reader_key == reader_key,
+        )
+    )).scalar_one_or_none()
+    if row is None:
+        raise not_found("ReaderAgentProfile", reader_key)
+
+    return {
+        "ok": True,
+        "data": {
+            "reader_key": row.reader_key,
+            "display_name": row.display_name,
+            "dimension": row.dimension,
+            "weight": row.weight,
+            "adopted_count": row.adopted_count,
+            "rejected_count": row.rejected_count,
+            "generated_comment_count": row.generated_comment_count,
+            "enabled": row.enabled,
+            "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+            "adoption_rate": round(
+                row.adopted_count / row.generated_comment_count, 4,
+            ) if row.generated_comment_count > 0 else 0.0,
+        },
+    }
+
+
+# ============================================================
+# §7 评审自动流程状态 API
+# ============================================================
+
+@router.get(
+    "/projects/{project_id}/auto-flow",
+    response_model=APIResponse[dict],
+)
+async def get_auto_flow_status(
+    project_id: int,
+    chapter_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """返回指定项目/章节的评审自动流程状态.
+
+    聚合 AgentTask, ReviewComment, ReviewCommentGroup, DiscussionSession 等表,
+    返回 { state, steps: [...], debug_actions: [...] }.
+    """
+    from app.models.task import AgentTask
+    from app.models.discussion import DiscussionSession as DS
+
+    # 校验 project
+    proj = await db.get(Project, project_id)
+    if proj is None:
+        raise not_found("Project", project_id)
+
+    # 1. AgentTask 状态
+    task_stmt = select(AgentTask).where(AgentTask.project_id == project_id)
+    if chapter_id is not None:
+        task_stmt = task_stmt.where(AgentTask.chapter_id == chapter_id)
+    task_stmt = task_stmt.order_by(AgentTask.created_at.desc()).limit(10)
+    tasks = (await db.execute(task_stmt)).scalars().all()
+
+    # 2. ReviewComment 状态
+    comment_stmt = select(ReviewComment).where(
+        ReviewComment.project_id == project_id,
+    )
+    if chapter_id is not None:
+        comment_stmt = comment_stmt.where(
+            ReviewComment.chapter_id == chapter_id,
+        )
+    comment_stmt = comment_stmt.order_by(
+        ReviewComment.created_at.desc(),
+    ).limit(20)
+    comments = (await db.execute(comment_stmt)).scalars().all()
+
+    # 3. ReviewCommentGroup 状态
+    group_stmt = select(ReviewCommentGroup).where(
+        ReviewCommentGroup.project_id == project_id,
+    )
+    if chapter_id is not None:
+        group_stmt = group_stmt.where(
+            ReviewCommentGroup.chapter_id == chapter_id,
+        )
+    group_stmt = group_stmt.order_by(
+        ReviewCommentGroup.created_at.desc(),
+    ).limit(10)
+    groups = (await db.execute(group_stmt)).scalars().all()
+
+    # 4. DiscussionSession 状态
+    disc_stmt = select(DS).where(DS.project_id == project_id)
+    disc_stmt = disc_stmt.order_by(DS.created_at.desc()).limit(5)
+    discussions = (await db.execute(disc_stmt)).scalars().all()
+
+    # 推断整体 state
+    has_running_task = any(t.status in ("pending", "running") for t in tasks)
+    has_undecided_group = any(g.status in ("new", "discussing") for g in groups)
+    has_running_disc = any(d.status == "running" for d in discussions)
+
+    if has_running_task or has_running_disc:
+        state = "running"
+    elif has_undecided_group:
+        state = "pending_decision"
+    elif any(t.status == "failed" for t in tasks):
+        state = "error"
+    else:
+        state = "idle"
+
+    # 构建 steps
+    steps: list[dict[str, Any]] = []
+
+    # 读者评审步
+    reader_runs = [c for c in comments if c.author_type == "reader_agent"]
+    if reader_runs:
+        steps.append({
+            "step": "reader_review",
+            "status": "completed",
+            "comment_count": len(reader_runs),
+            "latest_at": max(
+                c.created_at for c in reader_runs
+            ).isoformat() if reader_runs else None,
+        })
+
+    # chief 分流步
+    chief_replies = [c for c in comments if c.author_type == "chief_agent"]
+    if chief_replies:
+        steps.append({
+            "step": "chief_triage",
+            "status": "completed",
+            "reply_count": len(chief_replies),
+            "latest_at": max(
+                c.created_at for c in chief_replies
+            ).isoformat() if chief_replies else None,
+        })
+
+    # 评论组合并步
+    if groups:
+        steps.append({
+            "step": "comment_grouping",
+            "status": "completed",
+            "group_count": len(groups),
+            "undecided": sum(
+                1 for g in groups if g.status in ("new", "discussing")
+            ),
+        })
+
+    # 讨论步
+    if discussions:
+        steps.append({
+            "step": "discussion",
+            "status": (
+                "running" if has_running_disc else "completed"
+            ),
+            "session_count": len(discussions),
+        })
+
+    # 决策/重写步
+    rewrite_groups = [
+        g for g in groups if g.status == "rewrite_queued"
+    ]
+    if rewrite_groups:
+        steps.append({
+            "step": "rewrite",
+            "status": "pending",
+            "group_count": len(rewrite_groups),
+        })
+
+    # debug_actions
+    debug_actions: list[dict[str, str]] = []
+    if has_undecided_group:
+        debug_actions.append({
+            "action": "decide_group",
+            "label": "裁决待定评论组",
+        })
+    if has_running_task:
+        debug_actions.append({
+            "action": "check_tasks",
+            "label": "查看运行中的任务",
+        })
+    if any(t.status == "failed" for t in tasks):
+        debug_actions.append({
+            "action": "retry_failed",
+            "label": "重试失败任务",
+        })
+
+    return {
+        "ok": True,
+        "data": {
+            "state": state,
+            "project_id": project_id,
+            "chapter_id": chapter_id,
+            "steps": steps,
+            "debug_actions": debug_actions,
+            "task_count": len(tasks),
+            "comment_count": len(comments),
+            "group_count": len(groups),
+            "discussion_count": len(discussions),
+        },
     }
