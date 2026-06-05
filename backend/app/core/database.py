@@ -249,6 +249,17 @@ async def init_db() -> None:
     updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
     UNIQUE(material_id, edge_key)
 )"""),
+        # DeepStudy stage results — per-chapter audit trail
+        ("__new_table__deepstudy_stage_results", "id", """CREATE TABLE IF NOT EXISTS deepstudy_stage_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, material_id INTEGER NOT NULL,
+    chapter_id INTEGER, chapter_index INTEGER, stage_key VARCHAR(80) NOT NULL,
+    status VARCHAR(30) DEFAULT 'pending', input_snapshot TEXT, output_json TEXT,
+    raw_output TEXT, error_message TEXT, provider_name VARCHAR(120), model_name VARCHAR(200),
+    input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0, cost_usd FLOAT DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0, retry_count INTEGER DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+)"""),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

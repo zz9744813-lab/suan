@@ -1,8 +1,8 @@
 """DeepStudyCoordinatorAgent — the main execution loop.
 
 Consumes one tick per call per run, advancing the DAG one stage
-at a time. Each stage is simulated for now (no LLM calls); in
-production each stage dispatches to a chapter-level LLM agent.
+at a time. Stages with registered handlers execute real chapter-level
+processing; stages without handlers fall back to simulated completion.
 
 Auto-linkage: after marking a stage complete the coordinator
 publishes ``stage_completed`` so the GraphMaterializer and other
@@ -28,6 +28,8 @@ from .graph_materializer import GraphMaterializer
 from .job_graph import DEEPSTUDY_DAG, get_downstream_stages, get_ready_stages
 from .knowledge_indexer import KnowledgeIndexer
 from .stage_result_store import StageResultStore
+from .stages.chapter_profiler import ChapterProfilerStage
+from .stages.entity_extractor import EntityExtractorStage
 from .technique_miner import TechniqueMiner
 from .writing_context_sync import WritingContextSync
 
@@ -48,6 +50,11 @@ class DeepStudyCoordinatorAgent:
         self.knowledge_indexer = KnowledgeIndexer()
         self.writing_sync = WritingContextSync()
         self.auto_repair = AutoRepair()
+        # Stage handlers — map stage_key to real executor
+        self.stage_handlers = {
+            "chapter_profile": ChapterProfilerStage(),
+            "entity_extract": EntityExtractorStage(),
+        }
 
     async def execute_run(self, run_id: int) -> None:
         """Main execution loop — consume one tick per call.
@@ -127,31 +134,30 @@ class DeepStudyCoordinatorAgent:
                 )
                 db.add(parent_task)
 
-            # Execute the stage (simulated for now)
+            # Execute the stage (real dispatch if handler exists, fallback otherwise)
             await self._execute_stage(db, run, next_stage)
 
     async def _execute_stage(self, db, run, stage_key: str) -> None:
         """Execute a single stage.
 
-        In production this would:
-        - Dispatch to the appropriate LLM agent (ChapterProfilerAgent,
-          EntityAgent, etc.)
-        - Process each chapter in parallel (up to max_concurrency)
-        - Save per-chapter results via StageResultStore
-        - Accumulate tokens and cost
-
-        For now we simulate success and advance the DAG.
+        Dispatches to the registered stage handler if one exists.
+        Falls back to simulating completion for stages without handlers yet.
         """
-        # Mark stage as completed in progress
-        if not isinstance(run.progress, dict):
-            run.progress = {}
-        completed: list[str] = list(run.progress.get("completed_stages", []) or [])
-        if stage_key not in completed:
-            completed.append(stage_key)
-        run.progress["completed_stages"] = completed
-        run.processed_chapters = run.total_chapters
+        # Dispatch to real handler if available
+        handler = self.stage_handlers.get(stage_key)
+        if handler:
+            await handler.execute_stage(db, run, self.stage_store)
+        else:
+            # Fallback: mark as completed (for stages without handlers yet)
+            if not isinstance(run.progress, dict):
+                run.progress = {}
+            completed = run.progress.get("completed_stages", [])
+            if stage_key not in completed:
+                completed.append(stage_key)
+            run.progress["completed_stages"] = completed
+            run.processed_chapters = run.total_chapters
 
-        # Publish event for auto-linkage
+        # Common: publish event for auto-linkage
         await deepstudy_event_bus.stage_completed(
             material_id=run.material_id,
             run_id=run.id,
@@ -172,6 +178,13 @@ class DeepStudyCoordinatorAgent:
             parent.progress_total = run.total_chapters or 0
             parent.cost_usd = run.cost_usd or 0
             parent.input_tokens = run.input_tokens or 0
+
+        # Check if all core stages done
+        completed = (run.progress or {}).get("completed_stages", [])
+        all_stages = list(DEEPSTUDY_DAG.keys())
+        if all(s in completed for s in all_stages[:9]):  # First 9 are core stages
+            run.status = "succeeded"
+            run.finished_at = datetime.now(timezone.utc)
 
         await db.flush()
 

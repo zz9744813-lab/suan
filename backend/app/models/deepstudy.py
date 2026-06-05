@@ -46,7 +46,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -471,3 +471,39 @@ class WritingTechnique(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+
+
+# ============================================================
+# deepstudy_stage_results
+# ============================================================
+class DeepStudyStageResult(Base):
+    """Per-chapter stage execution result for audit and repair.
+
+    Each row records one chapter's execution within a stage, including
+    input/output snapshots, token usage, cost, and error details.
+    """
+    __tablename__ = "deepstudy_stage_results"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    material_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    chapter_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    chapter_index: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    stage_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    input_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    output_json: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    raw_output: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    provider_name: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
+    model_name: Mapped[str | None] = mapped_column(String(200), nullable=True, default=None)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        Index("ix_dsr_run_stage", "run_id", "stage_key"),
+    )

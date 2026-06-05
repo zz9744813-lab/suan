@@ -199,3 +199,4 @@ __all__ = [
     # Project-Study boundary
     "ProjectStudyMaterialLink",
 ]
+from app.models.evolution import (EvolutionPatch,EvolutionRun,ModelQualityStat,SkillCard,SkillUsageEvent,SkillVersion)
