@@ -18,6 +18,7 @@ import { GraphPage } from "./pages/GraphPage";
 import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
 import { GenrePromptMatrixPage } from "./pages/GenrePromptMatrixPage";
 import { NotFound } from "./pages/NotFound";
+import { useBackendHealth } from "./hooks/useBackendHealth";
 
 // P0-MODEL-9: dev-mode banner so the operator can see at a glance
 // whether the browser is talking to the backend directly (good) or
@@ -56,10 +57,37 @@ function DevApiBaseBanner() {
   );
 }
 
+// P3: Backend health banner — shows a sticky red bar when the backend is
+// unreachable, so the user immediately knows *why* everything says
+// "Failed to fetch" instead of debugging each page one by one.
+function BackendHealthBanner() {
+  const { ok, message } = useBackendHealth(15_000);
+  if (ok) return null;
+  return (
+    <div
+      style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 9999,
+        padding: "8px 16px",
+        fontSize: 13,
+        background: "rgba(220, 50, 50, 0.92)",
+        color: "#fff",
+        textAlign: "center",
+        fontWeight: 600,
+        letterSpacing: 0.3,
+      }}
+    >
+      ⚠ 后端未连接 — {message || "请检查后端是否启动（dev.bat）"}
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <AppShell>
       <DevApiBaseBanner />
+      <BackendHealthBanner />
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
