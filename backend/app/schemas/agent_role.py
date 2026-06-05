@@ -92,6 +92,14 @@ class AgentModelBindingRead(BaseModel):
     failure_threshold: int = 2
     cooldown_seconds: int = 300
     locked_reason: str | None = None
+    binding_mode: str | None = None
+    locked_provider_id: int | None = None
+    locked_model_name: str | None = None
+    lock_reason: str | None = None
+    locked_by_user: bool | None = None
+    allow_fallback: bool | None = None
+    allow_auto_switch: bool | None = None
+    updated_by: str | None = None
     last_selected_provider_id: int | None = None
     last_selected_model_name: str | None = None
     last_selection_reason: str | None = None

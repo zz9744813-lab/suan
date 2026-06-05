@@ -1294,6 +1294,7 @@ export type AgentModelBinding = {
   extra_body: Record<string, any> | null;
   // P0-Model-Failover 新增
   selection_mode: "auto" | "manual" | "manual_with_fallback";
+  binding_mode?: "auto" | "manual_with_fallback" | "locked" | null;
   auto_strategy: "quality_first" | "cost_first" | "speed_first" | "long_context_first" | "json_stable_first";
   candidate_provider_ids: number[] | null;
   candidate_models_json: { provider_id: number; model: string; weight: number }[] | null;
@@ -1302,6 +1303,13 @@ export type AgentModelBinding = {
   failure_threshold: number;
   cooldown_seconds: number;
   locked_reason: string | null;
+  locked_provider_id?: number | null;
+  locked_model_name?: string | null;
+  lock_reason?: string | null;
+  locked_by_user?: boolean | null;
+  allow_fallback?: boolean | null;
+  allow_auto_switch?: boolean | null;
+  updated_by?: string | null;
   last_selected_provider_id: number | null;
   last_selected_model_name: string | null;
   last_selection_reason: string | null;
@@ -1409,6 +1417,7 @@ export type AgentModelBindingUpdateBody = {
   extra_body?: Record<string, any> | null;
   // P0-Model-Failover 新增
   selection_mode?: "auto" | "manual" | "manual_with_fallback" | null;
+  binding_mode?: "auto" | "manual_with_fallback" | "locked" | null;
   auto_strategy?: "quality_first" | "cost_first" | "speed_first" | "long_context_first" | "json_stable_first" | null;
   candidate_provider_ids?: number[] | null;
   candidate_models_json?: { provider_id: number; model: string; weight: number }[] | null;
@@ -1417,6 +1426,13 @@ export type AgentModelBindingUpdateBody = {
   failure_threshold?: number | null;
   cooldown_seconds?: number | null;
   locked_reason?: string | null;
+  locked_provider_id?: number | null;
+  locked_model_name?: string | null;
+  lock_reason?: string | null;
+  locked_by_user?: boolean | null;
+  allow_fallback?: boolean | null;
+  allow_auto_switch?: boolean | null;
+  updated_by?: string | null;
 };
 
 export type AgentPromptBindingUpdateBody = {

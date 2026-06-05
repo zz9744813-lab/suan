@@ -29,7 +29,7 @@ import { ProviderHealthFullModal } from "./ProviderHealthFullModal";
 import { AutoConfigureToolbar } from "./AutoConfigureToolbar";
 import { AgentRoleEditorModal } from "./AgentRoleEditorModal";
 
-type BindingMode = "auto" | "manual" | "manual_with_fallback";
+type BindingMode = "auto" | "manual_with_fallback" | "locked";
 
 export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null }) {
   const [events, setEvents] = useState<any[]>([]);
@@ -45,6 +45,7 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
   const [draftCandidateProviderIds, setDraftCandidateProviderIds] = useState<number[]>([]);
   const [draftFallbackCandidates, setDraftFallbackCandidates] = useState<{ provider_id: number; model_name: string }[]>([]);
   const [draftAllowAutoFallback, setDraftAllowAutoFallback] = useState(true);
+  const [draftLockReason, setDraftLockReason] = useState("");
 
   // providers list for picker
   const [providers, setProviders] = useState<any[]>([]);
@@ -102,17 +103,21 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
       setDraftCandidateProviderIds([]);
       setDraftFallbackCandidates([]);
       setDraftAllowAutoFallback(true);
+      setDraftLockReason("");
     } else {
       const b = item.binding;
-      setDraftMode(b.selection_mode ?? "auto");
-      setDraftModel(b.model_name ?? "");
-      setDraftProvider(b.provider_id);
+      const mode: BindingMode =
+        b.binding_mode ?? (b.selection_mode === "manual" ? "manual_with_fallback" : b.selection_mode) ?? "auto";
+      setDraftMode(mode);
+      setDraftModel(mode === "locked" ? b.locked_model_name ?? b.model_name ?? "" : b.model_name ?? "");
+      setDraftProvider(mode === "locked" ? b.locked_provider_id ?? b.provider_id : b.provider_id);
       setDraftStrategy(b.auto_strategy ?? "quality_first");
       setDraftCandidateProviderIds(b.candidate_provider_ids ?? []);
       setDraftFallbackCandidates(
         (b.fallback_candidates_json ?? []).map((c) => ({ provider_id: c.provider_id, model_name: c.model }))
       );
-      setDraftAllowAutoFallback(b.allow_auto_fallback ?? true);
+      setDraftAllowAutoFallback(b.allow_fallback ?? b.allow_auto_fallback ?? true);
+      setDraftLockReason(b.lock_reason ?? b.locked_reason ?? "");
       // derive circuit state from recent events if available
       setCircuitState((b as any).circuit_state ?? "closed");
       setCircuitOpenUntil((b as any).circuit_open_until ?? null);
@@ -123,16 +128,26 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
   async function saveBinding() {
     if (!item) return;
     try {
+      const primaryProviderId = draftMode === "auto" ? null : draftProvider;
+      const primaryModelName = draftMode === "auto" ? null : draftModel || null;
       const body: any = {
-        selection_mode: draftMode,
-        provider_id: draftProvider,
-        model_name: draftModel || null,
+        selection_mode: draftMode === "auto" ? "auto" : "manual_with_fallback",
+        binding_mode: draftMode,
+        provider_id: primaryProviderId,
+        model_name: primaryModelName,
+        locked_provider_id: draftMode === "locked" ? draftProvider : null,
+        locked_model_name: draftMode === "locked" ? draftModel || null : null,
+        lock_reason: draftMode === "locked" ? draftLockReason || null : null,
+        locked_by_user: draftMode === "locked",
         auto_strategy: draftStrategy,
         candidate_provider_ids: draftCandidateProviderIds.length > 0 ? draftCandidateProviderIds : null,
-        fallback_candidates_json: draftFallbackCandidates.length > 0
+        fallback_candidates_json: draftMode === "manual_with_fallback" && draftFallbackCandidates.length > 0
           ? draftFallbackCandidates.map((c) => ({ provider_id: c.provider_id, model: c.model_name, weight: 1 }))
           : null,
-        allow_auto_fallback: draftAllowAutoFallback,
+        allow_auto_fallback: draftMode !== "locked" && draftAllowAutoFallback,
+        allow_fallback: draftMode !== "locked" && draftAllowAutoFallback,
+        allow_auto_switch: draftMode !== "locked",
+        updated_by: "user",
       };
       await updateAgentModelBinding(item.role.id, body);
       setEditingBinding(false);
@@ -146,7 +161,7 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
     setPreviewLoading(true);
     try {
       const res = await previewModelSelection(item.role.id, {
-        selection_mode: draftMode,
+        selection_mode: draftMode === "auto" ? "auto" : "manual_with_fallback",
         auto_strategy: draftStrategy,
         candidate_provider_ids: draftCandidateProviderIds,
         agent_role_key: item.role.key,
@@ -175,7 +190,10 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
   const failed = recent10.filter((x) => x.status === "failed").length;
 
   const currentBinding = item.binding;
-  const currentMode: BindingMode = currentBinding?.selection_mode ?? "auto";
+  const currentMode: BindingMode =
+    currentBinding?.binding_mode ??
+    (currentBinding?.selection_mode === "manual" ? "manual_with_fallback" : currentBinding?.selection_mode) ??
+    "auto";
 
   // derive circuit state from binding extras if available
   const cState = (currentBinding as any)?.circuit_state ?? circuitState;
@@ -275,7 +293,7 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
               )}
 
               {/* manual 模式: provider/model 下拉 */}
-              {(draftMode === "manual" || draftMode === "manual_with_fallback") && (
+              {(draftMode === "manual_with_fallback" || draftMode === "locked") && (
                 <div style={{ marginBottom: 8 }}>
                   <div className="muted small" style={{ marginBottom: 4 }}>主模型</div>
                   <div style={{ display: "flex", gap: 4 }}>
@@ -298,6 +316,16 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
                       style={{ flex: 1 }}
                     />
                   </div>
+                  {draftMode === "locked" && (
+                    <textarea
+                      className="input"
+                      placeholder="锁定原因"
+                      value={draftLockReason}
+                      onChange={(e) => setDraftLockReason(e.target.value)}
+                      rows={2}
+                      style={{ marginTop: 6 }}
+                    />
+                  )}
                 </div>
               )}
 

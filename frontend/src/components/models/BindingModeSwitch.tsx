@@ -1,9 +1,4 @@
-/**
- * BindingModeSwitch — 模型绑定模式切换组件
- *
- * 三种模式: auto / manual / manual_with_fallback
- */
-type BindingMode = "auto" | "manual" | "manual_with_fallback";
+type BindingMode = "auto" | "manual_with_fallback" | "locked";
 
 interface Props {
   value: BindingMode;
@@ -13,21 +8,23 @@ interface Props {
 
 export function BindingModeSwitch({ value, onChange, disabled }: Props) {
   const modes: { key: BindingMode; label: string; icon: string }[] = [
-    { key: "auto", label: "自动选择", icon: "⚡" },
-    { key: "manual", label: "手动锁定", icon: "🔒" },
-    { key: "manual_with_fallback", label: "手动+备用", icon: "🔀" },
+    { key: "auto", label: "自动", icon: "A" },
+    { key: "manual_with_fallback", label: "手动+备用", icon: "M" },
+    { key: "locked", label: "锁定", icon: "L" },
   ];
+
   return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {modes.map((m) => (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      {modes.map((mode) => (
         <button
-          key={m.key}
-          className={`tiny ${value === m.key ? "primary" : ""}`}
+          key={mode.key}
+          type="button"
+          className={`tiny ${value === mode.key ? "primary" : ""}`}
           disabled={disabled}
-          onClick={() => onChange(m.key)}
-          title={m.label}
+          onClick={() => onChange(mode.key)}
+          title={mode.label}
         >
-          {m.icon} {m.label}
+          {mode.icon} {mode.label}
         </button>
       ))}
     </div>

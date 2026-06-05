@@ -7,7 +7,6 @@ import { ChapterDetail } from "./pages/ChapterDetail";
 import { WorkerPage } from "./pages/WorkerPage";
 import { TasksPage } from "./pages/TasksPage";
 import { PromptsPage } from "./pages/PromptsPage";
-import { ModelsPage } from "./pages/ModelsPage";
 import ModelConfigPage from "./pages/ModelConfigPage";
 import ModelProviderDetailPage from "./pages/ModelProviderDetailPage";
 import { StudyLibraryPage, StudyBookGraphPage } from "./pages/StudyLibraryPage";

@@ -12,7 +12,12 @@ export function AuditLogPage() {
       try {
         const res = await listAuditLogs({ limit: 100 });
         if (!cancelled) {
-          setLogs(Array.isArray(res.data) ? res.data : res.data?.items ?? []);
+          const items = Array.isArray(res)
+            ? res
+            : Array.isArray(res?.data)
+              ? res.data
+              : res?.items ?? res?.data?.items ?? [];
+          setLogs(items);
         }
       } catch (e: any) {
         if (!cancelled) setErr(e.message);

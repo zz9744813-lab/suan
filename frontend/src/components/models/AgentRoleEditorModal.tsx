@@ -41,7 +41,7 @@ import { FallbackCandidateEditor } from "./FallbackCandidateEditor";
 import { ModelSelectionPreviewPanel } from "./ModelSelectionPreviewPanel";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 
-type BindingMode = "auto" | "manual" | "manual_with_fallback";
+type BindingMode = "auto" | "manual_with_fallback" | "locked";
 
 const CATEGORIES: AgentCategory[] = ["writing", "memory", "study", "discussion", "custom"];
 const RUN_MODES: string[] = ["manual", "pipeline", "scheduled", "event"];
@@ -89,6 +89,7 @@ export function AgentRoleEditorModal({
   const [draftCandidateProviderIds, setDraftCandidateProviderIds] = useState<number[]>([]);
   const [draftFallbackCandidates, setDraftFallbackCandidates] = useState<{ provider_id: number; model_name: string; weight?: number }[]>([]);
   const [draftAllowAutoFallback, setDraftAllowAutoFallback] = useState(true);
+  const [draftLockReason, setDraftLockReason] = useState("");
   const [draftTemperature, setDraftTemperature] = useState(0.7);
   const [draftMaxTokens, setDraftMaxTokens] = useState(4096);
   const [draftTopP, setDraftTopP] = useState(1.0);
@@ -131,9 +132,10 @@ export function AgentRoleEditorModal({
 
     // Tab 2
     if (binding) {
-      setDraftMode(binding.selection_mode ?? "auto");
-      setDraftProvider(binding.provider_id);
-      setDraftModel(binding.model_name ?? "");
+      const mode = binding.binding_mode ?? (binding.selection_mode === "manual" ? "manual_with_fallback" : binding.selection_mode) ?? "auto";
+      setDraftMode(mode);
+      setDraftProvider(mode === "locked" ? binding.locked_provider_id ?? binding.provider_id : binding.provider_id);
+      setDraftModel(mode === "locked" ? binding.locked_model_name ?? binding.model_name ?? "" : binding.model_name ?? "");
       setDraftStrategy(binding.auto_strategy ?? "quality_first");
       setDraftCandidateProviderIds(binding.candidate_provider_ids ?? []);
       setDraftFallbackCandidates(
@@ -141,7 +143,8 @@ export function AgentRoleEditorModal({
           provider_id: c.provider_id, model_name: c.model, weight: c.weight ?? 1,
         })),
       );
-      setDraftAllowAutoFallback(binding.allow_auto_fallback ?? true);
+      setDraftAllowAutoFallback(binding.allow_fallback ?? binding.allow_auto_fallback ?? true);
+      setDraftLockReason(binding.lock_reason ?? binding.locked_reason ?? "");
       setDraftTemperature(binding.temperature ?? 0.7);
       setDraftMaxTokens(binding.max_tokens ?? 4096);
       setDraftTopP((binding.extra_body as any)?.top_p ?? 1.0);
@@ -153,6 +156,7 @@ export function AgentRoleEditorModal({
       setDraftCandidateProviderIds([]);
       setDraftFallbackCandidates([]);
       setDraftAllowAutoFallback(true);
+      setDraftLockReason("");
       setDraftTemperature(0.7);
       setDraftMaxTokens(4096);
       setDraftTopP(1.0);
@@ -184,18 +188,13 @@ export function AgentRoleEditorModal({
     if (!displayName.trim()) return "显示名称不能为空";
 
     // 手动模式必须选择 Provider 和 Model
-    if ((draftMode === "manual" || draftMode === "manual_with_fallback") && (!draftProvider || !draftModel.trim())) {
+    if ((draftMode === "manual_with_fallback" || draftMode === "locked") && (!draftProvider || !draftModel.trim())) {
       return "手动绑定模式必须选择 Provider 并填写 Model";
     }
 
     // manual_with_fallback 至少需要 fallback 候选或开启自动 fallback
     if (draftMode === "manual_with_fallback" && draftFallbackCandidates.length === 0 && !draftAllowAutoFallback) {
       return "manual_with_fallback 至少需要一个 fallback 候选，或开启自动 fallback";
-    }
-
-    // auto 模式至少需要一个候选 Provider
-    if (draftMode === "auto" && draftCandidateProviderIds.length === 0) {
-      return "自动模式至少需要选择一个候选 Provider";
     }
 
     return null;
@@ -228,17 +227,28 @@ export function AgentRoleEditorModal({
       };
       await updateAgentRole(role.id, roleBody);
 
+      const primaryProviderId = draftMode === "auto" ? null : draftProvider;
+      const primaryModelName = draftMode === "auto" ? null : draftModel || null;
+
       // 2) 保存模型绑定
       await updateAgentModelBinding(role.id, {
-        selection_mode: draftMode,
-        provider_id: draftProvider,
-        model_name: draftModel || null,
+        selection_mode: draftMode === "auto" ? "auto" : "manual_with_fallback",
+        binding_mode: draftMode,
+        provider_id: primaryProviderId,
+        model_name: primaryModelName,
+        locked_provider_id: draftMode === "locked" ? draftProvider : null,
+        locked_model_name: draftMode === "locked" ? draftModel || null : null,
+        lock_reason: draftMode === "locked" ? draftLockReason || null : null,
+        locked_by_user: draftMode === "locked",
         auto_strategy: draftStrategy as any,
         candidate_provider_ids: draftCandidateProviderIds.length > 0 ? draftCandidateProviderIds : null,
-        fallback_candidates_json: draftFallbackCandidates.length > 0
+        fallback_candidates_json: draftMode === "manual_with_fallback" && draftFallbackCandidates.length > 0
           ? draftFallbackCandidates.map((c) => ({ provider_id: c.provider_id, model: c.model_name, weight: c.weight ?? 1 }))
           : null,
-        allow_auto_fallback: draftAllowAutoFallback,
+        allow_auto_fallback: draftMode !== "locked" && draftAllowAutoFallback,
+        allow_fallback: draftMode !== "locked" && draftAllowAutoFallback,
+        allow_auto_switch: draftMode !== "locked",
+        updated_by: "user",
         temperature: draftTemperature,
         max_tokens: draftMaxTokens,
         extra_body: { top_p: draftTopP },
@@ -265,7 +275,7 @@ export function AgentRoleEditorModal({
     setPreviewLoading(true);
     try {
       const res = await previewModelSelection(role.id, {
-        selection_mode: draftMode,
+        selection_mode: draftMode === "auto" ? "auto" : "manual_with_fallback",
         auto_strategy: draftStrategy as any,
         candidate_provider_ids: draftCandidateProviderIds,
         agent_role_key: role.key,
@@ -407,7 +417,7 @@ export function AgentRoleEditorModal({
               )}
 
               {/* manual / manual_with_fallback: Provider + Model 联合选择器 */}
-              {(draftMode === "manual" || draftMode === "manual_with_fallback") && (
+              {(draftMode === "manual_with_fallback" || draftMode === "locked") && (
                 <div>
                   <div className="muted small" style={{ marginBottom: 4 }}>主模型</div>
                   <ProviderModelPicker
@@ -417,6 +427,19 @@ export function AgentRoleEditorModal({
                     onProviderChange={setDraftProvider}
                     onModelChange={setDraftModel}
                     allowManualInput={true}
+                  />
+                </div>
+              )}
+
+              {draftMode === "locked" && (
+                <div>
+                  <div className="muted small" style={{ marginBottom: 4 }}>锁定原因</div>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={draftLockReason}
+                    onChange={(e) => setDraftLockReason(e.target.value)}
+                    placeholder="可选"
                   />
                 </div>
               )}
