@@ -27,6 +27,7 @@ import { ModelFailoverTimeline } from "./ModelFailoverTimeline";
 import { CircuitBreakerBadge } from "./CircuitBreakerBadge";
 import { ProviderHealthFullModal } from "./ProviderHealthFullModal";
 import { AutoConfigureToolbar } from "./AutoConfigureToolbar";
+import { AgentRoleEditorModal } from "./AgentRoleEditorModal";
 
 type BindingMode = "auto" | "manual" | "manual_with_fallback";
 
@@ -34,6 +35,7 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
   const [events, setEvents] = useState<any[]>([]);
   const [allRuns, setAllRuns] = useState<AgentRun[]>([]);
   const [editingBinding, setEditingBinding] = useState(false);
+  const [advancedModalOpen, setAdvancedModalOpen] = useState(false);
 
   // binding edit state
   const [draftMode, setDraftMode] = useState<BindingMode>("auto");
@@ -232,6 +234,7 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
 
               <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                 <button className="tiny" onClick={startEditBinding}>改绑</button>
+                <button className="tiny" onClick={() => setAdvancedModalOpen(true)}>高级配置</button>
                 {currentBinding?.provider_id && (
                   <button className="tiny" onClick={() => setHealthProviderId(currentBinding.provider_id!)}>
                     健康检查
@@ -380,6 +383,16 @@ export function AgentRunDetailPanel({ item }: { item: AgentRoleMatrixItem | null
 
       {/* Provider 健康检查弹窗 */}
       <ProviderHealthFullModal providerId={healthProviderId} onClose={() => setHealthProviderId(null)} />
+
+      {/* Agent 高级配置弹窗 */}
+      <AgentRoleEditorModal
+        open={advancedModalOpen}
+        role={r}
+        binding={item.binding}
+        promptBinding={item.prompt_binding}
+        onClose={() => setAdvancedModalOpen(false)}
+        onSaved={() => { setAdvancedModalOpen(false); setEditingBinding(false); }}
+      />
     </div>
   );
 }

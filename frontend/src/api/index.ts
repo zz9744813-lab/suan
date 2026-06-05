@@ -1310,3 +1310,34 @@ export const listModelCallEvents = (params?: { agent_role_key?: string; provider
   if (params?.limit != null) q.set("limit", String(params.limit));
   return api.get<any[]>(`/api/model-observability/events?${q.toString()}`);
 };
+
+// ── P0 Observability Rework ──
+export const getObservabilityModels = (params?: { hours?: number; provider_id?: number; agent_role_key?: string }) => {
+  const q = new URLSearchParams();
+  if (params?.hours) q.set("hours", String(params.hours));
+  if (params?.provider_id) q.set("provider_id", String(params.provider_id));
+  if (params?.agent_role_key) q.set("agent_role_key", params.agent_role_key);
+  return api.get<any[]>(`/api/model-observability/models?${q.toString()}`);
+};
+
+export const getObservabilityAgents = (params?: { hours?: number; project_id?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.hours) q.set("hours", String(params.hours));
+  if (params?.project_id) q.set("project_id", String(params.project_id));
+  return api.get<any[]>(`/api/model-observability/agents?${q.toString()}`);
+};
+
+export const getObservabilityFailures = (params?: { hours?: number; limit?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.hours) q.set("hours", String(params.hours));
+  if (params?.limit) q.set("limit", String(params.limit));
+  return api.get<any[]>(`/api/model-observability/failures?${q.toString()}`);
+};
+
+export const getObservabilitySlowRequests = (params?: { hours?: number; threshold_ms?: number; limit?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.hours) q.set("hours", String(params.hours));
+  if (params?.threshold_ms) q.set("threshold_ms", String(params.threshold_ms));
+  if (params?.limit) q.set("limit", String(params.limit));
+  return api.get<any[]>(`/api/model-observability/slow-requests?${q.toString()}`);
+};

@@ -17,6 +17,18 @@ from app.models.model_runtime import ModelRuntimeStat
 
 logger = logging.getLogger(__name__)
 
+# failure_type → event_type 映射
+_FAILURE_TYPE_TO_EVENT_TYPE: dict[str, str] = {
+    "timeout": "request_timeout",
+    "json_parse_failed": "json_parse_failed",
+    "empty_response": "empty_output",
+}
+
+# failure_type → level 映射
+_FAILURE_TYPE_TO_LEVEL: dict[str, str] = {
+    "auth_error": "critical",
+}
+
 
 class ModelCallRecorder:
     """记录每次模型调用的选择和结果."""
@@ -33,18 +45,41 @@ class ModelCallRecorder:
         selection_reason: str | None = None,
         project_id: int | None = None,
         task_id: int | None = None,
+        chapter_id: int | None = None,
+        step_key: str | None = None,
+        provider_name: str | None = None,
+        event_type: str = "request_started",
+        event_category: str = "request",
+        level: str = "info",
+        summary: str | None = None,
     ) -> ModelCallEvent:
         """记录模型选择 (调用前)."""
+        # 自动生成 summary
+        if summary is None and agent_role_key and model_name:
+            parts = [agent_role_key, "→", f"{provider_name or '?'}/{model_name}"]
+            if selection_mode:
+                parts.append(f"· {selection_mode}")
+            if selection_score is not None:
+                parts.append(f"· score={selection_score:.2f}")
+            summary = " ".join(parts)
+
         event = ModelCallEvent(
             provider_id=provider_id,
             model_name=model_name,
             agent_role_key=agent_role_key,
             project_id=project_id,
             task_id=task_id,
+            chapter_id=chapter_id,
+            step_key=step_key,
+            provider_name=provider_name,
             selection_mode=selection_mode,
             selection_score=selection_score,
             selection_reason=selection_reason,
             status="pending",  # 待完成
+            event_type=event_type,
+            event_category=event_category,
+            level=level,
+            summary=summary,
         )
         db.add(event)
         await db.flush()
@@ -65,6 +100,20 @@ class ModelCallRecorder:
         event.input_tokens = input_tokens
         event.output_tokens = output_tokens
         event.cost_usd = cost_usd
+        event.event_type = "request_succeeded"
+        event.event_category = "request"
+        event.level = "success"
+
+        # 自动生成 summary
+        parts = [event.agent_role_key or "?", "→",
+                 f"{event.provider_name or '?'}/{event.model_name or '?'}", "· 成功"]
+        if latency_ms is not None:
+            parts.append(f"· {latency_ms}ms")
+        if input_tokens or output_tokens:
+            parts.append(f"· {input_tokens + output_tokens} tokens")
+        if cost_usd > 0:
+            parts.append(f"· ${cost_usd:.4f}")
+        event.summary = " ".join(parts)
 
         # 更新 runtime stat
         await self._update_runtime_stat(
@@ -105,6 +154,28 @@ class ModelCallRecorder:
         event.failure_type = failure_type
         event.failure_message = failure_message
 
+        # 映射 event_type
+        event.event_type = _FAILURE_TYPE_TO_EVENT_TYPE.get(failure_type, "request_failed")
+        event.event_category = "request"
+        event.level = _FAILURE_TYPE_TO_LEVEL.get(failure_type, "error")
+        event.error_code = failure_type
+
+        # 自动生成 summary
+        parts = [event.agent_role_key or "?", "→",
+                 f"{event.provider_name or '?'}/{event.model_name or '?'}"]
+        # 友好化 failure_type
+        ft_display = {
+            "json_parse_failed": "JSON解析失败",
+            "empty_response": "空输出",
+            "timeout": "超时",
+            "auth_error": "鉴权失败",
+            "rate_limited": "限流",
+        }.get(failure_type, failure_type)
+        parts.append(f"· {ft_display}")
+        if failure_message:
+            parts.append(f"· {failure_message[:80]}")
+        event.summary = " ".join(parts)
+
         # 更新 runtime stat
         stat_update = {"success": False, failure_type: True}
         await self._update_runtime_stat(
@@ -121,6 +192,11 @@ class ModelCallRecorder:
         input_tokens: int = 0,
         output_tokens: int = 0,
         cost_usd: float = 0.0,
+        *,
+        fallback_from_provider: str | None = None,
+        fallback_from_model: str | None = None,
+        fallback_to_provider: str | None = None,
+        fallback_to_model: str | None = None,
     ) -> None:
         """记录 fallback 成功."""
         event.status = "fallback_success"
@@ -128,6 +204,25 @@ class ModelCallRecorder:
         event.input_tokens = input_tokens
         event.output_tokens = output_tokens
         event.cost_usd = cost_usd
+        event.event_type = "fallback_succeeded"
+        event.event_category = "routing"
+        event.level = "warning"
+        event.fallback_from_provider = fallback_from_provider
+        event.fallback_from_model = fallback_from_model
+        event.fallback_to_provider = fallback_to_provider
+        event.fallback_to_model = fallback_to_model
+
+        # 自动生成 summary
+        parts = [event.agent_role_key or "?"]
+        if fallback_from_provider and fallback_from_model:
+            parts.append(f"{fallback_from_provider}/{fallback_from_model}")
+        parts.append("→ fallback →")
+        if fallback_to_provider and fallback_to_model:
+            parts.append(f"{fallback_to_provider}/{fallback_to_model}")
+        parts.append("· 成功")
+        if latency_ms is not None:
+            parts.append(f"· {latency_ms}ms")
+        event.summary = " ".join(parts)
 
         # 更新 runtime stat
         await self._update_runtime_stat(

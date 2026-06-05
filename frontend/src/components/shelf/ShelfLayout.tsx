@@ -24,7 +24,7 @@ import type { ReactNode } from "react";
 import { ShelfBreadcrumb, type ShelfBreadcrumbItem } from "./ShelfBreadcrumb";
 
 export type ShelfLayoutProps = {
-  title: string;
+  title?: string;
   subtitle?: string;
   /** 顶部面包屑 items, 第一个是一级书架 */
   breadcrumb?: ShelfBreadcrumbItem[];
@@ -57,10 +57,12 @@ export function ShelfLayout({
           />
         </header>
       )}
-      <div className="shelf-layout-title">
-        <h1 className="shelf-layout-h1">{title}</h1>
-        {subtitle && <p className="shelf-layout-sub">{subtitle}</p>}
-      </div>
+      {(title || subtitle) && (
+        <div className="shelf-layout-title">
+          {title && <h1 className="shelf-layout-h1">{title}</h1>}
+          {subtitle && <p className="shelf-layout-sub">{subtitle}</p>}
+        </div>
+      )}
       <div className="shelf-layout-body">
         <aside className="shelf-layout-left">{left}</aside>
         <main className="shelf-layout-center">{center}</main>

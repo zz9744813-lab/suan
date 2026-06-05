@@ -167,6 +167,22 @@ async def init_db() -> None:
         ("agent_tasks", "max_retries", "INTEGER DEFAULT 3"),
         ("agent_tasks", "last_failure_type", "VARCHAR(80)"),
         ("agent_tasks", "last_fallback_summary", "JSON"),
+        # P0-observability-rework: ModelCallEvent 新增字段
+        ("model_call_events", "event_type", "VARCHAR(50)"),
+        ("model_call_events", "event_category", "VARCHAR(50)"),
+        ("model_call_events", "level", "VARCHAR(20)"),
+        ("model_call_events", "chapter_id", "INTEGER REFERENCES chapters(id) ON DELETE SET NULL"),
+        ("model_call_events", "step_key", "VARCHAR(50)"),
+        ("model_call_events", "provider_name", "VARCHAR(120)"),
+        ("model_call_events", "fallback_from_provider", "VARCHAR(120)"),
+        ("model_call_events", "fallback_from_model", "VARCHAR(200)"),
+        ("model_call_events", "fallback_to_provider", "VARCHAR(120)"),
+        ("model_call_events", "fallback_to_model", "VARCHAR(200)"),
+        ("model_call_events", "summary", "TEXT"),
+        ("model_call_events", "detail_json", "TEXT"),
+        ("model_call_events", "cache_hit", "BOOLEAN"),
+        ("model_call_events", "request_id", "VARCHAR(120)"),
+        ("model_call_events", "error_code", "VARCHAR(80)"),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

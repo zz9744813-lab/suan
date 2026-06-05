@@ -103,14 +103,25 @@ class AgentRunRecorder:
             "total_calls": total,
             "success_calls": success,
             "failed_calls": failed,
-            "fallback_calls": fallback,
+            "fallback_count": fallback,
+            "failed_count": sum(1 for e in events if e.status == "failed"),
+            "timeout_count": sum(1 for e in events if e.failure_type == "timeout"),
             "success_rate": round(success / total, 4) if total else 0.0,
             "fallback_rate": round(fallback / total, 4) if total else 0.0,
             "total_cost_usd": round(total_cost, 6),
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
             "avg_latency_ms": avg_latency,
             "p95_latency_ms": p95_latency,
+            "cache_hit_rate": (
+                round(
+                    sum(1 for e in events if e.cache_hit is True) /
+                    sum(1 for e in events if e.cache_hit is not None),
+                    4,
+                ) if any(e.cache_hit is not None for e in events) else None
+            ),
             "by_role": role_stats,
             "by_failure_type": failure_counts,
             "by_provider": {str(k): v for k, v in provider_stats.items()},
@@ -124,6 +135,12 @@ class AgentRunRecorder:
         agent_role_key: str | None = None,
         provider_id: int | None = None,
         status: str | None = None,
+        event_type: str | None = None,
+        event_category: str | None = None,
+        level: str | None = None,
+        model_name: str | None = None,
+        project_id: int | None = None,
+        chapter_id: int | None = None,
     ) -> list[dict]:
         """返回最近的调用事件列表."""
         q = select(ModelCallEvent).order_by(desc(ModelCallEvent.id)).limit(limit)
@@ -133,6 +150,18 @@ class AgentRunRecorder:
             q = q.where(ModelCallEvent.provider_id == provider_id)
         if status:
             q = q.where(ModelCallEvent.status == status)
+        if event_type:
+            q = q.where(ModelCallEvent.event_type == event_type)
+        if event_category:
+            q = q.where(ModelCallEvent.event_category == event_category)
+        if level:
+            q = q.where(ModelCallEvent.level == level)
+        if model_name:
+            q = q.where(ModelCallEvent.model_name == model_name)
+        if project_id:
+            q = q.where(ModelCallEvent.project_id == project_id)
+        if chapter_id:
+            q = q.where(ModelCallEvent.chapter_id == chapter_id)
 
         events = (await db.execute(q)).scalars().all()
         return [
@@ -143,6 +172,9 @@ class AgentRunRecorder:
                 "agent_role_key": e.agent_role_key,
                 "project_id": e.project_id,
                 "task_id": e.task_id,
+                "chapter_id": e.chapter_id,
+                "step_key": e.step_key,
+                "provider_name": e.provider_name,
                 "selection_mode": e.selection_mode,
                 "selection_score": e.selection_score,
                 "selection_reason": e.selection_reason,
@@ -153,6 +185,18 @@ class AgentRunRecorder:
                 "input_tokens": e.input_tokens,
                 "output_tokens": e.output_tokens,
                 "cost_usd": e.cost_usd,
+                "event_type": e.event_type,
+                "event_category": e.event_category,
+                "level": e.level,
+                "fallback_from_provider": e.fallback_from_provider,
+                "fallback_from_model": e.fallback_from_model,
+                "fallback_to_provider": e.fallback_to_provider,
+                "fallback_to_model": e.fallback_to_model,
+                "summary": e.summary,
+                "detail_json": e.detail_json,
+                "cache_hit": e.cache_hit,
+                "request_id": e.request_id,
+                "error_code": e.error_code,
                 "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in events

@@ -33,6 +33,9 @@ import { FailureDiagnosisCard } from "../components/dashboard/FailureDiagnosisCa
 import { ChapterPreviewCard } from "../components/dashboard/ChapterPreviewCard";
 import { UsefulEventStream } from "../components/dashboard/UsefulEventStream";
 import { PassFailRateCard } from "../components/dashboard/PassFailRateCard";
+import { DashboardKpiCards } from "../components/dashboard/DashboardKpiCards";
+import { AgentPipelineVisualization } from "../components/dashboard/AgentPipelineVisualization";
+import { MemoryLayerCard } from "../components/dashboard/MemoryLayerCard";
 import "./Dashboard.css";
 
 export function Dashboard() {
@@ -63,18 +66,10 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <header className="page-header">
-        <div>
-          <h1 className="page-title">工作台</h1>
-          <p className="page-subtitle">
-            {currentProject
-              ? `当前项目：${currentProject.name} · ${currentProject.genre}`
-              : "还没有选择项目 — 左侧项目栏选一个，或新建一个开始。"}
-          </p>
-        </div>
-      </header>
-
       <div className="dashboard-body">
+        <DashboardKpiCards projectId={currentProjectId} />
+        <AgentPipelineVisualization />
+        <MemoryLayerCard />
         <DashboardStatusBar noProject={noProject} />
 
         <div className="dashboard-row">

@@ -323,9 +323,6 @@ export function ProjectsPage() {
   // 渲染 ----------------------------------------------------------------
   return (
     <ShelfLayout
-      title="项目书架"
-      subtitle="一本书 = 一个项目。每个项目独立维护设定、大纲、章节与记忆。"
-      breadcrumb={[{ label: "项目书架" }]}
       left={
         <>
           <ShelfToolbar>

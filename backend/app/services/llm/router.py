@@ -139,6 +139,9 @@ class LLMRouter:
         response_format: dict[str, str] | None = None,
         extra: dict[str, Any] | None = None,
         stream: bool = True,
+        chapter_id: int | None = None,
+        step_key: str | None = None,
+        project_id: int | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult]:
         """调用 LLM, 支持 fallback 链.
 
@@ -166,6 +169,10 @@ class LLMRouter:
             selection_mode=resolved.selection_mode,
             selection_score=resolved.selection_score,
             selection_reason=resolved.selection_reason,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            step_key=step_key,
+            provider_name=resolved.provider.name,
         )
 
         # ── 主模型调用 ──
@@ -208,6 +215,8 @@ class LLMRouter:
                     response_format=response_format, extra=extra,
                     stream=stream, recorder=recorder,
                     primary_failure_type=failure_type,
+                    primary_provider_name=resolved.provider.name,
+                    primary_model_name=resolved.model,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -245,6 +254,8 @@ class LLMRouter:
         stream: bool = True,
         recorder: Any = None,
         primary_failure_type: str | None = None,
+        primary_provider_name: str | None = None,
+        primary_model_name: str | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult] | None:
         """尝试 fallback 到候选列表中的下一个可用模型.
 
@@ -336,6 +347,10 @@ class LLMRouter:
                     selection_mode="manual_with_fallback",
                     selection_score=fallback_resolved.selection_score,
                     selection_reason=f"fallback#{attempt_no} (主模型{primary_failure_type})",
+                    provider_name=fallback_resolved.provider.name,
+                    event_type="fallback_triggered",
+                    event_category="routing",
+                    level="warning",
                 )
 
             try:
@@ -352,6 +367,10 @@ class LLMRouter:
                         input_tokens=result.input_tokens,
                         output_tokens=result.output_tokens,
                         cost_usd=result.cost_usd,
+                        fallback_from_provider=primary_provider_name,
+                        fallback_from_model=primary_model_name,
+                        fallback_to_provider=fallback_resolved.provider.name,
+                        fallback_to_model=fallback_resolved.model,
                     )
                 logger.info(
                     "fallback#%d 成功: %s/%s",

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import bad_request, not_found
+from app.models.agent_role import AgentRole
 from app.models.comment_review import (
     ReaderAgentProfile,
     ReaderReviewRun,
