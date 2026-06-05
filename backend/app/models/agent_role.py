@@ -94,8 +94,10 @@ class AgentModelBinding(Base):
     extra_body: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
 
     # ── P0-Model-Failover: 自动选模 / 手动锁定 / 混合模式 ──
-    # auto / manual / manual_with_fallback
+    # auto / manual / manual_with_fallback (旧字段, 保留兼容)
     selection_mode: Mapped[str] = mapped_column(String(30), default="auto", index=True)
+    # P0-Model-Config: unified binding mode — auto / manual_with_fallback / locked
+    binding_mode: Mapped[str] = mapped_column(String(40), default="auto", index=True)
     # quality_first / cost_first / speed_first / long_context_first / json_stable_first
     auto_strategy: Mapped[str] = mapped_column(String(40), default="quality_first")
     # 自动模式可用 Provider 池；为空表示所有 enabled Provider
@@ -106,12 +108,23 @@ class AgentModelBinding(Base):
     fallback_candidates_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, default=None)
     # manual 模式下是否允许失效后自动切换
     allow_auto_fallback: Mapped[bool] = mapped_column(Boolean, default=True)
+    # P0-Model-Config: lock-specific fields
+    locked_provider_id: Mapped[int | None] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="SET NULL"), default=None,
+    )
+    locked_model_name: Mapped[str | None] = mapped_column(String(200), default=None)
+    # 锁死原因, UI 显示用 (rename from locked_reason)
+    lock_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    locked_by_user: Mapped[bool] = mapped_column(Boolean, default=False)
+    allow_fallback: Mapped[bool] = mapped_column(Boolean, default=True)
+    allow_auto_switch: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str | None] = mapped_column(String(120), default=None)
+    # 旧字段保留兼容 (deprecated, map to lock_reason)
+    locked_reason: Mapped[str | None] = mapped_column(Text, default=None)
     # 连续失败多少次触发切换
     failure_threshold: Mapped[int] = mapped_column(Integer, default=2)
     # 主模型失败后冷却多久（秒）
     cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
-    # 用户为什么手动锁定，UI 显示用
-    locked_reason: Mapped[str | None] = mapped_column(Text, default=None)
     # ── 最近一次自动选择结果 ──
     last_selected_provider_id: Mapped[int | None] = mapped_column(
         ForeignKey("model_providers.id", ondelete="SET NULL"), default=None,

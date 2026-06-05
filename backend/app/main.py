@@ -29,6 +29,7 @@ from app.routers import (
     graphs as graphs_router,
     memory,
     model_observability,
+    model_control,
     models,
     project_memory,
     projects,
@@ -108,7 +109,7 @@ async def health() -> dict:
 # ----- Mount routers under /api -----
 PREFIX = settings.api_prefix
 for r in (projects.router, chapters.router, tasks.router, prompts.router,
-          models.router, worker.router, chief_agent.router, memory.router,
+          models.router, model_control.router, worker.router, chief_agent.router, memory.router,
           events.router, study.router, behavior.router, graph.router,
           discussion.router, search.router, deepstudy.router,
           project_memory.router, agent_roles.router, agent_roles.agent_runs_router,

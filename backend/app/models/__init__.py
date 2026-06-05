@@ -13,6 +13,7 @@ from app.models.task import (
     WorkerStatus,
 )
 from app.models.model_provider import ModelProvider, ModelRoleAssignment
+from app.models.model_health import ModelHealthSnapshot, ModelRouteEvent
 from app.models.prompt import PromptTemplate, PromptVersion
 from app.models.memory import (
     MemoryCharacter,

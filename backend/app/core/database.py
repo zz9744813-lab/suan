@@ -260,6 +260,49 @@ async def init_db() -> None:
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 )"""),
+        # P0-Model-Config: binding_mode + locked_* fields
+        ("agent_model_bindings", "binding_mode", "VARCHAR(40) DEFAULT 'auto'"),
+        ("agent_model_bindings", "locked_provider_id", "INTEGER"),
+        ("agent_model_bindings", "locked_model_name", "VARCHAR(200)"),
+        ("agent_model_bindings", "lock_reason", "TEXT"),
+        ("agent_model_bindings", "locked_by_user", "BOOLEAN DEFAULT 0"),
+        ("agent_model_bindings", "allow_fallback", "BOOLEAN DEFAULT 1"),
+        ("agent_model_bindings", "allow_auto_switch", "BOOLEAN DEFAULT 1"),
+        ("agent_model_bindings", "updated_by", "VARCHAR(120)"),
+        # P0-Model-Config: model_health_snapshots table
+        ("__new_table__model_health_snapshots", "id", """CREATE TABLE IF NOT EXISTS model_health_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id INTEGER NOT NULL, model_name VARCHAR(200) NOT NULL,
+    status VARCHAR(40) DEFAULT 'unknown', health_score FLOAT DEFAULT 0,
+    success_rate FLOAT DEFAULT 0, error_rate FLOAT DEFAULT 0,
+    avg_latency_ms INTEGER DEFAULT 0, p95_latency_ms INTEGER DEFAULT 0,
+    last_success_at DATETIME, last_failure_at DATETIME,
+    last_error_code VARCHAR(80), last_error_message TEXT,
+    supports_text BOOLEAN DEFAULT 1, supports_image BOOLEAN DEFAULT 0,
+    supports_video BOOLEAN DEFAULT 0, supports_json BOOLEAN DEFAULT 0,
+    supports_stream BOOLEAN DEFAULT 0,
+    context_window INTEGER, max_output_tokens INTEGER,
+    input_price_per_million FLOAT, output_price_per_million FLOAT,
+    rate_limited_until DATETIME, cooldown_until DATETIME,
+    probe_count INTEGER DEFAULT 0, consecutive_failures INTEGER DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(provider_id, model_name)
+)"""),
+        # P0-Model-Config: model_route_events table
+        ("__new_table__model_route_events", "id", """CREATE TABLE IF NOT EXISTS model_route_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER, step_id INTEGER,
+    agent_role_key VARCHAR(120) NOT NULL,
+    binding_mode VARCHAR(40) NOT NULL, strategy VARCHAR(80),
+    selected_provider_id INTEGER, selected_model_name VARCHAR(200),
+    attempted_provider_id INTEGER, attempted_model_name VARCHAR(200),
+    route_reason VARCHAR(120) NOT NULL,
+    locked BOOLEAN DEFAULT 0, fallback_used BOOLEAN DEFAULT 0, fallback_reason TEXT,
+    health_score FLOAT, latency_ms INTEGER,
+    error_code VARCHAR(80), error_message TEXT,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+)"""),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

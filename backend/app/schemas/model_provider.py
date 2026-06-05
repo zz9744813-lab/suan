@@ -28,7 +28,7 @@ class ModelProviderCreate(BaseModel):
     base_url: str = Field(..., min_length=1)
     api_key: str = ""  # optional: can add later
     default_model: str = ""
-    enabled: bool | None = None
+    enabled: bool = True
     extra: dict | None = None
 
 

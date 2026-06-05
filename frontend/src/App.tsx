@@ -8,6 +8,8 @@ import { WorkerPage } from "./pages/WorkerPage";
 import { TasksPage } from "./pages/TasksPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { ModelsPage } from "./pages/ModelsPage";
+import { ModelConfigPage } from "./pages/ModelConfigPage";
+import { ModelProviderDetailPage } from "./pages/ModelProviderDetailPage";
 import { StudyLibraryPage, StudyBookGraphPage } from "./pages/StudyLibraryPage";
 import { StudyPage } from "./pages/StudyPage";
 import { DiscussionPage } from "./pages/DiscussionPage";
@@ -104,7 +106,8 @@ export default function App() {
         <Route path="/worker" element={<WorkerPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/prompts" element={<PromptsPage />} />
-        <Route path="/models" element={<ModelsPage />} />
+        <Route path="/models" element={<ModelConfigPage />} />
+        <Route path="/models/providers/:providerId" element={<ModelProviderDetailPage />} />
         <Route path="/model-observability" element={<ModelObservabilityPanel projectId={undefined} />} />
         {/* P0 (01 §6) 路由基础规范: /study/library 是 P2 拆书书架
          * (主入口, 查书/启动 DeepStudy/看知识网络).

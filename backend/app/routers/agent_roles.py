@@ -280,6 +280,17 @@ async def put_agent_model_binding(
         select(AgentModelBinding).where(AgentModelBinding.agent_role_id == role_id)
     )).scalar_one_or_none()
     data = body.model_dump(exclude_unset=True)
+
+    # P0-Model-Config: enforce locked mode invariants
+    if data.get("binding_mode") == "locked":
+        data["allow_fallback"] = False
+        data["allow_auto_switch"] = False
+        # Map locked_provider_id to provider_id for backward compat
+        if data.get("locked_provider_id") and not data.get("provider_id"):
+            data["provider_id"] = data["locked_provider_id"]
+        if data.get("locked_model_name") and not data.get("model_name"):
+            data["model_name"] = data["locked_model_name"]
+
     if existing is None:
         existing = AgentModelBinding(agent_role_id=role_id, **data)
         db.add(existing)

@@ -103,7 +103,7 @@ class AgentModelBindingRead(BaseModel):
 
 class AgentModelBindingUpdate(BaseModel):
     """PUT /api/agent-roles/{id}/model-binding — 一次写完整个绑定
-    (跟 spec §9.3 请求一致)."""
+    (跟 spec §9.3 请求一致). P0-Model-Config added locked support."""
     model_config = ConfigDict(protected_namespaces=())
 
     provider_id: int | None = None
@@ -113,7 +113,7 @@ class AgentModelBindingUpdate(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     extra_body: dict[str, Any] | None = None
-    # ── P0-Model-Failover 新增字段 ──
+    # ── P0-Model-Failover 旧字段 (保留兼容) ──
     selection_mode: Literal["auto", "manual", "manual_with_fallback"] | None = None
     auto_strategy: Literal[
         "quality_first", "cost_first", "speed_first",
@@ -125,7 +125,16 @@ class AgentModelBindingUpdate(BaseModel):
     allow_auto_fallback: bool | None = None
     failure_threshold: int | None = None
     cooldown_seconds: int | None = None
-    locked_reason: str | None = None
+    locked_reason: str | None = None  # deprecated, use lock_reason
+    # ── P0-Model-Config: locked mode 新字段 ──
+    binding_mode: Literal["auto", "manual_with_fallback", "locked"] | None = None
+    locked_provider_id: int | None = None
+    locked_model_name: str | None = None
+    lock_reason: str | None = None
+    locked_by_user: bool | None = None
+    allow_fallback: bool | None = None
+    allow_auto_switch: bool | None = None
+    updated_by: str | None = None
 
 
 # ============================================================
