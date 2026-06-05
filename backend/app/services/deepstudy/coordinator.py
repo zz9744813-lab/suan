@@ -68,6 +68,8 @@ class DeepStudyCoordinatorAgent:
             if run.status not in ("queued", "running"):
                 return
 
+            # P0-D: Stub detection is handled by UI warnings. Users should configure real providers.
+
             completed_stages: list[str] = []
             if run.progress and isinstance(run.progress, dict):
                 completed_stages = run.progress.get("completed_stages", [])

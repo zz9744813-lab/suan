@@ -35,4 +35,6 @@ export { ModelFailoverTimeline } from "./ModelFailoverTimeline";
 export { ProviderHealthFullModal } from "./ProviderHealthFullModal";
 export { AutoConfigureToolbar } from "./AutoConfigureToolbar";
 export { CircuitBreakerBadge } from "./CircuitBreakerBadge";
+export { FirstRunGuide } from "./FirstRunGuide";
 export { ProviderModelPicker } from "./ProviderModelPicker";
+export { AutoConfigureModal } from "./AutoConfigureModal";

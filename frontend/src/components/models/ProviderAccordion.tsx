@@ -8,6 +8,15 @@
 import { useState } from "react";
 import type { ModelProvider } from "../../types";
 
+const PROVIDER_TYPE_URLS: Record<string, string> = {
+  openrouter: "https://openrouter.ai/api/v1",
+  deepseek: "https://api.deepseek.com/v1",
+  openai: "https://api.openai.com/v1",
+  gemini: "https://generativelanguage.googleapis.com/v1beta",
+  siliconflow: "https://api.siliconflow.cn/v1",
+  custom: "",
+};
+
 export function ProviderAccordion({
   provider, defaultExpanded = false, onChange, onDelete, onTest, onHealth, onPreviewModels, busy,
 }: {
@@ -22,6 +31,9 @@ export function ProviderAccordion({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [draft, setDraft] = useState<Partial<ModelProvider>>({});
+  const [providerType, setProviderType] = useState<string>("custom");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [previewedModels, setPreviewedModels] = useState<string[] | null>(null);
   const healthColor = (() => {
     const s = provider.last_health_status;
     if (!s) return "gray";
@@ -69,6 +81,22 @@ export function ProviderAccordion({
       </button>
       {expanded && (
         <div className="provider-accordion-body">
+          <Field label="Provider 类型">
+            <select className="input" value={providerType} onChange={(e) => {
+              const t = e.target.value;
+              setProviderType(t);
+              if (PROVIDER_TYPE_URLS[t] !== undefined) {
+                onChange({ base_url: PROVIDER_TYPE_URLS[t] });
+              }
+            }}>
+              <option value="custom">自定义</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="siliconflow">SiliconFlow</option>
+            </select>
+          </Field>
           <Field label="名称">
             <input className="input" defaultValue={provider.name} onBlur={(e) => e.target.value !== provider.name && onChange({ name: e.target.value })} />
           </Field>
@@ -76,7 +104,25 @@ export function ProviderAccordion({
             <input className="input" defaultValue={provider.base_url} onBlur={(e) => e.target.value !== provider.base_url && onChange({ base_url: e.target.value })} />
           </Field>
           <Field label="API Key">
-            <input className="input" placeholder={provider.has_api_key ? provider.api_key : "未配置, 粘贴新 key"} onChange={(e) => setDraft((d) => ({ ...d, api_key: e.target.value }))} onBlur={() => draft.api_key && onChange({ api_key: draft.api_key })} />
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                type={showApiKey ? "text" : "password"}
+                placeholder={provider.has_api_key ? provider.api_key : "未配置, 粘贴新 key"}
+                onChange={(e) => setDraft((d) => ({ ...d, api_key: e.target.value }))}
+                onBlur={() => draft.api_key && onChange({ api_key: draft.api_key })}
+              />
+              <button
+                type="button"
+                className="input"
+                style={{ padding: "4px 10px", cursor: "pointer", background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: 4, whiteSpace: "nowrap" }}
+                onClick={() => setShowApiKey((v) => !v)}
+                title={showApiKey ? "隐藏 API Key" : "显示 API Key"}
+              >
+                {showApiKey ? "隐藏" : "显示"}
+              </button>
+            </div>
           </Field>
           <Field label="默认模型">
             <input className="input" defaultValue={provider.default_model} onBlur={(e) => e.target.value !== provider.default_model && onChange({ default_model: e.target.value })} />
@@ -99,7 +145,10 @@ export function ProviderAccordion({
             <button
               onClick={async () => {
                 const list = await onPreviewModels(provider.base_url, draft.api_key ?? "");
-                if (Array.isArray(list) && list.length > 0) onChange({ model_list: list });
+                if (Array.isArray(list) && list.length > 0) {
+                  setPreviewedModels(list);
+                  onChange({ model_list: list });
+                }
               }}
               disabled={busy.preview}
             >
@@ -122,6 +171,18 @@ export function ProviderAccordion({
             )}
             <button onClick={onDelete} className="danger">删除</button>
           </div>
+          {previewedModels && previewedModels.length > 0 && (
+            <details className="provider-accordion-details">
+              <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--text-muted)", marginBottom: 4 }}>
+                已拉取 {previewedModels.length} 个模型
+              </summary>
+              <div style={{ maxHeight: 200, overflowY: "auto", padding: "4px 0" }}>
+                {previewedModels.map((m, i) => (
+                  <div key={i} style={{ fontSize: 12, padding: "2px 8px", fontFamily: "monospace", color: "var(--text-secondary)" }}>{m}</div>
+                ))}
+              </div>
+            </details>
+          )}
           {/* P0-MODEL-FAILOVER: 监控数据行 */}
           <div className="provider-accordion-stats">
             <span>1h 成功率: <b>{(provider.success_rate_1h * 100 || 0).toFixed(0)}%</b></span>

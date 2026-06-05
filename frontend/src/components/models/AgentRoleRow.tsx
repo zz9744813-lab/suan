@@ -19,6 +19,7 @@ export function AgentRoleRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const r = item.role;
+  const isStub = item.provider_name === 'stub' || (item.model_name && item.model_name.startsWith('mock-'));
   const pct = Math.round((item.progress || 0) * 100);
   const statusClass = item.status;
   return (
@@ -35,6 +36,9 @@ export function AgentRoleRow({
             <b>{r.display_name}</b>
             <span className="muted small">· {r.key}</span>
             {!r.enabled && <span className="pill tiny gray" style={{ marginLeft: 6 }}>禁用</span>}
+            {isStub && (
+              <span style={{background: 'var(--warning-bg, #fff3cd)', color: 'var(--warning-text, #856404)', borderRadius: 4, padding: '1px 6px', fontSize: 10, marginLeft: 4}}>⚠ mock</span>
+            )}
           </div>
           <div className="agent-role-row-desc" title={r.description ?? ""}>
             {r.description ?? "—"}
@@ -51,6 +55,11 @@ export function AgentRoleRow({
                 <span className="muted small">Model</span>
                 <span>{item.model_name ?? "—"}</span>
               </div>
+              {isStub && (
+                <div style={{fontSize: 11, color: 'var(--warning-text, #856404)', marginTop: 2}}>
+                  ⚠ 使用 mock 模型，请绑定真实 Provider
+                </div>
+              )}
               {/* P0-MODEL-FAILOVER: 选模模式徽章 */}
               <div className="agent-role-row-mode">
                 <span className={`pill tiny mode-${item.binding.selection_mode ?? "auto"}`} title={`auto_strategy: ${item.binding.auto_strategy ?? "—"}`}>

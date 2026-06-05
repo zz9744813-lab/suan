@@ -14,7 +14,7 @@
  *   PUT    /api/agent-roles/{id}/model-binding  改绑
  *   GET    /api/models/providers        Provider CRUD (保留旧 API)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAgentRole,
   deleteAgentRole,
@@ -45,6 +45,8 @@ import {
   AgentRunDetailPanel,
   AgentRoleEditor,
   AgentRoleEditorModal,
+  FirstRunGuide,
+  AutoConfigureModal,
 } from "../components/models";
 
 export function ModelsPage() {
@@ -59,6 +61,10 @@ export function ModelsPage() {
   const [bindingEditorOpen, setBindingEditorOpen] = useState(false);
   const [editingRoleId, setEditingRoleId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [showFirstRunGuide, setShowFirstRunGuide] = useState(false);
+  const firstRunShown = useRef(false);
+  const [showAutoConfigure, setShowAutoConfigure] = useState(false);
+  const [autoConfigureProvider, setAutoConfigureProvider] = useState<ModelProvider | null>(null);
 
   // 拉数据
   const load = () => {
@@ -77,6 +83,18 @@ export function ModelsPage() {
     const h = window.setInterval(load, 8000);
     return () => window.clearInterval(h);
   }, []); // eslint-disable-line
+
+  // 首次运行引导: 只有 stub Provider 时弹窗
+  useEffect(() => {
+    if (firstRunShown.current) return;
+    if (providers.length === 1) {
+      const p = providers[0];
+      if (p.name === "stub" || p.base_url?.startsWith("mock://")) {
+        setShowFirstRunGuide(true);
+        firstRunShown.current = true;
+      }
+    }
+  }, [providers]);
 
   // 过滤
   const filteredItems = useMemo<AgentRoleMatrixItem[]>(() => {
@@ -157,6 +175,34 @@ export function ModelsPage() {
     }
   };
 
+  // 新增 Provider (支持快速添加 OpenRouter/DeepSeek/自定义)
+  const onAddProvider = async (type?: string) => {
+    try {
+      let newProvider: ModelProvider | null = null;
+      if (type === "openrouter") {
+        newProvider = await createProvider({ name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", enabled: true });
+        setSuccessMsg("已快速创建 OpenRouter");
+      } else if (type === "deepseek") {
+        newProvider = await createProvider({ name: "DeepSeek", base_url: "https://api.deepseek.com/v1", enabled: true });
+        setSuccessMsg("已快速创建 DeepSeek");
+      } else {
+        const name = prompt("新 Provider 名称:");
+        if (!name) return;
+        newProvider = await createProvider({ name, base_url: "https://api.openai.com/v1", enabled: true });
+        setSuccessMsg(`已创建 ${name}`);
+      }
+      load();
+      // 检测是否是第一个真实 Provider（之前只有 stub）
+      if (newProvider && providers.length === 1) {
+        const only = providers[0];
+        if (only.name === "stub" || only.base_url?.startsWith("mock://")) {
+          setAutoConfigureProvider(newProvider);
+          setShowAutoConfigure(true);
+        }
+      }
+    } catch (e: any) { setErrorMsg(String(e?.message ?? e)); }
+  };
+
   // Agent 操作
   // 新增 Agent：走旧基础创建弹窗 (只有基础信息)
   const onAddAgent = () => {
@@ -221,15 +267,7 @@ export function ModelsPage() {
               />
               <button
                 className="primary"
-                onClick={async () => {
-                  const name = prompt("新 Provider 名称:");
-                  if (!name) return;
-                  try {
-                    await createProvider({ name, base_url: "https://api.openai.com/v1", enabled: true });
-                    load();
-                    setSuccessMsg(`已创建 ${name}`);
-                  } catch (e: any) { setErrorMsg(String(e?.message ?? e)); }
-                }}
+                onClick={() => onAddProvider()}
               >
                 + 新增 Provider
               </button>
@@ -251,6 +289,26 @@ export function ModelsPage() {
                 共 {providers.length} 个 · 启用 {providers.filter((p) => p.enabled).length}
               </div>
             </ShelfSidePanel>
+
+            {/* P0-D: Global stub warning */}
+            {(() => {
+              const stubCount = matrix?.items.filter(it => 
+                it.provider_name === 'stub' || (it.model_name && it.model_name.startsWith('mock-'))
+              ).length ?? 0;
+              const totalCount = matrix?.items.length ?? 0;
+              const halfStub = totalCount > 0 && stubCount / totalCount > 0.5;
+              
+              if (!halfStub) return null;
+              return (
+                <ShelfSidePanel title="⚠️ 模型警告" accentColor="gold">
+                  <div style={{fontSize: 12, lineHeight: 1.6}}>
+                    {stubCount}/{totalCount} 个 Agent 仍使用 mock 模型，生产写作不会调用真实 API。
+                    <br />
+                    <span style={{color: 'var(--accent)'}}>请添加真实 API Provider 并一键配置 Agent 模型绑定。</span>
+                  </div>
+                </ShelfSidePanel>
+              );
+            })()}
 
             {providers.map((p) => (
               <ProviderAccordion
@@ -316,6 +374,32 @@ export function ModelsPage() {
           }}
         />
       )}
+
+      {/* 首次运行引导 */}
+      <FirstRunGuide
+        open={showFirstRunGuide}
+        onClose={() => setShowFirstRunGuide(false)}
+        onCreateProvider={async (type) => {
+          setShowFirstRunGuide(false);
+          await onAddProvider(type);
+        }}
+      />
+
+      {/* 一键自动配置 */}
+      <AutoConfigureModal
+        open={showAutoConfigure}
+        provider={autoConfigureProvider}
+        matrixItems={matrix?.items ?? []}
+        onClose={() => {
+          setShowAutoConfigure(false);
+          setAutoConfigureProvider(null);
+        }}
+        onConfigured={() => {
+          setShowAutoConfigure(false);
+          setAutoConfigureProvider(null);
+          load();
+        }}
+      />
     </>
   );
 }
