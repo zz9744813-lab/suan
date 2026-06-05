@@ -44,6 +44,7 @@ import {
   AgentRoleMatrix,
   AgentRunDetailPanel,
   AgentRoleEditor,
+  AgentRoleEditorModal,
 } from "../components/models";
 
 export function ModelsPage() {
@@ -53,8 +54,10 @@ export function ModelsPage() {
   const [busyProviders, setBusyProviders] = useState<Record<number, { test?: boolean; health?: boolean; preview?: boolean }>>({});
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<AgentRole | null>(null);
+  const [createEditorOpen, setCreateEditorOpen] = useState(false);
+  const [bindingEditorOpen, setBindingEditorOpen] = useState(false);
+  const [editingRoleId, setEditingRoleId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
 
   // 拉数据
@@ -92,6 +95,11 @@ export function ModelsPage() {
     if (!matrix || selectedRoleId == null) return null;
     return matrix.items.find((it) => it.role.id === selectedRoleId) ?? null;
   }, [matrix, selectedRoleId]);
+
+  const editingItem = useMemo<AgentRoleMatrixItem | null>(() => {
+    if (!matrix || editingRoleId == null) return null;
+    return matrix.items.find((it) => it.role.id === editingRoleId) ?? null;
+  }, [matrix, editingRoleId]);
 
   // Provider 操作
   const onProviderChange = async (id: number, body: Partial<ModelProvider>) => {
@@ -150,16 +158,17 @@ export function ModelsPage() {
   };
 
   // Agent 操作
+  // 新增 Agent：走旧基础创建弹窗 (只有基础信息)
   const onAddAgent = () => {
     setEditingRole(null);
-    setEditorOpen(true);
+    setCreateEditorOpen(true);
   };
+  // 编辑已有 Agent：走新 AgentRoleEditorModal (三 Tab: 基础信息 / 模型绑定 / Prompt 绑定)
   const onEditAgent = (id: number) => {
     const item = matrix?.items.find((it) => it.role.id === id);
-    if (item) {
-      setEditingRole(item.role);
-      setEditorOpen(true);
-    }
+    if (!item) return;
+    setEditingRoleId(id);
+    setBindingEditorOpen(true);
   };
   const onDeleteAgent = async (id: number) => {
     const item = matrix?.items.find((it) => it.role.id === id);
@@ -185,7 +194,7 @@ export function ModelsPage() {
         setSuccessMsg(`已创建 ${r.display_name}`);
         setSelectedRoleId(r.id);
       }
-      setEditorOpen(false);
+      setCreateEditorOpen(false);
       setEditingRole(null);
       setTimeout(() => setSuccessMsg(null), 2000);
       load();
@@ -276,13 +285,37 @@ export function ModelsPage() {
         }
       />
 
+      {/* 新增 Agent：使用基础创建弹窗 (旧 AgentRoleEditor，仅基础信息) */}
       <AgentRoleEditor
-        open={editorOpen}
-        mode={editingRole ? "edit" : "create"}
-        initial={editingRole}
-        onClose={() => { setEditorOpen(false); setEditingRole(null); }}
+        open={createEditorOpen}
+        mode="create"
+        initial={null}
+        onClose={() => {
+          setCreateEditorOpen(false);
+          setEditingRole(null);
+        }}
         onSave={onSaveAgent}
       />
+
+      {/* 编辑已有 Agent：使用 AgentRoleEditorModal (三 Tab: 基础信息 / 模型绑定 / Prompt 绑定) */}
+      {editingItem && (
+        <AgentRoleEditorModal
+          open={bindingEditorOpen}
+          role={editingItem.role}
+          binding={editingItem.binding}
+          promptBinding={editingItem.prompt_binding}
+          onClose={() => {
+            setBindingEditorOpen(false);
+            setEditingRoleId(null);
+          }}
+          onSaved={() => {
+            load();
+            const name = editingItem?.role.display_name ?? "Agent";
+            setSuccessMsg(`已更新 ${name}`);
+            setTimeout(() => setSuccessMsg(null), 2000);
+          }}
+        />
+      )}
     </>
   );
 }

@@ -1,9 +1,14 @@
 /**
- * AgentRoleEditorModal — Agent 角色 3-Tab 编辑弹窗
+ * AgentRoleEditorModal — Agent 角色 3-Tab 编辑弹窗 (增强版)
  *
  * Tab 1: 基础信息 (名称/分类/阶段/超时/重试等)
- * Tab 2: 模型绑定 (Provider/Model/绑定模式/fallback/温度等)
+ * Tab 2: 模型绑定 (Provider/Model/绑定模式/fallback/温度等) — 集成 ProviderModelPicker
  * Tab 3: Prompt 绑定 (system/task prompt 模板 + 输出格式)
+ *
+ * 保存校验:
+ *   manual/manual_with_fallback 必须选 Provider + 填 Model
+ *   manual_with_fallback 至少需要一个 fallback 候选或开启自动 fallback
+ *   保存成功后刷新矩阵
  */
 import { useEffect, useState } from "react";
 import type {
@@ -34,6 +39,7 @@ import { AutoStrategySelect } from "./AutoStrategySelect";
 import { CandidateProviderPicker } from "./CandidateProviderPicker";
 import { FallbackCandidateEditor } from "./FallbackCandidateEditor";
 import { ModelSelectionPreviewPanel } from "./ModelSelectionPreviewPanel";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 
 type BindingMode = "auto" | "manual" | "manual_with_fallback";
 
@@ -81,7 +87,7 @@ export function AgentRoleEditorModal({
   const [draftModel, setDraftModel] = useState("");
   const [draftStrategy, setDraftStrategy] = useState("quality_first");
   const [draftCandidateProviderIds, setDraftCandidateProviderIds] = useState<number[]>([]);
-  const [draftFallbackCandidates, setDraftFallbackCandidates] = useState<{ provider_id: number; model_name: string }[]>([]);
+  const [draftFallbackCandidates, setDraftFallbackCandidates] = useState<{ provider_id: number; model_name: string; weight?: number }[]>([]);
   const [draftAllowAutoFallback, setDraftAllowAutoFallback] = useState(true);
   const [draftTemperature, setDraftTemperature] = useState(0.7);
   const [draftMaxTokens, setDraftMaxTokens] = useState(4096);
@@ -96,6 +102,12 @@ export function AgentRoleEditorModal({
   const [strictJson, setStrictJson] = useState(false);
   const [evidenceRequired, setEvidenceRequired] = useState(false);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
+
+  // 判断是否使用 stub/mock-fast (开发模式默认)
+  const currentProvider = providers.find((p) => p.id === draftProvider);
+  const isStubProvider = currentProvider != null && (currentProvider.base_url.startsWith("mock://") || currentProvider.name === "stub");
+  const isMockModel = draftModel === "mock-fast" || draftModel === "mock-long" || draftModel === "mock-vision";
+  const showStubWarning = isStubProvider || isMockModel;
 
   // ── 初始化 ──────────────────────────────────────────
   useEffect(() => {
@@ -125,7 +137,9 @@ export function AgentRoleEditorModal({
       setDraftStrategy(binding.auto_strategy ?? "quality_first");
       setDraftCandidateProviderIds(binding.candidate_provider_ids ?? []);
       setDraftFallbackCandidates(
-        (binding.fallback_candidates_json ?? []).map((c) => ({ provider_id: c.provider_id, model_name: c.model })),
+        (binding.fallback_candidates_json ?? []).map((c: { provider_id: number; model: string; weight?: number }) => ({
+          provider_id: c.provider_id, model_name: c.model, weight: c.weight ?? 1,
+        })),
       );
       setDraftAllowAutoFallback(binding.allow_auto_fallback ?? true);
       setDraftTemperature(binding.temperature ?? 0.7);
@@ -165,8 +179,35 @@ export function AgentRoleEditorModal({
 
   if (!open) return null;
 
+  // ── 保存校验 ────────────────────────────────────────
+  const validate = (): string | null => {
+    if (!displayName.trim()) return "显示名称不能为空";
+
+    // 手动模式必须选择 Provider 和 Model
+    if ((draftMode === "manual" || draftMode === "manual_with_fallback") && (!draftProvider || !draftModel.trim())) {
+      return "手动绑定模式必须选择 Provider 并填写 Model";
+    }
+
+    // manual_with_fallback 至少需要 fallback 候选或开启自动 fallback
+    if (draftMode === "manual_with_fallback" && draftFallbackCandidates.length === 0 && !draftAllowAutoFallback) {
+      return "manual_with_fallback 至少需要一个 fallback 候选，或开启自动 fallback";
+    }
+
+    // auto 模式至少需要一个候选 Provider
+    if (draftMode === "auto" && draftCandidateProviderIds.length === 0) {
+      return "自动模式至少需要选择一个候选 Provider";
+    }
+
+    return null;
+  };
+
   // ── 保存 ────────────────────────────────────────────
   const handleSave = async () => {
+    const err = validate();
+    if (err) {
+      setErrMsg(err);
+      return;
+    }
     setErrMsg(null);
     setSaving(true);
     try {
@@ -195,7 +236,7 @@ export function AgentRoleEditorModal({
         auto_strategy: draftStrategy as any,
         candidate_provider_ids: draftCandidateProviderIds.length > 0 ? draftCandidateProviderIds : null,
         fallback_candidates_json: draftFallbackCandidates.length > 0
-          ? draftFallbackCandidates.map((c) => ({ provider_id: c.provider_id, model: c.model_name, weight: 1 }))
+          ? draftFallbackCandidates.map((c) => ({ provider_id: c.provider_id, model: c.model_name, weight: c.weight ?? 1 }))
           : null,
         allow_auto_fallback: draftAllowAutoFallback,
         temperature: draftTemperature,
@@ -243,7 +284,7 @@ export function AgentRoleEditorModal({
       <div
         className="modal agent-editor-modal"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 600, maxWidth: "95vw" }}
+        style={{ width: 640, maxWidth: "95vw" }}
       >
         <div className="modal-head">
           <h3 className="serif">编辑 Agent · {role.display_name}</h3>
@@ -265,6 +306,18 @@ export function AgentRoleEditorModal({
 
         <div className="modal-body">
           {errMsg && <div className="error">{errMsg}</div>}
+
+          {/* stub/mock-fast 警告 */}
+          {tab === "模型绑定" && showStubWarning && (
+            <div style={{
+              background: "var(--warning-bg, #fff3cd)",
+              color: "var(--warning-text, #856404)",
+              border: "1px solid var(--warning-border, #ffc107)",
+              borderRadius: 6, padding: "8px 12px", fontSize: 12, marginBottom: 12,
+            }}>
+              ⚠️ 当前 Agent 使用 stub/mock-fast，仅用于开发测试。生产写作不会调用真实模型。请切换到真实的 API Provider。
+            </div>
+          )}
 
           {/* ═══════════════ Tab 1: 基础信息 ═══════════════ */}
           {tab === "基础信息" && (
@@ -353,34 +406,22 @@ export function AgentRoleEditorModal({
                 </>
               )}
 
-              {/* manual / manual_with_fallback: provider + model 下拉 */}
+              {/* manual / manual_with_fallback: Provider + Model 联合选择器 */}
               {(draftMode === "manual" || draftMode === "manual_with_fallback") && (
                 <div>
                   <div className="muted small" style={{ marginBottom: 4 }}>主模型</div>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <select
-                      className="input"
-                      value={draftProvider ?? ""}
-                      onChange={(e) => setDraftProvider(e.target.value ? Number(e.target.value) : null)}
-                      style={{ flex: 1 }}
-                    >
-                      <option value="">选择 Provider</option>
-                      {providers.filter((p) => p.enabled).map((p) => (
-                        <option key={p.id} value={p.id}>{p.name} (#{p.id})</option>
-                      ))}
-                    </select>
-                    <input
-                      className="input"
-                      placeholder="Model 名称"
-                      value={draftModel}
-                      onChange={(e) => setDraftModel(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                  </div>
+                  <ProviderModelPicker
+                    providers={providers}
+                    providerId={draftProvider}
+                    modelName={draftModel}
+                    onProviderChange={setDraftProvider}
+                    onModelChange={setDraftModel}
+                    allowManualInput={true}
+                  />
                 </div>
               )}
 
-              {/* manual_with_fallback: fallback 编辑器 */}
+              {/* manual_with_fallback: fallback 编辑器 (增强版, 支持 Provider 下拉) */}
               {draftMode === "manual_with_fallback" && (
                 <div>
                   <div className="muted small" style={{ marginBottom: 4 }}>Fallback 候选</div>
@@ -389,6 +430,7 @@ export function AgentRoleEditorModal({
                     onChange={setDraftFallbackCandidates}
                     allowAutoFallback={draftAllowAutoFallback}
                     onAllowChange={setDraftAllowAutoFallback}
+                    providers={providers}
                   />
                 </div>
               )}
@@ -438,7 +480,7 @@ export function AgentRoleEditorModal({
                 </select>
               </div>
 
-              {/* 所有模板一览（按 genre 分组） */}
+              {/* 所有模板一览 */}
               <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                 <div className="muted small" style={{ marginBottom: 8 }}>可用模板 (按类型)</div>
                 <div style={{ maxHeight: 240, overflowY: "auto", fontSize: 12 }}>

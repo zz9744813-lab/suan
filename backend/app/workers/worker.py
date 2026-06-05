@@ -180,6 +180,10 @@ class WorkerController:
             self._provider_health_task = asyncio.create_task(
                 self._provider_health_worker_loop(), name="novelforge-provider-health"
             )
+            # P0-DeepStudy: 启动 DeepStudy worker
+            self._deepstudy_task = asyncio.create_task(
+                self._deepstudy_worker_loop(), name="novelforge-deepstudy"
+            )
             while not self._stop.is_set():
                 await self._pause_event.wait()
                 if self._stop.is_set():
@@ -195,7 +199,7 @@ class WorkerController:
             await self._set_state("error", error=str(exc))
         finally:
             # cancel background tasks
-            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None)]:
+            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None), getattr(self, '_deepstudy_task', None), getattr(self, '_memory_consolidation_task', None)]:
                 if t and not t.done():
                     t.cancel()
 
@@ -274,6 +278,23 @@ class WorkerController:
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning(f"Memory consolidation tick error: {exc}")
+
+    async def _deepstudy_worker_loop(self) -> None:
+        """P0-DeepStudy: 每 10 秒轮询 queued/running StudyRun 并推进 DAG。"""
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=10.0)
+                return  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                from app.workers.deepstudy_worker import deepstudy_tick
+                await deepstudy_tick()
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(f"DeepStudy worker tick error: {exc}")
 
     async def _tick(self) -> bool:
         # P6 §5.1: pick 5 种支持任务类型中的下一个 pending

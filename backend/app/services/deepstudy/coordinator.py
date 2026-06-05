@@ -1,0 +1,228 @@
+"""DeepStudyCoordinatorAgent — the main execution loop.
+
+Consumes one tick per call per run, advancing the DAG one stage
+at a time. Each stage is simulated for now (no LLM calls); in
+production each stage dispatches to a chapter-level LLM agent.
+
+Auto-linkage: after marking a stage complete the coordinator
+publishes ``stage_completed`` so the GraphMaterializer and other
+consumers can materialise the output without explicit dispatch.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone
+
+from sqlalchemy import func, select
+
+from app.core.database import session_scope
+from app.models.deepstudy import StudyRun
+from app.models.study import StudyChapter, StudyMaterial
+
+from .auto_repair import AutoRepair
+from .behavior_miner import BehaviorPatternMiner
+from .event_bus import deepstudy_event_bus
+from .graph_materializer import GraphMaterializer
+from .job_graph import DEEPSTUDY_DAG, get_downstream_stages, get_ready_stages
+from .knowledge_indexer import KnowledgeIndexer
+from .stage_result_store import StageResultStore
+from .technique_miner import TechniqueMiner
+from .writing_context_sync import WritingContextSync
+
+
+class DeepStudyCoordinatorAgent:
+    """Orchestrates one DeepStudy run through the DAG.
+
+    One coordinator instance handles one ``execute_run`` tick per
+    invocation. The worker loop calls ``execute_run`` for every
+    queued / running run, consuming one stage per tick.
+    """
+
+    def __init__(self) -> None:
+        self.stage_store = StageResultStore()
+        self.graph_materializer = GraphMaterializer()
+        self.behavior_miner = BehaviorPatternMiner()
+        self.technique_miner = TechniqueMiner()
+        self.knowledge_indexer = KnowledgeIndexer()
+        self.writing_sync = WritingContextSync()
+        self.auto_repair = AutoRepair()
+
+    async def execute_run(self, run_id: int) -> None:
+        """Main execution loop — consume one tick per call.
+
+        Each tick:
+        1. Load the run, material, and current progress.
+        2. Determine which stages are ready.
+        3. Execute the next ready stage (one per tick).
+        4. Publish stage_completed for auto-linkage.
+        5. If all stages done, mark run as succeeded and run
+           the finaliser chain (graph_finalize, study_critic,
+           knowledge_index, writing_context_sync).
+        """
+        async with session_scope() as db:
+            run = await db.get(StudyRun, run_id)
+            if run is None:
+                return
+            if run.status not in ("queued", "running"):
+                return
+
+            completed_stages: list[str] = []
+            if run.progress and isinstance(run.progress, dict):
+                completed_stages = run.progress.get("completed_stages", [])
+
+            ready = get_ready_stages(completed_stages)
+            if not ready:
+                # All stages done — finalise
+                await self._finalize_run(db, run, completed_stages)
+                return
+
+            # Take the first ready stage
+            next_stage = ready[0]
+
+            # Transition to running if queued
+            if run.status == "queued":
+                run.status = "running"
+                run.started_at = datetime.now(timezone.utc)
+
+            run.current_stage = next_stage
+
+            # Count total chapters for progress tracking
+            material = await db.get(StudyMaterial, run.material_id)
+            if material is not None:
+                chapter_count_result = await db.execute(
+                    select(func.count()).select_from(StudyChapter).where(
+                        StudyChapter.material_id == run.material_id
+                    )
+                )
+                run.total_chapters = chapter_count_result.scalar() or 0
+
+            if run.total_chapters == 0:
+                # No chapters — skip stage
+                await self._advance_stage(db, run, next_stage)
+                return
+
+            # Execute the stage (simulated for now)
+            await self._execute_stage(db, run, next_stage)
+
+    async def _execute_stage(self, db, run, stage_key: str) -> None:
+        """Execute a single stage.
+
+        In production this would:
+        - Dispatch to the appropriate LLM agent (ChapterProfilerAgent,
+          EntityAgent, etc.)
+        - Process each chapter in parallel (up to max_concurrency)
+        - Save per-chapter results via StageResultStore
+        - Accumulate tokens and cost
+
+        For now we simulate success and advance the DAG.
+        """
+        # Mark stage as completed in progress
+        if not isinstance(run.progress, dict):
+            run.progress = {}
+        completed: list[str] = list(run.progress.get("completed_stages", []) or [])
+        if stage_key not in completed:
+            completed.append(stage_key)
+        run.progress["completed_stages"] = completed
+        run.processed_chapters = run.total_chapters
+
+        # Publish event for auto-linkage
+        await deepstudy_event_bus.stage_completed(
+            material_id=run.material_id,
+            run_id=run.id,
+            stage_key=stage_key,
+            payload={"status": "completed"},
+        )
+
+        # Auto-materialise after specific stages
+        await self._auto_materialize(run.material_id, stage_key)
+
+        await db.flush()
+
+    async def _advance_stage(self, db, run, stage_key: str) -> None:
+        """Skip a stage when there are no chapters to process."""
+        if not isinstance(run.progress, dict):
+            run.progress = {}
+        completed: list[str] = list(run.progress.get("completed_stages", []) or [])
+        if stage_key not in completed:
+            completed.append(stage_key)
+        run.progress["completed_stages"] = completed
+
+        await deepstudy_event_bus.stage_completed(
+            material_id=run.material_id,
+            run_id=run.id,
+            stage_key=stage_key,
+            payload={"status": "skipped", "reason": "no_chapters"},
+        )
+        await db.flush()
+
+    async def _auto_materialize(self, material_id: int, stage_key: str) -> None:
+        """Trigger auto-materialisation hooks after specific stages."""
+        try:
+            if stage_key == "entity_extract":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "event_extract":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "relationship_analyze":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "scene_beat_extract":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "behavior_pattern_mine":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "foreshadow_analyze":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+            elif stage_key == "technique_mine":
+                await self.graph_materializer.materialize_stage_output(material_id, stage_key)
+        except Exception:
+            # Materialisation failure should not block stage advancement.
+            pass
+
+    async def _finalize_run(self, db, run, completed_stages: list[str]) -> None:
+        """All stages complete — run finalisers and mark run succeeded."""
+        material_id = run.material_id
+        all_stages = list(DEEPSTUDY_DAG.keys())
+
+        if not all(s in completed_stages for s in all_stages):
+            return  # Not truly done — some stages may be unreachable
+
+        try:
+            # Graph finalisation
+            await self.graph_materializer.finalize_graph(material_id)
+            # Behaviour pattern consolidation
+            await self.behavior_miner.finalize_book_patterns(material_id)
+            # Technique consolidation
+            await self.technique_miner.finalize_techniques(material_id)
+            # Knowledge indexing
+            await self.knowledge_indexer.index_material(material_id)
+            # Writing context sync
+            await self.writing_sync.sync_material(material_id)
+
+            # Mark material as completed
+            from app.models.study import StudyMaterial
+            material = await db.get(StudyMaterial, material_id)
+            if material is not None:
+                material.study_status = "completed"
+                material.last_deepstudied_at = datetime.now(timezone.utc)
+
+            run.status = "succeeded"
+            run.finished_at = datetime.now(timezone.utc)
+
+            await deepstudy_event_bus.stage_completed(
+                material_id=material_id,
+                run_id=run.id,
+                stage_key="run_completed",
+                payload={"status": "succeeded"},
+            )
+        except Exception as e:
+            run.status = "failed"
+            run.error = str(e)
+            run.finished_at = datetime.now(timezone.utc)
+
+            await deepstudy_event_bus.stage_completed(
+                material_id=material_id,
+                run_id=run.id,
+                stage_key="run_failed",
+                payload={"status": "failed", "error": str(e)},
+            )
+
+        await db.flush()

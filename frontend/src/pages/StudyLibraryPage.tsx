@@ -50,6 +50,10 @@ import {
   type ShelfColorType,
 } from "../components/shelf";
 
+// P0-DeepStudy: debug flag — 控制高级模式按钮 (entities_only, relationships_only,
+// behaviors_only, techniques_only) 是否在 UI 中显示.
+const ENABLE_DEEPSTUDY_DEBUG = import.meta.env.VITE_ENABLE_DEEPSTUDY_DEBUG === "true";
+
 // ----- 状态 -> 颜色 + 标签 (P2 §2) -------------------------------------
 // spec 给的 6 个颜色. 我们的 Shelf 颜色 token 表里没 orange, 走 fallback red
 // 并在 hoverHint 里说明, 后续 P2.1 (UI 美化) 加 orange token.
@@ -485,44 +489,48 @@ export function StudyLibraryPage() {
                   </button>
                   <button
                     className="tiny"
-                    onClick={() => startRun(selected, "entities_only")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                    title="只跑 ChapterProfiler + Entity + SceneBeat"
-                  >
-                    👤 仅实体
-                  </button>
-                  <button
-                    className="tiny"
-                    onClick={() => startRun(selected, "relationships_only")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                    title="只跑 ChapterProfiler + Relationship"
-                  >
-                    🔗 仅关系
-                  </button>
-                  <button
-                    className="tiny"
-                    onClick={() => startRun(selected, "behaviors_only")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                    title="只跑 ChapterProfiler + Behavior"
-                  >
-                    🧩 仅行为
-                  </button>
-                  <button
-                    className="tiny"
-                    onClick={() => startRun(selected, "techniques_only")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                    title="只跑 Behavior + Technique"
-                  >
-                    ✍️ 仅技巧
-                  </button>
-                  <button
-                    className="tiny"
                     onClick={() => startRun(selected, "repair_failed")}
                     disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
                     title="重跑上一次 run 失败的 stage (其它不动)"
                   >
                     🔧 修复失败
                   </button>
+                  {ENABLE_DEEPSTUDY_DEBUG && (
+                    <>
+                      <button
+                        className="tiny"
+                        onClick={() => startRun(selected, "entities_only")}
+                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                        title="只跑 ChapterProfiler + Entity + SceneBeat"
+                      >
+                        👤 仅实体
+                      </button>
+                      <button
+                        className="tiny"
+                        onClick={() => startRun(selected, "relationships_only")}
+                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                        title="只跑 ChapterProfiler + Relationship"
+                      >
+                        🔗 仅关系
+                      </button>
+                      <button
+                        className="tiny"
+                        onClick={() => startRun(selected, "behaviors_only")}
+                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                        title="只跑 ChapterProfiler + Behavior"
+                      >
+                        🧩 仅行为
+                      </button>
+                      <button
+                        className="tiny"
+                        onClick={() => startRun(selected, "techniques_only")}
+                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                        title="只跑 Behavior + Technique"
+                      >
+                        ✍️ 仅技巧
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

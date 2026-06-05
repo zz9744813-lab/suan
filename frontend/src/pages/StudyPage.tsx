@@ -1,22 +1,22 @@
 /**
- * StudyPage (R18 rewrite) — 拆书 → 模式
+ * StudyPage (P0 DeepStudy 自动联动重构)
  *
- * 旧的 3-section 布局 (① 材料 / ② 详情 / ③ 模式库) 改成 tab + 树状:
+ * 旧的 "手动按钮" 模式已废弃。现在的设计原则:
+ *   上传/粘贴参考书 → 启动 DeepStudy → 自动生成图谱/行为模式/技巧
+ *   用户只看结果，不操作内部工序。
  *
- *   ┌─ Tab 切换 ─────────────────────────────────────────┐
- *   │  📚 我的书库    /    🧩 行为模式                    │
- *   └────────────────────────────────────────────────────┘
- *   「我的书库」tab:
- *     - 顶部 toolbar: 搜索 + 上传 (txt/md/pdf/docx/html/epub) + 粘贴新建
- *     - 主体: 书本卡片网格. 每张卡片默认折叠, 点开显示章节 → 人物
- *     - 卡片内部是树状: 章节行可点开看原文 + 抽取人物
- *   「行为模式」tab: 标签筛选 + 搜索 + 卡片列表, 跟 R16 一样
+ * 页面结构:
+ *   Tab 1: 📚 我的书库 — 书卡网格, 每本书展开后显示:
+ *     - 自动 DeepStudy 进度 (Run 状态/阶段/产物预览)
+ *     - 章节树 (只读, 查看已抽取的人物)
+ *     - "启动 DeepStudy" / "查看图谱" / "查看行为模式" / "查看技巧"
+ *   Tab 2: 🧩 行为模式 — 标签筛选 + 搜索 + 卡片列表
  *
- * 砍掉的"杂乱"来源: 旧的 3 段式把"创建材料"、"材料详情"和"模式库"
- * 三个独立的卡片从上到下平铺, 用户得不停滚屏 + 在两个不同的
- * "selectedId" 状态间来回. 现在先选书, 再选章节, 层次清晰.
+ * 已删除的手动按钮: 批量抽人物 / 批量抽事件 / 试抽5章 / 提取行为模式 /
+ *   分析人物关系 / 应用关系图谱。这些是系统内部 Agent 的工作。
+ *   Debug 模式下 (VITE_ENABLE_DEEPSTUDY_DEBUG=true) 仍然可见。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   listStudyMaterials,
   createStudyMaterial,
@@ -24,30 +24,22 @@ import {
   getStudyMaterial,
   chapterizeStudyMaterial,
   runStudyChapter,
-  runStudyBulk,
   deleteStudyCharacter,
   listBehaviorPatterns,
   createBehaviorPattern,
   deleteBehaviorPattern,
   deleteStudyMaterial,
-  getTask,
-  extractStudyBehaviors,
   getStudyMaterialOverview,
-  getStudyRelationships,
-  applyStudyRelationships,
-  getStudyForeshadows,
+  startDeepStudyRun,
+  getDeepStudyRun,
 } from "../api";
 import type {
   StudyMaterial,
   StudyMaterialDetail,
   StudyChapter,
   StudyCharacter,
-  StudyBulkPayload,
   BehaviorPattern,
   StudyMaterialOverview,
-  StudyRelationshipSuggestion,
-  StudyRelationshipsResponse,
-  StudyForeshadowSummary,
 } from "../types";
 import "./StudyPage.css";
 
@@ -111,39 +103,16 @@ function BookLibrary() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  // New material form (collapsed by default — the upload button is
-  // the primary path now that we accept 6 formats).
+  // New material form (collapsed by default)
   const [showNew, setShowNew] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newAuthor, setNewAuthor] = useState("");
   const [newText, setNewText] = useState("");
-  // R21: live bulk-study progress. ``bulkProgress`` is keyed by
-  // material_id so the user can run a bulk on book A, expand
-  // book B, and still see book A's bar ticking in the background.
-  // ``bulkTimers`` holds the polling setTimeout handle so the
-  // component can cancel them on unmount.
-  const [bulkProgress, setBulkProgress] = useState<
-    Record<number, StudyBulkPayload & { task_id: number; status: string }>
-  >({});
-  const bulkTimers = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({});
-  // R22: per-material overview cache (chapters/characters/behaviors/
-  // foreshadows/graph_node_count). Refreshed after a behavior
-  // extract or a graph materialise, so the badges stay honest.
+  // Per-material overview cache
   const [overviews, setOverviews] = useState<Record<number, StudyMaterialOverview>>({});
-  // R22: relationships-modal state. ``relMaterialId`` opens the
-  // modal with the corresponding material's suggestions. The
-  // ``relationInputs`` map holds the per-suggestion free-form
-  // label the user types before applying.
-  const [relMaterialId, setRelMaterialId] = useState<number | null>(null);
-  const [relData, setRelData] = useState<StudyRelationshipsResponse | null>(null);
-  const [relLoading, setRelLoading] = useState(false);
-  const [relApplyMsg, setRelApplyMsg] = useState<string | null>(null);
-  const [relApplyBusy, setRelApplyBusy] = useState(false);
-  // ``selectedSuggestions`` is a Set of "a_id-b_id" keys the user
-  // ticked in the modal. Persists across renders so the user can
-  // freely edit relation labels without losing their selection.
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
-  const [relationInputs, setRelationInputs] = useState<Record<string, string>>({});
+  // P0 DeepStudy: per-material run state for progress display
+  const [deepstudyRuns, setDeepstudyRuns] = useState<Record<number, any>>({});
+  const [deepstudyLaunchBusy, setDeepstudyLaunchBusy] = useState<Record<number, boolean>>({});
 
   const refresh = () => {
     listStudyMaterials()
@@ -308,94 +277,49 @@ function BookLibrary() {
     refresh();
   };
 
-  // R21: kick off a background bulk study on every chapter of one
-  // book. The endpoint returns immediately with a task_id; we
-  // poll ``GET /api/tasks/{id}`` every 2.5s and write the
-  // counters into ``bulkProgress`` so the user sees the bar
-  // tick up. When the task reaches a terminal state (succeeded /
-  // failed), we refresh the book detail to pull the freshly
-  // persisted characters / events.
-  const onRunStudyBulk = async (
-    material: StudyMaterial,
-    mode: "character" | "event" | "both",
-    limit: number,
-  ) => {
+  // P0 DeepStudy: launch a DeepStudy run for this material
+  const onLaunchDeepStudy = async (materialId: number) => {
+    setDeepstudyLaunchBusy((prev) => ({ ...prev, [materialId]: true }));
     setErrorMsg(null);
     try {
-      const start = await runStudyBulk(material.id, {
-        mode,
-        limit,
-        max_concurrency: 3,
-        force: true,
-        max_chars: 4000,
-      });
-      setBulkProgress((prev) => ({
-        ...prev,
-        [material.id]: {
-          task_id: start.task_id,
-          material_id: material.id,
-          mode,
-          total_chapters: start.total_chapters,
-          chapters_to_process: start.chapters_to_process,
-          chapters_processed: 0,
-          characters_added: 0,
-          events_added: 0,
-          errors: [],
-          max_concurrency: 3,
-          force: true,
-          max_chars: 4000,
-          status: "running",
-        },
-      }));
-      // Start the polling loop for this material.
-      const tick = async () => {
-        try {
-          const t = await getTask(start.task_id);
-          const payload = (t.payload || {}) as StudyBulkPayload;
-          setBulkProgress((prev) => ({
-            ...prev,
-            [material.id]: {
-              ...payload,
-              task_id: t.id,
-              status: t.status,
-            },
-          }));
-          if (t.status === "succeeded" || t.status === "failed") {
-            // Terminal — refresh book detail to pick up the new
-            // character_count / event_count, and stop polling.
-            bulkTimers.current[material.id] = null;
-            if (expanded === material.id) {
-              const d = await getStudyMaterial(material.id);
-              setDetail(d);
-            }
-            refresh();
-            return;
-          }
-        } catch (e: any) {
-          // Polling error — keep retrying unless the task is
-          // already gone from the server (404 → treat as done).
-          setErrorMsg(`轮询任务失败: ${e?.message ?? e}`);
-        }
-        const handle = setTimeout(tick, 2500);
-        bulkTimers.current[material.id] = handle;
-      };
-      const handle = setTimeout(tick, 1500);
-      bulkTimers.current[material.id] = handle;
+      const r = await startDeepStudyRun(materialId, { mode: "full" });
+      setDeepstudyRuns((prev) => ({ ...prev, [materialId]: r }));
+      // Poll for updates
+      pollDeepStudyRun(materialId, r.run_id);
     } catch (e: any) {
       setErrorMsg(e?.message ?? String(e));
+    } finally {
+      setDeepstudyLaunchBusy((prev) => ({ ...prev, [materialId]: false }));
     }
   };
 
-  // Cancel any in-flight polling timers when the page unmounts.
-  useEffect(() => {
-    const timers = bulkTimers.current;
-    return () => {
-      for (const k of Object.keys(timers)) {
-        const h = timers[Number(k)];
-        if (h) clearTimeout(h);
-      }
+  const pollDeepStudyRun = (materialId: number, runId: number) => {
+    const tick = async () => {
+      try {
+        const r = await getDeepStudyRun(runId);
+        setDeepstudyRuns((prev) => ({ ...prev, [materialId]: r }));
+        if (r.status === "succeeded" || r.status === "failed" || r.status === "cancelled") {
+          refresh();
+          return;
+        }
+        setTimeout(tick, 5000);
+      } catch { /* ignore */ }
     };
-  }, []);
+    setTimeout(tick, 3000);
+  };
+
+  // Load existing runs for all materials
+  useEffect(() => {
+    if (materials.length === 0) return;
+    materials.forEach((m) => {
+      // The material's study_progress may have last run info
+      if ((m as any).study_progress?.last_run_id) {
+        getDeepStudyRun((m as any).study_progress.last_run_id)
+          .then((r) => setDeepstudyRuns((prev) => ({ ...prev, [m.id]: r })))
+          .catch(() => {});
+      }
+    });
+  }, [materials]);
 
   // R22: load overviews for every material in the current list so
   // the per-book 4-stat row can render the "behavior_count /
@@ -422,107 +346,13 @@ function BookLibrary() {
   }, [materials]);
 
   // R22: re-fetch a single material's overview (e.g. after
-  // extract-behaviors) without paying for the whole list.
+  // DeepStudy completes) without paying for the whole list.
   const refreshOverview = async (materialId: number) => {
     try {
       const o = await getStudyMaterialOverview(materialId);
       setOverviews((prev) => ({ ...prev, [materialId]: o }));
     } catch {
       // Ignore.
-    }
-  };
-
-  // R22: kick off the behavior-pattern extraction. Synchronous
-  // endpoint (one LLM call) so we just await the response and
-  // refresh the overview once it's done.
-  const onExtractBehaviors = async (m: StudyMaterial) => {
-    setBusy(true);
-    setErrorMsg(null);
-    try {
-      const r = await extractStudyBehaviors(m.id, {
-        max_patterns: 20,
-        force: false,
-        max_chunk_chars: 1500,
-        evidence_chapter_count: 5,
-      });
-      const data = r ?? null;
-      const added = data?.patterns_added ?? 0;
-      const skipped = data?.patterns_skipped ?? 0;
-      const sample = (data?.sample_names ?? []).join("、") || "—";
-      setErrorMsg(
-        `提取完成: 新增 ${added} 条模式,跳过 ${skipped} 条(已存在)。示例: ${sample}。`,
-      );
-      await refreshOverview(m.id);
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // R22: open the relationship-modal. The endpoint is cheap
-  // (just a SQL join) so we don't need a separate loading row.
-  const onAnalyzeRelationships = async (m: StudyMaterial) => {
-    setRelMaterialId(m.id);
-    setRelData(null);
-    setRelApplyMsg(null);
-    setSelectedSuggestions(new Set());
-    setRelationInputs({});
-    setRelLoading(true);
-    try {
-      const r = await getStudyRelationships(m.id, { min_co_chapter_count: 1, limit: 80 });
-      setRelData(r ?? null);
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? String(e));
-      setRelMaterialId(null);
-    } finally {
-      setRelLoading(false);
-    }
-  };
-
-  // R22: apply the user-picked (pair, relation) tuples as
-  // GraphEdge rows. Each picked suggestion becomes a single
-  // ``{char_a_id, char_b_id, relation}`` triple. We need the
-  // material's project_id to know which graph to write into;
-  // if it's not set, we surface a friendly error.
-  const onApplyRelationships = async (m: StudyMaterial) => {
-    if (!m.project_id) {
-      setRelApplyMsg("这本书还没关联到 project_id,没法写入图谱。先去编辑这本书绑定项目。");
-      return;
-    }
-    if (!relData || selectedSuggestions.size === 0) {
-      setRelApplyMsg("至少勾选一条关系再应用。");
-      return;
-    }
-    setRelApplyBusy(true);
-    setRelApplyMsg(null);
-    try {
-      const pairs: Array<Record<string, any>> = [];
-      for (const sug of relData.suggestions) {
-        const k = `${sug.char_a_id}-${sug.char_b_id}`;
-        if (!selectedSuggestions.has(k)) continue;
-        pairs.push({
-          char_a_id: sug.char_a_id,
-          char_b_id: sug.char_b_id,
-          relation: (relationInputs[k] || "同章节出现").trim() || "同章节出现",
-          weight: Math.min(1.0, 0.3 + 0.1 * sug.co_chapter_count),
-          evidence: sug.sample_quote,
-        });
-      }
-      const r = await applyStudyRelationships(m.id, {
-        project_id: m.project_id,
-        pairs,
-      });
-      const data = r ?? null;
-      setRelApplyMsg(
-        `已应用: 新增 ${data?.edges_added ?? 0} 条,跳过 ${data?.edges_skipped ?? 0} 条(已存在)。`,
-      );
-      setSelectedSuggestions(new Set());
-      await refreshOverview(m.id);
-    } catch (e: any) {
-      setRelApplyMsg(e?.message ?? String(e));
-    } finally {
-      setRelApplyBusy(false);
     }
   };
 
@@ -630,34 +460,14 @@ function BookLibrary() {
               onChapterize={() => onChapterize(m.id)}
               onDelete={() => onDeleteBook(m)}
               onRunStudy={onRunStudy}
-              onRunStudyBulk={(mode, limit) => onRunStudyBulk(m, mode, limit)}
               onDeleteCharacter={onDeleteCharacter}
-              bulkProgress={bulkProgress[m.id] ?? null}
               overview={overviews[m.id] ?? null}
-              onExtractBehaviors={() => onExtractBehaviors(m)}
-              onAnalyzeRelationships={() => onAnalyzeRelationships(m)}
+              onLaunchDeepStudy={() => onLaunchDeepStudy(m.id)}
+              deepstudyRun={deepstudyRuns[m.id] ?? null}
+              launchBusy={!!deepstudyLaunchBusy[m.id]}
             />
           ))}
         </div>
-      )}
-
-      {relMaterialId != null && (
-        <RelationshipsModal
-          material={materials.find((m) => m.id === relMaterialId)!}
-          data={relData}
-          loading={relLoading}
-          selected={selectedSuggestions}
-          setSelected={setSelectedSuggestions}
-          relationInputs={relationInputs}
-          setRelationInputs={setRelationInputs}
-          applyMsg={relApplyMsg}
-          applyBusy={relApplyBusy}
-          onApply={() => {
-            const m = materials.find((x) => x.id === relMaterialId);
-            if (m) onApplyRelationships(m);
-          }}
-          onClose={() => setRelMaterialId(null)}
-        />
       )}
     </div>
   );
@@ -665,9 +475,8 @@ function BookLibrary() {
 
 function BookCard({
   material, expanded, detail, busy,
-  onToggle, onChapterize, onDelete, onRunStudy, onRunStudyBulk, onDeleteCharacter,
-  bulkProgress, overview,
-  onExtractBehaviors, onAnalyzeRelationships,
+  onToggle, onChapterize, onDelete, onRunStudy, onDeleteCharacter,
+  overview, onLaunchDeepStudy, deepstudyRun, launchBusy,
 }: {
   material: StudyMaterial;
   expanded: boolean;
@@ -677,12 +486,11 @@ function BookCard({
   onChapterize: () => void;
   onDelete: () => void;
   onRunStudy: (ch: StudyChapter) => void;
-  onRunStudyBulk: (mode: "character" | "event" | "both", limit: number) => void;
   onDeleteCharacter: (id: number) => void;
-  bulkProgress: (StudyBulkPayload & { task_id: number; status: string }) | null;
   overview: StudyMaterialOverview | null;
-  onExtractBehaviors: () => void;
-  onAnalyzeRelationships: () => void;
+  onLaunchDeepStudy: () => void;
+  deepstudyRun: any | null;
+  launchBusy: boolean;
 }) {
   // The detail fetch belongs to the EXPANDED book only; if this
   // card isn't the active one, we just show the summary fields
@@ -730,89 +538,57 @@ function BookCard({
             <button onClick={onChapterize} disabled={busy || !material.raw_text_length} title="重新按「第 N 章 / Chapter N」切分正文">
               {busy ? "分章中…" : "重新分章"}
             </button>
-            {/* R21: bulk action row. Two presets so the user can
-                run character extraction across the WHOLE book
-                (default 一次性跑完) or sample a fixed number
-                of chapters first to sanity-check the model +
-                token spend before committing to 2332. The
-                progress bar below ticks up live from the
-                polling task payload. */}
+            {/* P0 DeepStudy: 一键启动自动流水线 */}
             <button
               className="primary"
-              disabled={busy || !!bulkProgress || !material.chapter_count}
-              onClick={() => onRunStudyBulk("character", 0)}
-              title="对全书每一章都跑一次人物抽取(后台批量,可在 Dashboard 看进度)"
+              disabled={busy || launchBusy || !material.chapter_count || (deepstudyRun && deepstudyRun.status === "running")}
+              onClick={onLaunchDeepStudy}
+              title="启动 DeepStudy 自动流水线: 分章 → 实体抽取 → 事件抽取 → 关系分析 → 伏笔 → 行为模式 → 写作技巧 → 图谱生成 → 知识索引"
             >
-              {bulkProgress ? "抽取中…" : "批量抽人物"}
+              {launchBusy ? "启动中…"
+                : deepstudyRun && deepstudyRun.status === "running" ? "运行中…"
+                : deepstudyRun && deepstudyRun.status === "succeeded" ? "✅ DeepStudy 已完成"
+                : "🚀 启动 DeepStudy"}
             </button>
-            <button
-              disabled={busy || !!bulkProgress || !material.chapter_count || !material.project_id}
-              onClick={() => onRunStudyBulk("event", 0)}
-              title="对全书每一章跑一次事件抽取(伏笔/转折,需要先把这本书关联到 project_id)"
-            >
-              {bulkProgress ? "抽取中…" : "批量抽事件"}
-            </button>
-            <button
-              disabled={busy || !!bulkProgress || !material.chapter_count}
-              onClick={() => onRunStudyBulk("character", 5)}
-              title="先跑 5 章试一下模型效果,确认 OK 再点上面跑全书"
-            >
-              试抽 5 章
-            </button>
-            {/* R22: 联动按钮 — 提取行为模式 / 分析人物关系。
-                两个按钮都是同步端点,完成后刷新 overview 即可。
-                「行为模式」会复用抽取过的 character roster, 所以
-                在 character_count=0 时禁用,避免空跑 LLM。 */}
-            <button
-              disabled={busy || !material.character_count}
-              onClick={onExtractBehaviors}
-              title="基于已抽人物 + 章节摘要,跑一次 LLM 总结出 N 张行为模式卡"
-            >
-              🧩 提取行为模式
-            </button>
-            <button
-              disabled={busy || !material.character_count}
-              onClick={onAnalyzeRelationships}
-              title="分析书中同章节出现的人物对,生成可一键应用到图谱的关系建议"
-            >
-              🔗 分析人物关系
-            </button>
+            {material.project_id && deepstudyRun && deepstudyRun.status === "succeeded" && (
+              <button
+                className="link small"
+                onClick={() => window.open(`/study/books/${material.id}/graph`, "_blank")}
+                title="查看自动生成的知识图谱"
+              >
+                🌐 查看图谱
+              </button>
+            )}
             <button className="danger" onClick={onDelete} disabled={busy}>
               删除
             </button>
           </div>
 
-          {/* R22: 概览行 — 让用户一眼看到这本书"数据沉淀到了哪"。
-              4 个数字 = character_count(已有) / behavior_count /
-              foreshadow_count / graph_node_count。如果 overview
-              还没加载完,这一行就不渲染,避免空 0 误导。 */}
+          {/* P0 DeepStudy: 自动进度展示 */}
+          {deepstudyRun && (
+            <DeepStudyProgressCard run={deepstudyRun} material={material} overview={overview} />
+          )}
+
+          {/* 概览行 — 展示自动联动的产物统计 */}
           {overview && (overview.behavior_count > 0 || overview.foreshadow_count > 0 || overview.graph_node_count > 0) && (
             <div className="study-linkage-row">
-              <span className="muted small">联动数据：</span>
-              <span className="study-linkage-chip" title="已沉淀到行为模式库">
-                🧩 行为 <b>{overview.behavior_count}</b>
-              </span>
-              <span className="study-linkage-chip" title="已沉淀到伏笔库(需要 project_id)">
-                📜 伏笔 <b>{overview.foreshadow_count}</b>
-              </span>
-              <span className="study-linkage-chip" title="已导入到图谱(任何 kind)">
-                🌐 图谱 <b>{overview.graph_node_count}</b>
-              </span>
-              {overview.graph_node_count === 0 && material.project_id && (
-                <span className="muted tiny">
-                  提示: 进入「图谱」页 → 选这本书导入,即可一键把人物/伏笔/行为送进图谱
+              <span className="muted small">自动产物：</span>
+              {overview.behavior_count > 0 && (
+                <span className="study-linkage-chip" title="DeepStudy 自动沉淀的行为模式">
+                  🧩 行为模式 <b>{overview.behavior_count}</b>
+                </span>
+              )}
+              {overview.foreshadow_count > 0 && (
+                <span className="study-linkage-chip" title="DeepStudy 自动分析的伏笔链路">
+                  📜 伏笔 <b>{overview.foreshadow_count}</b>
+                </span>
+              )}
+              {overview.graph_node_count > 0 && (
+                <span className="study-linkage-chip" title="DeepStudy 自动生成的图谱节点">
+                  🌐 图谱 <b>{overview.graph_node_count}</b> 节点
                 </span>
               )}
             </div>
-          )}
-
-          {/* R21: live progress bar for the in-flight bulk job on
-              this book. We pull the per-chapter counters from the
-              polled AgentTask.payload. Stays visible after the
-              task finishes so the user can see "finished, 3 chars
-              added" before they scroll the page. */}
-          {bulkProgress && (
-            <BulkProgressBar payload={bulkProgress} />
           )}
 
           {d?.error && (
@@ -843,57 +619,6 @@ function BookCard({
               busy={busy}
             />
           )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// R21: live progress bar for an in-flight bulk study job.
-// Shows "已处理 X / Y" + the per-mode counters (chars added /
-// events added) and a horizontal fill bar. The bar is
-// percentage-based off ``chapters_processed / chapters_to_process``;
-// if the backend somehow reports a denominator of 0 we fall
-// through to ``0%`` (defensive — should never happen in practice).
-function BulkProgressBar({
-  payload,
-}: {
-  payload: StudyBulkPayload & { task_id: number; status: string };
-}) {
-  const total = Math.max(payload.chapters_to_process, 1);
-  const pct = Math.min(100, Math.round((payload.chapters_processed / total) * 100));
-  const isRunning = payload.status === "running" || payload.status === "pending";
-  const isError = payload.status === "failed";
-  const modeLabel: Record<string, string> = {
-    character: "人物",
-    event: "事件",
-    both: "人物+事件",
-  };
-  return (
-    <div className={`bulk-progress ${isError ? "error" : isRunning ? "running" : "done"}`} style={{ marginBottom: 10 }}>
-      <div className="row" style={{ gap: 10, fontSize: 12, marginBottom: 4 }}>
-        <span>
-          <b>{modeLabel[payload.mode] ?? payload.mode}</b>
-          {" · 已处理 "}
-          <b>{payload.chapters_processed}</b> / {payload.chapters_to_process} 章
-        </span>
-        <span className="muted">· +{payload.characters_added} 人物 · +{payload.events_added} 事件</span>
-        <span className="muted">· task #{payload.task_id}</span>
-        <span className="spacer" />
-        <span className={`pill tiny ${isError ? "error" : isRunning ? "warn" : "ok"}`}>{payload.status}</span>
-      </div>
-      <div className="bulk-progress-track">
-        <div
-          className="bulk-progress-fill"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {payload.errors && payload.errors.length > 0 && (
-        <div className="muted small" style={{ marginTop: 4 }}>
-          错误 {payload.errors.length} 条（仅显示前 3 条）：
-          <ul style={{ margin: "4px 0 0 18px" }}>
-            {payload.errors.slice(0, 3).map((e, i) => <li key={i}>{e}</li>)}
-          </ul>
         </div>
       )}
     </div>
@@ -1000,111 +725,55 @@ function ChapterTree({
   );
 }
 
-// R22: 人物关系建议模态。
-// 显示每对 (char_a, char_b) 的 co_chapter_count / 最后出现章节 /
-// sample_quote,用户勾选并给一个关系标签,点"应用"批量写 graph_edges。
-function RelationshipsModal({
-  material, data, loading, selected, setSelected,
-  relationInputs, setRelationInputs,
-  applyMsg, applyBusy, onApply, onClose,
-}: {
-  material: StudyMaterial;
-  data: StudyRelationshipsResponse | null;
-  loading: boolean;
-  selected: Set<string>;
-  setSelected: (s: Set<string>) => void;
-  relationInputs: Record<string, string>;
-  setRelationInputs: (r: Record<string, string>) => void;
-  applyMsg: string | null;
-  applyBusy: boolean;
-  onApply: () => void;
-  onClose: () => void;
-}) {
-  const toggle = (k: string) => {
-    const next = new Set(selected);
-    if (next.has(k)) next.delete(k);
-    else next.add(k);
-    setSelected(next);
+/* ===================== DeepStudy 自动进度卡片 ===================== */
+
+function DeepStudyProgressCard({ run, material, overview }: { run: any; material: StudyMaterial; overview: StudyMaterialOverview | null }) {
+  const stageLabels: Record<string, string> = {
+    chapterize: "分章", chapter_profile: "章节画像", entity_extract: "实体抽取",
+    event_extract: "事件抽取", scene_beat_extract: "场景节拍", relationship_analyze: "关系分析",
+    foreshadow_analyze: "伏笔分析", behavior_pattern_mine: "行为模式", technique_mine: "写作技巧",
+    graph_finalize: "图谱整理", study_critic: "质量审查", knowledge_index: "知识索引",
+    writing_context_sync: "同步写作系统",
   };
-  const setRel = (k: string, v: string) => {
-    setRelationInputs({ ...relationInputs, [k]: v });
-  };
+  const statusPill = run.status === "running" ? "warn" : run.status === "succeeded" ? "ok" : run.status === "failed" ? "error" : "";
+  const allStages = Object.keys(stageLabels);
+  const completedStages = run.progress?.completed_stages ?? [];
+  const stageIndex = completedStages.length;
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-        <header>
-          <h3>人物关系分析 · {material.title}</h3>
-          <button onClick={onClose}>×</button>
-        </header>
-        <div className="modal-body">
-          {loading ? (
-            <div className="muted small">分析中…</div>
-          ) : !data || data.suggestions.length === 0 ? (
-            <div className="muted small">
-              还没有可建议的关系。要么这本书还没抽过人物,要么所有人物都没有挂在具体章节上。
-            </div>
-          ) : (
-            <>
-              <p className="muted small">
-                扫描了 <b>{data.chapters_scanned}</b> 章、共 <b>{data.total_characters}</b> 个有人物来源的角色,
-                按"同章节出现"频次排序。勾选要写入图谱的关系,给一个标签(默认「同章节出现」),点「应用」即可。
-              </p>
-              <div className="rel-suggestion-list">
-                {data.suggestions.map((sug) => {
-                  const k = `${sug.char_a_id}-${sug.char_b_id}`;
-                  const checked = selected.has(k);
-                  return (
-                    <div key={k} className={`rel-suggestion ${checked ? "checked" : ""}`}>
-                      <label className="rel-suggestion-head">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggle(k)}
-                        />
-                        <span>
-                          <b>{sug.char_a_name}</b> ↔ <b>{sug.char_b_name}</b>
-                          <span className="muted tiny" style={{ marginLeft: 8 }}>
-                            同章 {sug.co_chapter_count} 次 · 最近 第 {sug.last_chapter_no || "?"} 章
-                            {sug.last_chapter_title ? ` · ${sug.last_chapter_title}` : ""}
-                          </span>
-                        </span>
-                      </label>
-                      <div className="rel-suggestion-row">
-                        <input
-                          placeholder="关系标签,如 师父 / 恋人 / 对手"
-                          value={relationInputs[k] ?? ""}
-                          onChange={(e) => setRel(k, e.target.value)}
-                          disabled={!checked}
-                        />
-                      </div>
-                      {sug.sample_quote && (
-                        <div className="muted tiny rel-suggestion-quote">
-                          「{sug.sample_quote.slice(0, 160)}」
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-        <footer>
-          {applyMsg && <span className="muted small" style={{ marginRight: "auto" }}>{applyMsg}</span>}
-          <span className="spacer" />
-          <span className="muted small" style={{ marginRight: 8 }}>
-            已选 {selected.size} 条
-          </span>
-          <button onClick={onClose}>关闭</button>
-          <button
-            className="primary"
-            disabled={applyBusy || selected.size === 0 || !data || data.suggestions.length === 0}
-            onClick={onApply}
-          >
-            {applyBusy ? "写入中…" : "应用到图谱"}
-          </button>
-        </footer>
+    <div className="card" style={{ background: "var(--bg-elevated)", marginBottom: 10, fontSize: 12 }}>
+      <div className="row" style={{ marginBottom: 6, gap: 8 }}>
+        <b>DeepStudy Run #{run.id}</b>
+        <span className={`pill tiny ${statusPill}`}>{run.status}</span>
+        {run.status === "running" && <span className="muted tiny">当前: {stageLabels[run.current_stage] ?? run.current_stage}</span>}
+        <span className="spacer" />
+        {run.cost_usd > 0 && <span className="muted tiny">${run.cost_usd.toFixed(4)}</span>}
+        {run.total_chapters > 0 && <span className="muted tiny">{run.processed_chapters}/{run.total_chapters} 章</span>}
       </div>
+
+      {/* 阶段进度条 */}
+      <div style={{ display: "flex", gap: 2, marginBottom: 6 }}>
+        {allStages.map((s, i) => {
+          const done = completedStages.includes(s) || i < stageIndex;
+          const running = run.status === "running" && i === stageIndex;
+          return (
+            <div
+              key={s}
+              title={`${stageLabels[s]} ${done ? "✅" : running ? "⏳" : ""}`}
+              style={{
+                flex: 1, height: 6, borderRadius: 3,
+                background: done ? "var(--accent)" : running ? "var(--warning)" : "var(--border)",
+                opacity: done || running ? 1 : 0.4,
+              }}
+            />
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+        <span className="muted tiny">人物: {material.character_count}</span>
+        {overview && <span className="muted tiny">行为: {overview.behavior_count} · 伏笔: {overview.foreshadow_count} · 图谱: {overview.graph_node_count}</span>}
+      </div>
+      {run.error && <div className="error small">{run.error}</div>}
     </div>
   );
 }
