@@ -26,6 +26,7 @@ from app.routers import (
     events,
     genre_prompts,
     graph,
+    graphs as graphs_router,
     memory,
     model_observability,
     models,
@@ -117,5 +118,6 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           discussion_trace.router,
           agent_memory.router, agent_memory.change_router,
           model_observability.router,
-          audit.router):
+          audit.router,
+          graphs_router.router):
     app.include_router(r, prefix=PREFIX)

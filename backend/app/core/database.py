@@ -214,6 +214,41 @@ async def init_db() -> None:
 )"""),
         # B1: unify old behavior_patterns → behavior_cards
         ("behavior_cards", "source_pattern_id", "INTEGER"),
+        # DeepStudy knowledge graph — two-layer graph persistence
+        ("__new_table__deepstudy_graphs", "id", """CREATE TABLE IF NOT EXISTS deepstudy_graphs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, material_id INTEGER NOT NULL UNIQUE,
+    status VARCHAR(40) NOT NULL DEFAULT 'not_started', graph_version INTEGER DEFAULT 1,
+    node_count INTEGER DEFAULT 0, edge_count INTEGER DEFAULT 0,
+    character_count INTEGER DEFAULT 0, location_count INTEGER DEFAULT 0,
+    faction_count INTEGER DEFAULT 0, item_count INTEGER DEFAULT 0,
+    event_count INTEGER DEFAULT 0, foreshadow_count INTEGER DEFAULT 0,
+    behavior_pattern_count INTEGER DEFAULT 0, writing_technique_count INTEGER DEFAULT 0,
+    layout_json TEXT, stats_json TEXT, last_error TEXT, built_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+)"""),
+        ("__new_table__deepstudy_graph_nodes", "id", """CREATE TABLE IF NOT EXISTS deepstudy_graph_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, material_id INTEGER NOT NULL, node_key VARCHAR(240) NOT NULL,
+    node_type VARCHAR(80) NOT NULL, label VARCHAR(240) NOT NULL, summary TEXT,
+    importance FLOAT DEFAULT 0.5, confidence FLOAT DEFAULT 0.5,
+    first_seen_chapter INTEGER, last_seen_chapter INTEGER, source_stage VARCHAR(80),
+    payload_json TEXT, evidence_json TEXT, x FLOAT, y FLOAT,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(material_id, node_key)
+)"""),
+        ("__new_table__deepstudy_graph_edges", "id", """CREATE TABLE IF NOT EXISTS deepstudy_graph_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, material_id INTEGER NOT NULL, edge_key VARCHAR(320) NOT NULL,
+    source_node_key VARCHAR(240) NOT NULL, target_node_key VARCHAR(240) NOT NULL,
+    source_node_id INTEGER, target_node_id INTEGER,
+    edge_type VARCHAR(80) NOT NULL, label VARCHAR(160) NOT NULL, summary TEXT,
+    direction VARCHAR(30) DEFAULT 'directed', weight FLOAT DEFAULT 0.5, confidence FLOAT DEFAULT 0.5,
+    source_stage VARCHAR(80), evidence_json TEXT, payload_json TEXT,
+    first_seen_chapter INTEGER, last_seen_chapter INTEGER, occurrence_count INTEGER DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(material_id, edge_key)
+)"""),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:

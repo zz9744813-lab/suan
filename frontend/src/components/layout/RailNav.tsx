@@ -37,7 +37,7 @@ const LEARN_ITEMS: Item[] = [
   { to: "/audit-logs", label: "审计日志", icon: "⚲" },
   { to: "/study",      label: "拆书",     icon: "☷" },
   { to: "/behavior",   label: "行为模式", icon: "✺" },
-  { to: "/graph",      label: "图谱",     icon: "◉" },
+  { to: "/graphs",     label: "图谱",     icon: "◉" },
   { to: "/discussion", label: "讨论室",   icon: "☕" },
   { to: "/memory",     label: "记忆库",   icon: "❖" },
   // P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7)

@@ -1354,3 +1354,19 @@ export const getObservabilitySlowRequests = (params?: { hours?: number; threshol
   if (params?.limit) q.set("limit", String(params.limit));
   return api.get<any[]>(`/api/model-observability/slow-requests?${q.toString()}`);
 };
+
+// ----- NovelForge Knowledge Graph (单书知识网络 /graphs 路由) -----
+export const listGraphBooks = (params: { status?: string } = {}) => {
+  const q = new URLSearchParams();
+  if (params.status) q.set("status", params.status);
+  return api.get<any[]>(`/api/graphs/books${q.toString() ? '?' + q.toString() : ''}`);
+};
+
+export const getGraphNetwork = (materialId: number) =>
+  api.get<any>(`/api/graphs/materials/${materialId}`);
+
+export const getGraphNodeDetail = (materialId: number, nodeId: number) =>
+  api.get<any>(`/api/graphs/materials/${materialId}/nodes/${nodeId}`);
+
+export const getGraphEdgeDetail = (materialId: number, edgeId: number) =>
+  api.get<any>(`/api/graphs/materials/${materialId}/edges/${edgeId}`);

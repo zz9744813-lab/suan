@@ -47,6 +47,11 @@ from app.models.deepstudy import (
     StudyRun,
     WritingTechnique,
 )
+from app.models.deepstudy_graph import (
+    DeepStudyGraph,
+    DeepStudyGraphEdge,
+    DeepStudyGraphNode,
+)
 from app.models.discussion import DiscussionSession, DiscussionTurn
 from app.models.agent_role import (
     AgentModelBinding,
@@ -138,6 +143,10 @@ __all__ = [
     "ForeshadowChain",
     "BehaviorPatternEvidence",
     "WritingTechnique",
+    # DeepStudy knowledge graph (two-layer)
+    "DeepStudyGraph",
+    "DeepStudyGraphNode",
+    "DeepStudyGraphEdge",
     # P3: Raw + Stable memory
     "RawMemoryEntry",
     "StableMemoryEntity",

@@ -175,8 +175,18 @@ class GraphMaterializer:
         - Merge entity nodes with the same merge_key.
         - Compute importance scores from degree / mention count.
         - Generate graph statistics (nodes/edges by type).
-        - Update StudyMaterial knowledge_score from the StudyCritic.
+        - Update or create the DeepStudyGraph summary record (Layer 1).
         """
+        from datetime import datetime
+
+        from sqlalchemy import func
+
+        from app.models.deepstudy_graph import (
+            DeepStudyGraph,
+            DeepStudyGraphEdge,
+            DeepStudyGraphNode,
+        )
+
         async with session_scope() as db:
             # Compute entity counts per entity_type for stats
             result = await db.execute(
@@ -210,6 +220,80 @@ class GraphMaterializer:
                         await db.delete(entity)
                 else:
                     seen_keys[key] = entity.id
+
+            # ── Layer 1: update/create the DeepStudyGraph summary record ──
+            graph_result = await db.execute(
+                select(DeepStudyGraph).where(
+                    DeepStudyGraph.material_id == material_id
+                )
+            )
+            g = graph_result.scalar_one_or_none()
+            if not g:
+                g = DeepStudyGraph(material_id=material_id, status="ready")
+                db.add(g)
+
+            # Count entities by type
+            type_counts = await db.execute(
+                select(
+                    Entity.entity_type,
+                    func.count(Entity.id),
+                )
+                .where(Entity.material_id == material_id)
+                .group_by(Entity.entity_type)
+            )
+            type_map = {row[0]: row[1] for row in type_counts.all()}
+
+            # Total records from each output table
+            rel_count = await db.scalar(
+                select(func.count()).select_from(Relationship).where(
+                    Relationship.material_id == material_id
+                )
+            )
+            scene_count = await db.scalar(
+                select(func.count()).select_from(SceneBeat).where(
+                    SceneBeat.material_id == material_id
+                )
+            )
+            foreshadow_count = await db.scalar(
+                select(func.count()).select_from(ForeshadowChain).where(
+                    ForeshadowChain.material_id == material_id
+                )
+            )
+            behavior_count = await db.scalar(
+                select(func.count()).select_from(BehaviorPatternEvidence).where(
+                    BehaviorPatternEvidence.material_id == material_id
+                )
+            )
+            technique_count = await db.scalar(
+                select(func.count()).select_from(WritingTechnique).where(
+                    WritingTechnique.material_id == material_id
+                )
+            )
+
+            total_entities = sum(type_map.values())
+            total_nodes = (
+                total_entities
+                + (scene_count or 0)
+                + (foreshadow_count or 0)
+                + (behavior_count or 0)
+                + (technique_count or 0)
+            )
+
+            g.status = "ready"
+            g.node_count = total_nodes
+            g.edge_count = rel_count or 0
+            g.character_count = type_map.get("character", 0)
+            g.location_count = type_map.get("location", 0)
+            g.faction_count = type_map.get("faction", 0)
+            g.item_count = type_map.get("item", 0)
+            g.event_count = type_map.get("event", 0)
+            g.foreshadow_count = foreshadow_count or 0
+            g.behavior_pattern_count = behavior_count or 0
+            g.writing_technique_count = technique_count or 0
+            g.built_at = datetime.utcnow()
+            g.last_error = None
+
+            await db.flush()
 
     async def build_graph_payload(
         self, material_id: int

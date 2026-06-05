@@ -15,6 +15,8 @@ import { MemoryShelfPage, MemoryArchivePage } from "./pages/MemoryShelfPage";
 import { AgentMemoryPage } from "./pages/AgentMemoryPage";
 import { BehaviorPage } from "./pages/BehaviorPage";
 import { GraphPage } from "./pages/GraphPage";
+import { GraphsPage } from "./pages/GraphsPage";
+import { GraphNetworkPage } from "./pages/GraphNetworkPage";
 import { ReviewCommentsPage } from "./pages/ReviewCommentsPage";
 import { ReaderAgentsPage } from "./pages/ReaderAgentsPage";
 import { ReaderAgentDetailPage } from "./pages/ReaderAgentDetailPage";
@@ -115,7 +117,10 @@ export default function App() {
         <Route path="/study/library" element={<StudyLibraryPage />} />
         <Route path="/study/books/:materialId/graph" element={<StudyBookGraphPage />} />
         <Route path="/behavior" element={<BehaviorPage />} />
-        <Route path="/graph" element={<GraphPage />} />
+        <Route path="/graph" element={<Navigate to="/graphs" replace />} />
+        <Route path="/graph/:projectId" element={<Navigate to="/graphs" replace />} />
+        <Route path="/graphs" element={<GraphsPage />} />
+        <Route path="/graphs/:materialId/network" element={<GraphNetworkPage />} />
         <Route path="/discussion" element={<DiscussionPage />} />
         {/* P10: Agent 分层记忆池 (三栏布局) */}
         <Route path="/memory" element={<AgentMemoryPage />} />
