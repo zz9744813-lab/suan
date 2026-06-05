@@ -94,6 +94,18 @@ export type AgentTask = {
   finished_at: string | null;
   created_at: string;
   updated_at?: string;
+  // P0 task center
+  parent_task_id?: number | null;
+  visibility?: string;
+  domain?: string;
+  task_kind?: string | null;
+  material_id?: number | null;
+  run_id?: number | null;
+  stage_key?: string | null;
+  progress_current?: number;
+  progress_total?: number;
+  display_title?: string | null;
+  summary_json?: Record<string, any> | null;
 };
 
 export type AgentStep = {

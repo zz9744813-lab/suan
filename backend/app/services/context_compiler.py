@@ -152,8 +152,8 @@ class ContextCompiler:
             await db.execute(
                 select(MemoryHardFact)
                 .where(MemoryHardFact.project_id == chapter.project_id)
-                .order_by(MemoryHardFact.id.desc())
-                .limit(50)
+                .order_by(MemoryHardFact.category, MemoryHardFact.id.desc())
+                .limit(200)
             )
         ).scalars().all()
         hard_facts = [f"{f.category}: {f.fact}" for f in hard_facts_rows]

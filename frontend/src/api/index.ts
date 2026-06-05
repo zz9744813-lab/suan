@@ -120,12 +120,20 @@ export const listTasks = (params: {
   project_id?: number;
   chapter_id?: number;
   status?: string;
+  visibility?: string;
+  domain?: string;
+  task_kind?: string;
+  parent_task_id?: number;
   limit?: number;
 } = {}) => {
   const q = new URLSearchParams();
   if (params.project_id) q.set("project_id", String(params.project_id));
   if (params.chapter_id) q.set("chapter_id", String(params.chapter_id));
   if (params.status) q.set("status", params.status);
+  if (params.visibility) q.set("visibility", params.visibility);
+  if (params.domain) q.set("domain", params.domain);
+  if (params.task_kind) q.set("task_kind", params.task_kind);
+  if (params.parent_task_id) q.set("parent_task_id", String(params.parent_task_id));
   if (params.limit) q.set("limit", String(params.limit));
   const s = q.toString();
   return api.get<AgentTask[]>(`/api/tasks${s ? `?${s}` : ""}`);

@@ -84,6 +84,7 @@ async def init_db() -> None:
 
     # Lightweight column-level backfill for SQLite dev DBs.
     # Each entry: (table, column, DDL fragment for the column type).
+    # Special marker: ("__new_table__<table_name>", "id", "CREATE TABLE IF NOT EXISTS ...")
     _COLUMN_BACKFILLS = [
         ("projects", "category", "VARCHAR(80)"),
         ("projects", "sort_order", "INTEGER DEFAULT 0"),
@@ -183,10 +184,42 @@ async def init_db() -> None:
         ("model_call_events", "cache_hit", "BOOLEAN"),
         ("model_call_events", "request_id", "VARCHAR(120)"),
         ("model_call_events", "error_code", "VARCHAR(80)"),
+        # R28: task center three-layer architecture — AgentTask new columns
+        ("agent_tasks", "parent_task_id", "INTEGER"),
+        ("agent_tasks", "visibility", "VARCHAR(30) DEFAULT 'user'"),
+        ("agent_tasks", "domain", "VARCHAR(50) DEFAULT 'writing'"),
+        ("agent_tasks", "task_kind", "VARCHAR(80)"),
+        ("agent_tasks", "material_id", "INTEGER"),
+        ("agent_tasks", "run_id", "INTEGER"),
+        ("agent_tasks", "stage_key", "VARCHAR(80)"),
+        ("agent_tasks", "progress_current", "INTEGER DEFAULT 0"),
+        ("agent_tasks", "progress_total", "INTEGER DEFAULT 0"),
+        ("agent_tasks", "display_title", "VARCHAR(240)"),
+        ("agent_tasks", "summary_json", "JSON"),
+        # AgentStep: is_mock flag for mock model steps.
+        ("agent_steps", "is_mock", "BOOLEAN DEFAULT 0"),
+        # GraphEdge: count column for dedup tracking.
+        ("graph_edges", "count", "INTEGER DEFAULT 1"),
+        # Project-Study boundary: new link table.
+        ("__new_table__project_study_material_links", "id", """CREATE TABLE IF NOT EXISTS project_study_material_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    material_id INTEGER NOT NULL,
+    link_type VARCHAR(50) DEFAULT 'reference',
+    weight FLOAT DEFAULT 1.0,
+    enabled BOOLEAN DEFAULT TRUE,
+    created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(project_id, material_id)
+)"""),
     ]
     async with engine.begin() as conn:
         for table, column, ddl in _COLUMN_BACKFILLS:
-            await _ensure_column(conn, table, column, ddl)
+            if table.startswith("__new_table__"):
+                # Special marker for new-table creation (idempotent).
+                await conn.execute(text(ddl))
+            else:
+                await _ensure_column(conn, table, column, ddl)
 
         # P0-DeepStudy: one-shot backfill for existing StudyMaterial
         # rows. We can only run this after the column exists. We map

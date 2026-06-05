@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -45,6 +45,19 @@ class AgentTask(Base):
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
+    # R28: task center three-layer architecture columns
+    parent_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    visibility: Mapped[str] = mapped_column(String(30), default="user")
+    domain: Mapped[str] = mapped_column(String(50), default="writing")
+    task_kind: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
+    material_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    stage_key: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
+    progress_current: Mapped[int] = mapped_column(Integer, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, default=0)
+    display_title: Mapped[str | None] = mapped_column(String(240), nullable=True, default=None)
+    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+
     chapter: Mapped["Chapter | None"] = relationship(back_populates="tasks")
     steps: Mapped[list["AgentStep"]] = relationship(back_populates="task", cascade="all, delete-orphan", order_by="AgentStep.id")
 
@@ -79,6 +92,7 @@ class AgentStep(Base):
     error_message: Mapped[str | None] = mapped_column(Text, default=None)
     started_at: Mapped[datetime | None] = mapped_column(default=None)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    is_mock: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
 
     task: Mapped["AgentTask"] = relationship(back_populates="steps")

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import bad_request
-from app.models.task import WorkerPolicy, WorkerStatus
+from app.models.task import WorkerPolicy, WorkerStatus, AgentTask
+from app.models.model_provider import ModelProvider
 from app.schemas import APIResponse, WorkerPolicyRead, WorkerPolicyUpdate, WorkerStatusRead
 from app.workers.worker import get_worker
 
@@ -18,6 +19,54 @@ router = APIRouter(prefix="/worker", tags=["worker"])
 @router.get("/status", response_model=APIResponse[dict])
 async def status() -> APIResponse[dict]:
     return {"ok": True, "data": await get_worker().status()}
+
+
+@router.get("/multi-status")
+async def get_multi_worker_status(db: AsyncSession = Depends(get_db)):
+    """Return separate status for Writing/DeepStudy/Model workers."""
+
+    # Writing worker status from the singleton
+    worker_status = await get_worker().status()
+
+    # DeepStudy: count active study tasks
+    deepstudy_running = await db.execute(
+        select(func.count(AgentTask.id)).where(
+            AgentTask.domain == "deepstudy",
+            AgentTask.status == "running",
+        )
+    )
+    deepstudy_active_count = deepstudy_running.scalar() or 0
+
+    # Model router: count providers
+    providers_total = await db.execute(
+        select(func.count(ModelProvider.id))
+    )
+    total = providers_total.scalar() or 0
+    providers_up = await db.execute(
+        select(func.count(ModelProvider.id)).where(
+            ModelProvider.enabled.is_(True),
+            ModelProvider.circuit_state == "closed",
+        )
+    )
+    up = providers_up.scalar() or 0
+
+    return {
+        "writing_worker": {
+            "status": worker_status.get("state", "unknown"),
+            "current_task": worker_status.get("current_task_id"),
+            "uptime_seconds": 0,
+        },
+        "deepstudy_worker": {
+            "status": "running" if deepstudy_active_count > 0 else "idle",
+            "current_run": None,
+            "uptime_seconds": 0,
+        },
+        "model_router": {
+            "status": "healthy" if up > 0 else "degraded",
+            "providers_up": up,
+            "providers_total": total,
+        },
+    }
 
 
 @router.post("/start", response_model=APIResponse[dict])

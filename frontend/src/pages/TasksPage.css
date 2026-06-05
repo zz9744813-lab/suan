@@ -140,3 +140,121 @@ button.link:disabled { opacity: 0.5; cursor: wait; }
 .steps-table td { padding: 4px 8px; }
 .steps-table tr { border-bottom: 1px solid var(--accent-line-soft, rgba(0,0,0,0.04)); }
 .steps-table tr:last-child { border-bottom: 0; }
+
+/* ---- P0 task center: stats bar ---- */
+.tasks-stats-bar {
+  display: flex;
+  gap: 20px;
+  padding: 8px 24px 16px;
+  flex-wrap: wrap;
+}
+.tasks-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.tasks-stat-num {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+}
+.tasks-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* ---- P0 task center: card list ---- */
+.tasks-card-list {
+  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- P0 task center: card ---- */
+.task-card {
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  background: var(--bg-paper);
+  overflow: hidden;
+}
+.task-card:hover {
+  border-color: var(--accent-gold);
+}
+.task-card.expanded {
+  border-color: var(--accent-gold);
+}
+
+.task-card-head {
+  padding: 10px 14px;
+}
+.task-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-card-caret {
+  color: var(--text-muted);
+  font-size: 10px;
+  width: 14px;
+}
+.task-card-title {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.task-card-progress {
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-paper-soft);
+  overflow: hidden;
+}
+.task-card-progress-fill {
+  height: 100%;
+  background: var(--accent-gold);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+.task-card-summary {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.task-card-detail {
+  padding: 0 14px 14px 28px;
+}
+.task-card-stage {
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.task-card-stage-bar {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+}
+.task-stage-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.task-stage-dot.done {
+  background: var(--accent);
+}
+
+.task-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}

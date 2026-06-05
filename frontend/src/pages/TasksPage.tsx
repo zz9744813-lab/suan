@@ -1,60 +1,72 @@
 /**
- * TasksPage — 任务列表 (Round 13, P0-UI-7)
+ * TasksPage — 任务中心 (P0 重构)
  *
- * 之前只有筛选+表格,现在补上:
- *   - failed 任务显示「重试」按钮 (调 retryTask, mode=full)
- *   - pending/running 任务显示「取消」按钮 (调 cancelTask)
- *   - 点击行展开: 显示 error_message + step 列表
- *   - filter chip 改成可点击的按钮组 (全/运行/失败/已成功)
- *
- * 不动 backend。
+ * 从表格日志改成任务看板:
+ *   - 顶部统计: 运行中/等待/失败/今日完成/今日成本
+ *   - 分类 Tab: 全部/写作/拆书/模型/讨论/记忆/导出/失败
+ *   - 任务卡片: 进度条+产物摘要+阶段轨道
+ *   - 点击卡片展开详情: 阶段步骤+内部事件(默认折叠)
+ *   - 内部子任务 (study_character等) 不出现,只在详情事件里折叠显示
  */
-import { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   listTasks, retryTask, cancelTask, taskSteps,
 } from "../api";
 import type { AgentTask, AgentStep } from "../types";
 import "./TasksPage.css";
 
-type Filter = "all" | "running" | "failed" | "succeeded";
+type DomainTab = "all" | "writing" | "deepstudy" | "model" | "discussion" | "memory" | "export" | "failed";
 
-const FILTERS: { key: Filter; label: string; cls: string }[] = [
-  { key: "all",       label: "全部",   cls: "" },
-  { key: "running",   label: "运行中", cls: "running" },
-  { key: "failed",    label: "失败",   cls: "failed" },
-  { key: "succeeded", label: "已成功", cls: "succeeded" },
+const DOMAINS: { key: DomainTab; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "writing", label: "写作" },
+  { key: "deepstudy", label: "拆书" },
+  { key: "model", label: "模型" },
+  { key: "discussion", label: "讨论" },
+  { key: "memory", label: "记忆" },
+  { key: "export", label: "导出" },
+  { key: "failed", label: "失败" },
 ];
 
-const STATUS_FILTER_MAP: Record<Filter, string | undefined> = {
-  all: undefined,
-  running: "running",
-  failed: "failed",
-  succeeded: "succeeded",
+const STAGE_LABELS: Record<string, string> = {
+  chapterize: "分章", chapter_profile: "章节画像", entity_extract: "实体抽取",
+  event_extract: "事件抽取", scene_beat_extract: "场景节拍", relationship_analyze: "关系分析",
+  foreshadow_analyze: "伏笔分析", behavior_pattern_mine: "行为模式", technique_mine: "写作技巧",
+  graph_finalize: "图谱整理", study_critic: "质量审查", knowledge_index: "知识索引",
+  writing_context_sync: "同步写作",
+  planner:"规划", draft:"写作", critic:"评审", reader_feedback:"读者反馈",
+  discussion:"讨论", rewrite:"返工", continuity:"连续", learning:"学习", memory_update:"记忆更新",
 };
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [domain, setDomain] = useState<DomainTab>("all");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [stepsLoading, setStepsLoading] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [flash, setFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  // Internal events toggle
+  const [showInternalEvents, setShowInternalEvents] = useState(false);
 
   const reload = useCallback(() => {
-    listTasks({ limit: 100, status: STATUS_FILTER_MAP[filter] }).then(setTasks).catch(() => {});
-  }, [filter]);
+    const params: any = { limit: 100, visibility: "user" };
+    if (domain === "failed") {
+      params.status = "failed";
+    } else if (domain !== "all") {
+      params.domain = domain;
+    }
+    listTasks(params).then(setTasks).catch(() => {});
+  }, [domain]);
 
   useEffect(() => {
     reload();
-    const t = window.setInterval(reload, 3000);
+    const t = window.setInterval(reload, 5000);
     return () => window.clearInterval(t);
   }, [reload]);
 
-  // Expand row → fetch steps lazily
   useEffect(() => {
-    if (expandedId == null) { setSteps([]); return; }
+    if (expandedId == null) { setSteps([]); setShowInternalEvents(false); return; }
     setStepsLoading(true);
     taskSteps(expandedId)
       .then((s) => setSteps(s))
@@ -63,11 +75,11 @@ export function TasksPage() {
   }, [expandedId]);
 
   async function doRetry(t: AgentTask) {
-    if (!confirm(`重试任务 #${t.id} (${t.task_type})?\n\n会用同样的 payload 重新跑一遍。`)) return;
+    if (!confirm(`重试任务 "${t.display_title || t.task_type}"?`)) return;
     setBusyTaskId(t.id); setFlash(null);
     try {
       await retryTask(t.id, { mode: "full" });
-      setFlash({ type: "ok", text: `任务 #${t.id} 已重新入队` });
+      setFlash({ type: "ok", text: `任务已重新入队` });
       reload();
     } catch (e: any) {
       setFlash({ type: "err", text: `重试失败: ${e.message}` });
@@ -78,11 +90,11 @@ export function TasksPage() {
   }
 
   async function doCancel(t: AgentTask) {
-    if (!confirm(`取消任务 #${t.id}?\n\n只能取消 pending / running 状态的任务。`)) return;
+    if (!confirm(`取消任务 "${t.display_title || t.task_type}"?`)) return;
     setBusyTaskId(t.id); setFlash(null);
     try {
       await cancelTask(t.id);
-      setFlash({ type: "ok", text: `任务 #${t.id} 已取消` });
+      setFlash({ type: "ok", text: `任务已取消` });
       reload();
     } catch (e: any) {
       setFlash({ type: "err", text: `取消失败: ${e.message}` });
@@ -92,32 +104,58 @@ export function TasksPage() {
     }
   }
 
-  // counts for the filter chips
-  const counts = {
-    all: tasks.length, // only the current filter scope, just to show numbers
+  const stats = useMemo(() => ({
     running: tasks.filter((t) => t.status === "running").length,
+    pending: tasks.filter((t) => t.status === "pending" || t.status === "queued").length,
     failed: tasks.filter((t) => t.status === "failed").length,
     succeeded: tasks.filter((t) => t.status === "succeeded").length,
-  };
+    cost: tasks.reduce((s, t) => s + (t.cost_usd || 0), 0),
+    tokens: tasks.reduce((s, t) => s + (t.input_tokens || 0) + (t.output_tokens || 0), 0),
+  }), [tasks]);
+
+  // Internal steps: filter out user-level
+  const userSteps = useMemo(() => steps.filter((s) => s.step_name !== "study_character" && s.step_name !== "study_event"), [steps]);
+  const internalSteps = useMemo(() => steps.filter((s) => s.step_name === "study_character" || s.step_name === "study_event"), [steps]);
 
   return (
     <div className="main-body tasks-page">
-      <div className="page-header">
-        <div>
-          <h1>任务</h1>
-          <div className="sub">所有 agent_tasks 记录 · 失败可重试 · 展开看错误与步骤</div>
-        </div>
+      {/* Top stats bar */}
+      <div className="tasks-stats-bar">
+        <span className="tasks-stat">
+          <span className="tasks-stat-num" style={{ color: "var(--accent)" }}>{stats.running}</span>
+          <span className="tasks-stat-label">运行中</span>
+        </span>
+        <span className="tasks-stat">
+          <span className="tasks-stat-num">{stats.pending}</span>
+          <span className="tasks-stat-label">等待</span>
+        </span>
+        <span className="tasks-stat">
+          <span className="tasks-stat-num" style={{ color: stats.failed > 0 ? "var(--danger)" : undefined }}>{stats.failed}</span>
+          <span className="tasks-stat-label">失败</span>
+        </span>
+        <span className="tasks-stat">
+          <span className="tasks-stat-num">{stats.succeeded}</span>
+          <span className="tasks-stat-label">已完成</span>
+        </span>
+        <span className="tasks-stat">
+          <span className="tasks-stat-num">${stats.cost.toFixed(3)}</span>
+          <span className="tasks-stat-label">成本</span>
+        </span>
+        <span className="tasks-stat">
+          <span className="tasks-stat-num">{(stats.tokens / 1000).toFixed(1)}k</span>
+          <span className="tasks-stat-label">Token</span>
+        </span>
       </div>
 
+      {/* Domain tabs */}
       <div className="tasks-filter-row">
-        {FILTERS.map((f) => (
+        {DOMAINS.map((d) => (
           <button
-            key={f.key}
-            className={`tasks-filter-chip ${filter === f.key ? "active" : ""}`}
-            onClick={() => setFilter(f.key)}
+            key={d.key}
+            className={`tasks-filter-chip ${domain === d.key ? "active" : ""}`}
+            onClick={() => setDomain(d.key)}
           >
-            <span className="chip-label">{f.label}</span>
-            <span className="chip-count">{counts[f.key]}</span>
+            {d.label}
           </button>
         ))}
       </div>
@@ -126,118 +164,180 @@ export function TasksPage() {
         <div className={`tasks-flash tasks-flash-${flash.type}`}>{flash.text}</div>
       )}
 
-      <div className="card">
+      {/* Task card list */}
+      <div className="tasks-card-list">
         {tasks.length === 0 ? (
-          <div className="muted">还没有任务。点「项目」→ 章节「开始流水线」可新建任务。</div>
+          <div className="card" style={{ padding: 24, textAlign: "center" }}>
+            <div className="muted">暂无任务</div>
+          </div>
         ) : (
-          <table className="tasks-table">
-            <thead>
-              <tr>
-                <th style={{ width: 30 }}></th>
-                <th>#</th><th>类型</th><th>项目</th><th>章节</th>
-                <th>状态</th><th>优先级</th>
-                <th style={{ textAlign: "right" }}>成本</th>
-                <th style={{ textAlign: "right" }}>Tokens</th>
-                <th>开始 / 完成</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((t) => {
-                const expanded = expandedId === t.id;
-                return (
-                  <>
-                    <tr
-                      key={t.id}
-                      className={`${expanded ? "expanded" : ""} ${t.status === "failed" ? "is-failed" : ""}`}
-                      onClick={() => setExpandedId(expanded ? null : t.id)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td className="expand-caret">{expanded ? "▼" : "▶"}</td>
-                      <td className="mono muted">{t.id}</td>
-                      <td>{t.task_type}</td>
-                      <td><Link to={`/projects/${t.project_id}`} onClick={(e) => e.stopPropagation()}>#{t.project_id}</Link></td>
-                      <td>{t.chapter_id ? <Link to={`/projects/${t.project_id}/chapters/${t.chapter_id}`} onClick={(e) => e.stopPropagation()}>第 {t.chapter_id} 章</Link> : "—"}</td>
-                      <td><span className={`pill ${t.status}`}>{t.status}</span></td>
-                      <td className="mono">{t.priority}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>${t.cost_usd.toFixed(4)}</td>
-                      <td className="mono muted" style={{ textAlign: "right" }}>{(t.input_tokens / 1000).toFixed(1)}k / {(t.output_tokens / 1000).toFixed(1)}k</td>
-                      <td className="muted tiny">
-                        {t.started_at ? new Date(t.started_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "—"}
-                        {" / "}
-                        {t.finished_at ? new Date(t.finished_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "—"}
-                      </td>
-                      <td className="task-actions" onClick={(e) => e.stopPropagation()}>
-                        {t.status === "failed" && (
-                          <button
-                            className="link retry"
-                            onClick={() => doRetry(t)}
-                            disabled={busyTaskId === t.id}
-                          >
-                            {busyTaskId === t.id ? "..." : "重试"}
-                          </button>
-                        )}
-                        {(t.status === "pending" || t.status === "running") && (
-                          <button
-                            className="link cancel"
-                            onClick={() => doCancel(t)}
-                            disabled={busyTaskId === t.id}
-                          >
-                            {busyTaskId === t.id ? "..." : "取消"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {expanded && (
-                      <tr key={`${t.id}-detail`} className="detail-row">
-                        <td colSpan={11}>
-                          <div className="tasks-detail">
-                            {t.error && (
-                              <div className="tasks-detail-block">
-                                <div className="detail-title">错误</div>
-                                <pre className="error-text">{t.error}</pre>
-                              </div>
-                            )}
-                            <div className="tasks-detail-block">
-                              <div className="detail-title">步骤 ({steps.length})</div>
-                              {stepsLoading ? (
-                                <div className="muted small">加载步骤…</div>
-                              ) : steps.length === 0 ? (
-                                <div className="muted small">无步骤记录 (可能事务已回滚)。</div>
-                              ) : (
-                                <table className="steps-table">
-                                  <thead>
-                                    <tr>
-                                      <th>步骤</th><th>Agent</th><th>状态</th>
-                                      <th>模型</th>
-                                      <th style={{ textAlign: "right" }}>耗时</th>
-                                      <th style={{ textAlign: "right" }}>成本</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {steps.map((s) => (
-                                      <tr key={s.id}>
-                                        <td className="mono small">{s.step_name}</td>
-                                        <td className="muted small">{s.agent_name}</td>
-                                        <td><span className={`pill ${s.status === "succeeded" ? "succeeded" : s.status === "failed" ? "failed" : ""}`}>{s.status}</span></td>
-                                        <td className="muted tiny">{s.model_name ?? "—"}</td>
-                                        <td className="mono tiny" style={{ textAlign: "right" }}>{s.duration_ms}ms</td>
-                                        <td className="mono tiny" style={{ textAlign: "right" }}>${s.cost_usd.toFixed(4)}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
+          tasks.map((t) => {
+            const expanded = expandedId === t.id;
+            const progressPct = (t.progress_total ?? 0) > 0
+              ? Math.min(100, Math.round(((t.progress_current ?? 0) / (t.progress_total ?? 1)) * 100))
+              : 0;
+            const title = t.display_title || `${t.task_type} #${t.id}`;
+            const statusCls = t.status === "running" ? "running" : t.status === "failed" ? "error" : t.status === "succeeded" ? "ok" : "";
+            const stageLabel = t.stage_key ? (STAGE_LABELS[t.stage_key] || t.stage_key) : "";
+            const summary = (t as any).summary_json || {};
+
+            return (
+              <div key={t.id} className={`card task-card ${expanded ? "expanded" : ""}`}>
+                {/* Card header */}
+                <div className="task-card-head" onClick={() => setExpandedId(expanded ? null : t.id)} style={{ cursor: "pointer" }}>
+                  <div className="task-card-title-row">
+                    <span className="task-card-caret">{expanded ? "▼" : "▶"}</span>
+                    <b className="task-card-title">{title}</b>
+                    <span className={`pill tiny ${statusCls}`}>{t.status}</span>
+                    {t.domain && <span className="pill tiny muted">{t.domain}</span>}
+                    {stageLabel && <span className="muted tiny">{stageLabel}</span>}
+                    <span className="spacer" />
+                    {t.cost_usd > 0 && <span className="muted tiny">${t.cost_usd.toFixed(4)}</span>}
+                    {t.progress_total != null && t.progress_total > 0 && (
+                      <span className="muted tiny">{t.progress_current ?? 0}/{t.progress_total}</span>
                     )}
-                  </>
-                );
-              })}
-            </tbody>
-          </table>
+                  </div>
+                  {/* Progress bar */}
+                  {progressPct > 0 && (
+                    <div className="task-card-progress">
+                      <div className="task-card-progress-fill" style={{ width: `${progressPct}%` }} />
+                    </div>
+                  )}
+                  {/* Summary badges */}
+                  {summary && Object.keys(summary).length > 0 && (
+                    <div className="task-card-summary">
+                      {summary.characters > 0 && <span>人物 {summary.characters}</span>}
+                      {summary.events > 0 && <span>事件 {summary.events}</span>}
+                      {summary.behaviors > 0 && <span>行为 {summary.behaviors}</span>}
+                      {summary.techniques > 0 && <span>技巧 {summary.techniques}</span>}
+                      {summary.graph_nodes > 0 && <span>图谱 {summary.graph_nodes}</span>}
+                    </div>
+                  )}
+                </div>
+
+                {/* Expanded detail */}
+                {expanded && (
+                  <div className="task-card-detail">
+                    {/* Error */}
+                    {t.error && (
+                      <div className="tasks-detail-block">
+                        <div className="detail-title">错误</div>
+                        <pre className="error-text">{t.error}</pre>
+                      </div>
+                    )}
+
+                    {/* Stage rail */}
+                {t.stage_key && (
+                  <div className="task-card-stage">
+                    <span className="muted tiny">当前阶段: {stageLabel}</span>
+                    {t.progress_total && t.progress_total > 0 && (
+                      <span className="task-card-stage-bar" style={{ marginLeft: 8 }}>
+                        {Array.from({ length: Math.min(14, t.progress_total) }).map((_, i) => {
+                              const done = i < (t.progress_current ?? 0);
+                              return (
+                                <span
+                                  key={i}
+                                  className={`task-stage-dot ${done ? "done" : ""}`}
+                                  title={done ? "已完成" : "等待"}
+                                />
+                              );
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* User-level steps */}
+                    <div className="tasks-detail-block">
+                      <div className="detail-title">
+                        步骤 ({userSteps.length})
+                      </div>
+                      {stepsLoading ? (
+                        <div className="muted small">加载中…</div>
+                      ) : userSteps.length === 0 ? (
+                        <div className="muted small">无步骤记录</div>
+                      ) : (
+                        <table className="steps-table">
+                          <thead>
+                            <tr>
+                              <th>步骤</th><th>Agent</th><th>状态</th>
+                              <th>模型</th>
+                              <th style={{ textAlign: "right" }}>耗时</th>
+                              <th style={{ textAlign: "right" }}>成本</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {userSteps.map((s) => (
+                              <tr key={s.id}>
+                                <td className="mono small">{s.step_name}</td>
+                                <td className="muted small">{s.agent_name}</td>
+                                <td><span className={`pill tiny ${s.status}`}>{s.status}</span></td>
+                                <td className="muted tiny">{s.model_name ?? "—"}</td>
+                                <td className="mono tiny" style={{ textAlign: "right" }}>{s.duration_ms}ms</td>
+                                <td className="mono tiny" style={{ textAlign: "right" }}>${s.cost_usd.toFixed(4)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* Internal events (collapsed by default) */}
+                    {internalSteps.length > 0 && (
+                      <div className="tasks-detail-block">
+                        <button
+                          className="link small"
+                          onClick={() => setShowInternalEvents(!showInternalEvents)}
+                        >
+                          {showInternalEvents ? "收起" : "展开"} 内部事件 ({internalSteps.length})
+                        </button>
+                        {showInternalEvents && (
+                          <div style={{ marginTop: 8, maxHeight: 300, overflowY: "auto" }}>
+                            {internalSteps.map((s) => (
+                              <div key={s.id} className="muted tiny" style={{ padding: "2px 0", borderBottom: "1px solid var(--border)" }}>
+                                <span className={`pill tiny ${s.status}`}>{s.status}</span>
+                                {" "}{s.step_name} · {s.agent_name}
+                                {s.duration_ms ? ` · ${s.duration_ms}ms` : ""}
+                                {s.cost_usd ? ` · $${s.cost_usd.toFixed(4)}` : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="task-card-actions">
+                      <span className="muted tiny">
+                        {t.started_at ? new Date(t.started_at).toLocaleString() : "—"}
+                        {" → "}
+                        {t.finished_at ? new Date(t.finished_at).toLocaleString() : "运行中"}
+                      </span>
+                      <span className="spacer" />
+                      {t.status === "failed" && (
+                        <button
+                          className="primary small"
+                          onClick={() => doRetry(t)}
+                          disabled={busyTaskId === t.id}
+                        >
+                          {busyTaskId === t.id ? "..." : "重试"}
+                        </button>
+                      )}
+                      {(t.status === "pending" || t.status === "running" || t.status === "queued") && (
+                        <button
+                          className="link small"
+                          onClick={() => doCancel(t)}
+                          disabled={busyTaskId === t.id}
+                        >
+                          {busyTaskId === t.id ? "..." : "取消"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

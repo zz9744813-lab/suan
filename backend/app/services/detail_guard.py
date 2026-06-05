@@ -105,3 +105,20 @@ def get_detail_guard() -> DetailGuard:
     if _detail_guard_singleton is None:
         _detail_guard_singleton = DetailGuard()
     return _detail_guard_singleton
+
+
+CRITICAL_SECRET_TOKENS = ["真名", "秘密", "底牌", "真实身份", "致命弱点", "最大秘密"]
+
+
+async def check_critical_secrets(text: str, project_id: int) -> list[dict]:
+    """Check if text accidentally reveals critical secrets. Returns list of findings."""
+    findings = []
+    for token in CRITICAL_SECRET_TOKENS:
+        if token in text:
+            findings.append({
+                "type": "critical_secret_exposure",
+                "token": token,
+                "severity": "high",
+                "suggestion": f"检查是否意外暴露了「{token}」级别的秘密，建议降低信息密度或移到合适节点"
+            })
+    return findings

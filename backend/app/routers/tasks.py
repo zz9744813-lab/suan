@@ -34,6 +34,10 @@ async def list_tasks(
     project_id: int | None = None,
     chapter_id: int | None = None,
     status: str | None = None,
+    visibility: str = "user",
+    domain: str | None = None,
+    task_kind: str | None = None,
+    parent_task_id: int | None = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[list[AgentTaskRead]]:
@@ -44,6 +48,14 @@ async def list_tasks(
         stmt = stmt.where(AgentTask.chapter_id == chapter_id)
     if status is not None:
         stmt = stmt.where(AgentTask.status == status)
+    if visibility is not None:
+        stmt = stmt.where(AgentTask.visibility == visibility)
+    if domain is not None:
+        stmt = stmt.where(AgentTask.domain == domain)
+    if task_kind is not None:
+        stmt = stmt.where(AgentTask.task_kind == task_kind)
+    if parent_task_id is not None:
+        stmt = stmt.where(AgentTask.parent_task_id == parent_task_id)
     rows = (await db.execute(stmt)).scalars().all()
     return {"ok": True, "data": [AgentTaskRead.model_validate(r) for r in rows]}
 

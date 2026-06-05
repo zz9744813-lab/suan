@@ -118,6 +118,7 @@ class BaseAgent(ABC):
         step.raw_output = result.content
         step.model_name = result.model
         step.provider_name = resolved.provider.name
+        step.is_mock = (result.model or "").startswith("mock-")
         step.input_tokens = result.input_tokens
         step.output_tokens = result.output_tokens
         step.cost_usd = result.cost_usd

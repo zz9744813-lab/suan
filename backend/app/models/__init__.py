@@ -92,6 +92,7 @@ from app.models.agent_memory import (
 )
 from app.models.model_runtime import ModelRuntimeStat
 from app.models.model_call_event import ModelCallEvent
+from app.models.project_study_link import ProjectStudyMaterialLink
 from app.models.prompt_auto_fill import (
     PromptAutoFillBatch,
     PromptRecommendationLog,
@@ -186,4 +187,6 @@ __all__ = [
     "PromptAutoFillBatch",
     "PromptRecommendationLog",
     "PromptTemplatePerformance",
+    # Project-Study boundary
+    "ProjectStudyMaterialLink",
 ]

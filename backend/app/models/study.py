@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -282,6 +282,7 @@ class GraphEdge(Base):
     )
     relation: Mapped[str] = mapped_column(String(60), index=True)
     weight: Mapped[float] = mapped_column(Float, default=0.5)
+    count: Mapped[int] = mapped_column(Integer, default=1)
     # Optional short evidence quote backing the edge.
     evidence: Mapped[str | None] = mapped_column(Text, default=None)
     extra: Mapped[dict | None] = mapped_column(JSON, default=None)
@@ -290,3 +291,7 @@ class GraphEdge(Base):
 
     source_node: Mapped["GraphNode"] = relationship(foreign_keys=[source_node_id])
     target_node: Mapped["GraphNode"] = relationship(foreign_keys=[target_node_id])
+
+    __table_args__ = (
+        UniqueConstraint("source_node_id", "target_node_id", "relation", name="uq_graph_edge"),
+    )

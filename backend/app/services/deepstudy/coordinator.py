@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from app.core.database import session_scope
 from app.models.deepstudy import StudyRun
 from app.models.study import StudyChapter, StudyMaterial
+from app.models.task import AgentTask
 
 from .auto_repair import AutoRepair
 from .behavior_miner import BehaviorPatternMiner
@@ -102,6 +103,28 @@ class DeepStudyCoordinatorAgent:
                 await self._advance_stage(db, run, next_stage)
                 return
 
+            # R28: ensure a user-visible parent task exists for this run
+            existing = await db.execute(
+                select(AgentTask).where(AgentTask.run_id == run_id, AgentTask.visibility == "user")
+            )
+            if not existing.scalar_one_or_none():
+                chapters_count = run.total_chapters or 0
+                title_value = f"DeepStudy《{material.title if material else 'Material #' + str(run.material_id)}》"
+                parent_task = AgentTask(
+                    task_type="deepstudy_run",
+                    project_id=run.project_id,
+                    visibility="user",
+                    domain="deepstudy",
+                    task_kind="deepstudy_material_run",
+                    material_id=run.material_id,
+                    run_id=run.id,
+                    display_title=title_value,
+                    status="running",
+                    progress_current=0,
+                    progress_total=chapters_count,
+                )
+                db.add(parent_task)
+
             # Execute the stage (simulated for now)
             await self._execute_stage(db, run, next_stage)
 
@@ -136,6 +159,17 @@ class DeepStudyCoordinatorAgent:
 
         # Auto-materialise after specific stages
         await self._auto_materialize(run.material_id, stage_key)
+
+        # R28: update parent task progress and cost
+        parent_result = await db.execute(
+            select(AgentTask).where(AgentTask.run_id == run.id, AgentTask.visibility == "user")
+        )
+        parent = parent_result.scalar_one_or_none()
+        if parent is not None:
+            parent.progress_current = run.processed_chapters or 0
+            parent.progress_total = run.total_chapters or 0
+            parent.cost_usd = run.cost_usd or 0
+            parent.input_tokens = run.input_tokens or 0
 
         await db.flush()
 
@@ -207,6 +241,19 @@ class DeepStudyCoordinatorAgent:
             run.status = "succeeded"
             run.finished_at = datetime.now(timezone.utc)
 
+            # R28: mark parent task as succeeded
+            parent_result = await db.execute(
+                select(AgentTask).where(AgentTask.run_id == run.id, AgentTask.visibility == "user")
+            )
+            parent = parent_result.scalar_one_or_none()
+            if parent is not None:
+                parent.status = "succeeded"
+                parent.progress_current = run.processed_chapters or 0
+                parent.progress_total = run.total_chapters or 0
+                parent.cost_usd = run.cost_usd or 0
+                parent.input_tokens = run.input_tokens or 0
+                parent.finished_at = run.finished_at
+
             await deepstudy_event_bus.stage_completed(
                 material_id=material_id,
                 run_id=run.id,
@@ -217,6 +264,16 @@ class DeepStudyCoordinatorAgent:
             run.status = "failed"
             run.error = str(e)
             run.finished_at = datetime.now(timezone.utc)
+
+            # R28: mark parent task as failed
+            parent_result = await db.execute(
+                select(AgentTask).where(AgentTask.run_id == run.id, AgentTask.visibility == "user")
+            )
+            parent = parent_result.scalar_one_or_none()
+            if parent is not None:
+                parent.status = "failed"
+                parent.error = str(e)[:500]
+                parent.finished_at = run.finished_at
 
             await deepstudy_event_bus.stage_completed(
                 material_id=material_id,

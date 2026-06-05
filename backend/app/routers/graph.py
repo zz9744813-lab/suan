@@ -12,7 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, insert, func
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -141,8 +142,36 @@ async def create_edge(
         evidence=body.evidence,
         extra=body.extra,
     )
-    db.add(row)
+    # Upsert: on conflict, bump weight and count
+    stmt = sqlite_insert(GraphEdge).values(
+        project_id=row.project_id,
+        source_node_id=row.source_node_id,
+        target_node_id=row.target_node_id,
+        relation=row.relation,
+        weight=row.weight,
+        count=1,
+        evidence=row.evidence,
+        extra=row.extra,
+    ).on_conflict_do_update(
+        index_elements=["source_node_id", "target_node_id", "relation"],
+        set_={
+            "weight": GraphEdge.weight + row.weight,
+            "count": GraphEdge.count + 1,
+            "evidence": row.evidence,
+            "extra": row.extra,
+            "updated_at": func.now(),
+        },
+    )
+    result = await db.execute(stmt)
     await db.flush()
+    # Fetch the resulting row (new or updated)
+    row = (await db.execute(
+        select(GraphEdge).where(
+            GraphEdge.source_node_id == body.source_node_id,
+            GraphEdge.target_node_id == body.target_node_id,
+            GraphEdge.relation == body.relation,
+        )
+    )).scalar_one()
     return {"ok": True, "data": GraphEdgeRead.model_validate(row)}
 
 
@@ -452,19 +481,36 @@ async def materialise_from_study(
                 if a_node.id == b_node.id:
                     continue
                 relation = "同章节出现"
-                if (a_node.id, b_node.id, relation) in edge_key:
-                    continue
                 weight = min(1.0, 0.3 + 0.1 * count)
-                db.add(GraphEdge(
-                    project_id=project_id,
-                    source_node_id=a_node.id,
-                    target_node_id=b_node.id,
-                    relation=relation,
-                    weight=weight,
-                    evidence=None,
-                ))
-                edge_key.add((a_node.id, b_node.id, relation))
-                edges_created += 1
+                if (a_node.id, b_node.id, relation) in edge_key:
+                    # Edge exists: bump weight and count via upsert
+                    stmt = sqlite_insert(GraphEdge).values(
+                        project_id=project_id,
+                        source_node_id=a_node.id,
+                        target_node_id=b_node.id,
+                        relation=relation,
+                        weight=weight,
+                        count=1,
+                    ).on_conflict_do_update(
+                        index_elements=["source_node_id", "target_node_id", "relation"],
+                        set_={
+                            "weight": GraphEdge.weight + weight,
+                            "count": GraphEdge.count + 1,
+                            "updated_at": func.now(),
+                        },
+                    )
+                    await db.execute(stmt)
+                else:
+                    db.add(GraphEdge(
+                        project_id=project_id,
+                        source_node_id=a_node.id,
+                        target_node_id=b_node.id,
+                        relation=relation,
+                        weight=weight,
+                        evidence=None,
+                    ))
+                    edge_key.add((a_node.id, b_node.id, relation))
+                    edges_created += 1
 
     await db.flush()
     # Touch the result so the response carries the full updated

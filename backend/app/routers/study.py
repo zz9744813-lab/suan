@@ -2234,6 +2234,26 @@ async def apply_relationship_suggestions(
             skipped += 1
             continue
         if (a_node.id, b_node.id, relation) in edge_key:
+            # Edge exists: bump weight and count via upsert
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+            from sqlalchemy import func
+            weight = float(p.get("weight") or 0.5)
+            stmt = sqlite_insert(GraphEdge).values(
+                project_id=body.project_id,
+                source_node_id=a_node.id,
+                target_node_id=b_node.id,
+                relation=relation[:60],
+                weight=weight,
+                count=1,
+            ).on_conflict_do_update(
+                index_elements=["source_node_id", "target_node_id", "relation"],
+                set_={
+                    "weight": GraphEdge.weight + weight,
+                    "count": GraphEdge.count + 1,
+                    "updated_at": func.now(),
+                },
+            )
+            await db.execute(stmt)
             skipped += 1
             continue
         edge = GraphEdge(
