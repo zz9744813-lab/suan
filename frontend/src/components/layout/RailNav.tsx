@@ -64,14 +64,6 @@ export function RailNav() {
     <nav className="rail">
       <div className="rail-brand" title="NovelForge 2.0">NF</div>
 
-      <RailGroup items={CORE_ITEMS} />
-
-      <div className="rail-divider" />
-
-      <RailGroup items={LEARN_ITEMS} />
-
-      <div className="rail-spacer" />
-
       <button
         className="rail-theme-toggle"
         onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -80,6 +72,14 @@ export function RailNav() {
       >
         {theme === "dark" ? "☀" : "☾"}
       </button>
+
+      <div className="rail-nav-scroll">
+        <RailGroup items={CORE_ITEMS} />
+
+        <div className="rail-divider" />
+
+        <RailGroup items={LEARN_ITEMS} />
+      </div>
 
       <div
         className={`rail-dot rail-dot-${stateColor(workerState)}`}

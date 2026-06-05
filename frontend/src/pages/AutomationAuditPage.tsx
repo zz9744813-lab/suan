@@ -37,6 +37,27 @@ const EVENT_COLORS: Record<string, string> = {
   discussion_decision: "#4caf50",
 };
 
+function normalizeStats(raw: any): Record<string, number> {
+  const source = raw?.by_event ?? raw?.counts ?? raw;
+  const entries = Array.isArray(source)
+    ? source.map((item) => [
+        String(item?.event_type ?? item?.key ?? item?.name ?? ""),
+        item?.count ?? item?.total ?? item?.value,
+      ])
+    : Object.entries(source ?? {});
+
+  return entries.reduce<Record<string, number>>((acc, [key, value]) => {
+    const count =
+      typeof value === "number"
+        ? value
+        : value && typeof value === "object"
+          ? Number((value as any).count ?? (value as any).total ?? (value as any).value)
+          : Number(value);
+    if (key && Number.isFinite(count)) acc[key] = count;
+    return acc;
+  }, {});
+}
+
 export function AutomationAuditPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -55,7 +76,7 @@ export function AutomationAuditPage() {
         getAuditStatsByEvent(projectId ? { project_id: projectId } : undefined),
       ]);
       setLogs(Array.isArray(l) ? l : l?.items ?? []);
-      setStats(s?.by_event ?? s ?? {});
+      setStats(normalizeStats(s));
     } catch { /* */ }
     setLoading(false);
   }, [filter, projectId]);

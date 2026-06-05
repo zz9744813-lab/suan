@@ -65,6 +65,7 @@ export function ModelsPage() {
   const firstRunShown = useRef(false);
   const [showAutoConfigure, setShowAutoConfigure] = useState(false);
   const [autoConfigureProvider, setAutoConfigureProvider] = useState<ModelProvider | null>(null);
+  const [expandedProviderId, setExpandedProviderId] = useState<number | null>(null);
 
   // 拉数据
   const load = () => {
@@ -191,6 +192,7 @@ export function ModelsPage() {
         newProvider = await createProvider({ name, base_url: "https://api.openai.com/v1", enabled: true });
         setSuccessMsg(`已创建 ${name}`);
       }
+      if (newProvider) setExpandedProviderId(newProvider.id);
       load();
       // 检测是否是第一个真实 Provider（之前只有 stub）
       if (newProvider && providers.length === 1) {
@@ -269,7 +271,7 @@ export function ModelsPage() {
                 className="primary"
                 onClick={() => onAddProvider()}
               >
-                + 新增 Provider
+                + 添加 API Provider
               </button>
             </ShelfToolbar>
 
@@ -314,6 +316,7 @@ export function ModelsPage() {
               <ProviderAccordion
                 key={p.id}
                 provider={p}
+                defaultExpanded={p.id === expandedProviderId}
                 onChange={(body) => onProviderChange(p.id, body)}
                 onDelete={() => onProviderDelete(p.id)}
                 onTest={() => onProviderTest(p.id)}
