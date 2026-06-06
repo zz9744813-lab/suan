@@ -29,8 +29,13 @@ from .graph_materializer import GraphMaterializer
 from .job_graph import DEEPSTUDY_DAG, get_downstream_stages, get_ready_stages
 from .knowledge_indexer import KnowledgeIndexer
 from .stage_result_store import StageResultStore
+from .stages.behavior_pattern_mine import BehaviorPatternMineStage
 from .stages.chapter_profiler import ChapterProfilerStage
 from .stages.entity_extractor import EntityExtractorStage
+from .stages.event_extractor import EventExtractorStage
+from .stages.relationship_analyze import RelationshipAnalyzeStage
+from .stages.scene_beat_extractor import SceneBeatExtractorStage
+from .stages.technique_mine import TechniqueMineStage
 from .technique_miner import TechniqueMiner
 from .writing_context_sync import WritingContextSync
 
@@ -58,6 +63,11 @@ class DeepStudyCoordinatorAgent:
         self.stage_handlers = {
             "chapter_profile": ChapterProfilerStage(),
             "entity_extract": EntityExtractorStage(),
+            "event_extract": EventExtractorStage(),
+            "scene_beat_extract": SceneBeatExtractorStage(),
+            "relationship_analyze": RelationshipAnalyzeStage(),
+            "behavior_pattern_mine": BehaviorPatternMineStage(),
+            "technique_mine": TechniqueMineStage(),
         }
 
     async def execute_run(self, run_id: int) -> None:

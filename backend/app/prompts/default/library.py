@@ -534,6 +534,170 @@ WRITING_PROMPTS: dict[str, dict] = {
             "3. evidence 必须是原文 1-2 句,不能改写\n"
         ),
     },
+    "study_chapter_profile": {
+        "template_key": "study_chapter_profile",
+        "name": "拆书·章节画像",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "对单章进行叙事功能分析：摘要、叙事功能、视角、基调、冲突类型、读者钩子、节奏/信息密度评分。",
+        "allowed_inputs": ["chapter_no", "chapter_text"],
+        "forbidden_inputs": [],
+        "output_schema": "chapter_profile",
+        "can_modify": ["chapter_analysis"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "摘要必须概括本章核心事件，不能只写「本章推进了剧情」。",
+            "narrative_function 必须从枚举中选：开篇立压迫 / 关系翻转 / 伏笔埋设 / 伏笔回收 / 力量提升 / 信息揭露 / 冲突升级 / 转折 / 爽点 / 铺垫 / 收束 / 情节推进",
+            "pace_score 和 information_density 是 0-1 的小数。",
+        ],
+        "body": (
+            "请对下面这章小说做叙事功能分析。\n\n"
+            "【章节号】\n第{{chapter_no}}章\n\n"
+            "【章节文本】\n{{chapter_text}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "summary": "100~200 字摘要，概括本章核心事件和人物变化",\n'
+            '  "narrative_function": "开篇立压迫|关系翻转|伏笔埋设|伏笔回收|力量提升|信息揭露|冲突升级|转折|爽点|铺垫|收束|情节推进",\n'
+            '  "pov": "first_person|third_person|third_person_limited|omniscient",\n'
+            '  "tone": "激烈|压抑|轻松|悲伤|紧张|悬疑|温馨|中性",\n'
+            '  "conflict_type": "身份压迫|资源争夺|情感背叛|内心挣扎|势力对抗|理念冲突|无冲突",\n'
+            '  "reader_hook": "章末钩子描述（50字内），没有则留空",\n'
+            '  "pace_score": 0.0-1.0 小数（节奏快慢，1=最快）,\n'
+            '  "information_density": 0.0-1.0 小数（新信息密度，1=最密）\n'
+            "}\n"
+        ),
+    },
+    "study_scene_beat": {
+        "template_key": "study_scene_beat",
+        "name": "拆书·场景节拍提取",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "从章节文本中提取叙事节拍（trigger→action→result），每个节拍是推动剧情的原子单位。",
+        "allowed_inputs": ["chapter_no", "chapter_text", "known_characters"],
+        "forbidden_inputs": [],
+        "output_schema": "scene_beats",
+        "can_modify": ["scene_beats"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "每个节拍必须包含 trigger / action / result 三要素。",
+            "involved_characters 必须是文本中实际出现的人物名。",
+            "scene_type 必须从枚举中选。",
+        ],
+        "body": (
+            "请从下面这段章节文本中提取叙事节拍。\n"
+            "每个节拍是一个(trigger→action→result)原子单元，推动剧情前进。\n\n"
+            "【章节号】\n第{{chapter_no}}章\n\n"
+            "【章节文本】\n{{chapter_text}}\n\n"
+            "【已识别人物（用于匹配出场角色）】\n{{known_characters}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "beats": [\n'
+            "    {\n"
+            '      "title": "节拍标题(10字内)",\n'
+            '      "summary": "30字内概括",\n'
+            '      "scene_type": "铺垫|冲突|试探|压迫|反击|交易|战斗|揭秘|升级|转折|伏笔|回收|收束|钩子",\n'
+            '      "trigger": "触发事件",\n'
+            '      "action": "角色行动",\n'
+            '      "result": "结果",\n'
+            '      "conflict": "核心矛盾(可选)",\n'
+            '      "reader_emotion": "读者预期情绪(可选)",\n'
+            '      "involved_characters": ["人物名1", "人物名2"],\n'
+            '      "evidence_quotes": ["原文1句作为依据"],\n'
+            '      "importance": 0.0-1.0 小数\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "注意：\n"
+            "1. 每章通常有 2-6 个节拍\n"
+            "2. 只提取对剧情有推动作用的节拍，不要提取日常描写\n"
+            "3. importance 越高表示对剧情推动越关键\n"
+        ),
+    },
+    "study_entity_extract": {
+        "template_key": "study_entity_extract",
+        "name": "拆书·非人物实体提取",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "从章节文本中提取非人物实体（地点、势力、物品、规则等）。",
+        "allowed_inputs": ["chapter_text"],
+        "forbidden_inputs": [],
+        "output_schema": "study_entities",
+        "can_modify": ["study_entities"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "只提取非人物实体（location / faction / item / rule / concept / resource / ability / secret）。",
+            "不要提取人物——人物由 study_character 模板处理。",
+            "每个实体必须有文本依据。",
+        ],
+        "body": (
+            "请从下面这段章节文本中提取非人物实体。\n"
+            "只提取以下类型：地点(location)、势力(faction)、物品(item)、规则(rule)、概念(concept)、资源(resource)、能力(ability)、秘密(secret)。\n"
+            "不要提取人物——人物由专门的模板处理。\n\n"
+            "【章节文本】\n{{chapter_text}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "entities": [\n'
+            "    {\n"
+            '      "name": "实体名",\n'
+            '      "type": "location|faction|item|rule|concept|resource|ability|secret",\n'
+            '      "summary": "30字内描述",\n'
+            '      "tags": ["标签1", "标签2"],\n'
+            '      "confidence": 0.0-1.0 小数,\n'
+            '      "evidence": "原文1句作为依据"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        ),
+    },
+    "study_technique_mine": {
+        "template_key": "study_technique_mine",
+        "name": "拆书·写作技巧提炼",
+        "category": "study",
+        "role": "StudyAgent",
+        "scope": "global",
+        "genre": None,
+        "description": "基于行为模式、场景节拍和伏笔链提炼可复用的写作技巧，包含 prompt_hint（写手提示）和 anti_pattern（反模式）。",
+        "allowed_inputs": ["evidence_summary", "book_title"],
+        "forbidden_inputs": [],
+        "output_schema": "writing_techniques",
+        "can_modify": ["writing_techniques"],
+        "cannot_modify": ["bible"],
+        "hard_rules": [
+            "每个技巧必须有 prompt_hint（一条具体写作指令）。",
+            "prompt_hint 必须可操作，不能是「写好一点」这种废话。",
+            "anti_pattern 是「不要这样做」的警示。",
+        ],
+        "body": (
+            "请从下面的拆书数据中提炼可复用的写作技巧。\n\n"
+            "【拆书数据汇总】\n{{evidence_summary}}\n\n"
+            "输出 JSON：\n"
+            "{\n"
+            '  "techniques": [\n'
+            "    {\n"
+            '      "name": "技巧名(20字内)",\n'
+            '      "technique_type": "开篇钩子|人物塑造|压迫感|反转|爽点|伏笔埋设|伏笔回收|信息差|关系推进|节奏控制|战斗设计|对话设计|世界观展示",\n'
+            '      "summary": "50~100字说明这个技巧",\n'
+            '      "applicable_genres": ["玄幻", "都市"],\n'
+            '      "applicable_situations": ["弱势主角被公开压迫", "..."],\n'
+            '      "prompt_hint": "一条可操作的写作指令（如：当你要写「弱势主角被公开压迫但不能立刻反击」的桥段时，先让主角表面接受规则，再通过一个不起眼的硬事实保存筹码，最后在章末给出反制暗示）",\n'
+            '      "anti_pattern": "不要这样做（如：不能只让主角忍，否则会变成憋屈）",\n'
+            '      "evidence_quotes": ["原文依据1"],\n'
+            '      "confidence": 0.0-1.0 小数\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "注意：\n"
+            "1. 只提炼真正有写作指导价值的技巧，不要凑数\n"
+            "2. prompt_hint 必须是一条具体的、可操作的写作指令\n"
+            "3. anti_pattern 是「使用这个技巧时要避免的做法」\n"
+        ),
+    },
     "behavior_pattern_extract": {
         "template_key": "behavior_pattern_extract",
         "name": "行为模式归纳",
