@@ -26,7 +26,6 @@ from app.models.study import (
     StudyChapter,
     StudyCharacter,
     StudyMaterial,
-    StudyShelf,
 )
 from app.models.task import AgentTask
 from app.schemas import (
@@ -56,9 +55,6 @@ from app.schemas import (
     StudyRelationshipsResponse,
     StudyRelationshipSuggestion,
     StudyRequest,
-    StudyShelfCreate,
-    StudyShelfRead,
-    StudyShelfUpdate,
 )
 from app.services.llm.router import get_llm_router
 from app.services.prompt_engine import get_prompt_engine
@@ -286,15 +282,15 @@ def _chunks_from_matches(
                 first_real_index = 1
         else:
             first_real_index = 1
-        # Title: capture group 1 is the number, group 2 is the
-        # suffix char (章/节/卷/回) — we echo that back in the
-        # title so the user can see which book convention this is,
-        # group 3 is the optional chapter name. We also include
-        # the original header line in the content so the user can
-        # see the full chapter start.
+        # CN regex: group(1)=number, group(2)=suffix(章/节/卷/回), group(3)=title
+        # EN regex: group(1)=number, group(2)=title (no suffix group)
         num = m.group(1)
-        suffix = m.group(2) or "章"
-        title = (m.group(3) or "").strip()
+        if cn_mode:
+            suffix = m.group(2) or "章"
+            title = (m.group(3) or "").strip()
+        else:
+            suffix = "章"
+            title = (m.group(2) or "").strip()
         if cn_mode:
             try:
                 num_int = _cn_to_int(num)
