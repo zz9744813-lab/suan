@@ -388,6 +388,15 @@ export function ProjectsPage() {
             <button className="primary" onClick={() => setCreating(true)}>
               + 新建项目
             </button>
+            {projects.length > visibleProjects.length && (
+              <span
+                className="shelf-toolbar-chip"
+                title={`当前有 ${visibleProjects.length} 个项目, 还有 ${projects.length - visibleProjects.length} 个系统项目 (拆书·公共 / DeepStudy 等) 被默认隐藏`}
+                style={{ marginLeft: 4, cursor: "help", opacity: 0.7 }}
+              >
+                ℹ️ {projects.length - visibleProjects.length} 个系统项目已隐藏
+              </span>
+            )}
           </ShelfToolbar>
 
           <ShelfSidePanel

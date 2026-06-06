@@ -68,7 +68,10 @@ import type {
 } from "../types";
 
 // ----- projects -----
-export const listProjects = () => api.get<Project[]>("/api/projects");
+export const listProjects = (params: { include_system?: boolean } = {}) => {
+  const q = params.include_system ? "?include_system=true" : "";
+  return api.get<Project[]>(`/api/projects${q}`);
+};
 export const getProject = (id: number) => api.get<Project>(`/api/projects/${id}`);
 export const createProject = (body: Partial<Project>) =>
   api.post<Project>("/api/projects", body);
