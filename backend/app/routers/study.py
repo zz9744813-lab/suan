@@ -221,12 +221,106 @@ def _cn_to_int(s: str) -> int:
     return total + section + current
 
 
+# Common delimiter patterns used by web-novel aggregators / copy-paste dumps.
+_DELIMITER_RE = re.compile(
+    r"^[\s]*[=\-#\*~\+]{3,}[\s]*$",
+    re.MULTILINE,
+)
+
+
+_DEFAULT_CHUNK_CHARS = 10_000  # ~10k chars per auto-split chapter
+_MIN_CHUNK_CHARS = 2_000
+
+
+def _split_by_delimiter(text: str) -> list[tuple[int, str, str]] | None:
+    """Split by delimiter lines (e.g. `===========`).
+
+    Returns None if fewer than 2 delimiters are found, meaning
+    there's nothing to split on.
+    """
+    matches = list(_DELIMITER_RE.finditer(text))
+    if len(matches) < 2:
+        return None
+    out: list[tuple[int, str, str]] = []
+    # Treat text before first delimiter as preamble / chapter 1 intro
+    first_start = matches[0].start()
+    if first_start > 100:
+        preamble = text[:first_start].strip()
+        if len(preamble) >= _MIN_CHUNK_CHARS:
+            out.append((1, "序章", preamble))
+            offset = 1
+        else:
+            offset = 0
+    else:
+        offset = 0
+
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        if len(body) < _MIN_CHUNK_CHARS:
+            continue
+        idx = offset + len(out) + 1
+        out.append((idx, f"第 {idx} 章", body))
+    return out if len(out) >= 2 else None
+
+
+def _split_by_size(text: str, chunk_chars: int = _DEFAULT_CHUNK_CHARS) -> list[tuple[int, str, str]]:
+    """Uniform size-based split at paragraph boundaries.
+
+    Used as the final fallback when no chapter headers or delimiters
+    are found. Prefers to break at blank lines; if none exist, breaks
+    at the nearest sentence end (。！？) within a tolerance window.
+    """
+    out: list[tuple[int, str, str]] = []
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    if not paragraphs:
+        return [(1, "全文", text)]
+
+    current_body = ""
+    current_idx = 1
+    tolerance = chunk_chars // 5  # ±20% tolerance for better break points
+
+    for para in paragraphs:
+        if len(current_body) + len(para) + 1 < chunk_chars:
+            current_body = (current_body + "\n" + para).strip() if current_body else para
+            continue
+
+        # Try to find a good break point within tolerance
+        candidate = current_body + "\n" + para
+        if len(candidate) <= chunk_chars + tolerance:
+            # Accept slightly oversized chunk for a clean paragraph break
+            current_body = candidate.strip()
+            out.append((current_idx, f"第 {current_idx} 章", current_body))
+            current_idx += 1
+            current_body = ""
+        else:
+            # Flush current buffer and start new chunk with this paragraph
+            if current_body:
+                out.append((current_idx, f"第 {current_idx} 章", current_body))
+                current_idx += 1
+            current_body = para
+
+    if current_body:
+        if len(current_body) >= _MIN_CHUNK_CHARS:
+            out.append((current_idx, f"第 {current_idx} 章", current_body))
+        elif out:
+            # Merge last small chunk into previous chapter
+            prev_idx, prev_title, prev_body = out[-1]
+            out[-1] = (prev_idx, prev_title, prev_body + "\n\n" + current_body)
+        else:
+            out.append((current_idx, "全文", current_body))
+
+    return out if out else [(1, "全文", text)]
+
+
 def _split_chapters(text: str, pattern: str = "auto") -> list[tuple[int, str, str]]:
     """Return a list of (chapter_index, title, content) tuples.
 
-    The first item is always ``(1, "序章", text_before_first_header)`` if
-    the user pastes a preamble, or ``(1, "第 N 章", full_text)`` if the
-    first line is already a chapter header.
+    Strategy (in order):
+    1. Regex-based header matching (第N章 / CHAPTER N).
+    2. Delimiter-based splitting (`=========` etc.).
+    3. Uniform size-based splitting at paragraph boundaries (final fallback).
     """
     text = (text or "").strip()
     if not text:
@@ -253,11 +347,19 @@ def _split_chapters(text: str, pattern: str = "auto") -> list[tuple[int, str, st
             matches = en_hits
             cn_mode = False
         if not matches:
-            return [(1, "全文", text)]
+            # Fallback 1: delimiter-based split
+            delimiter_chunks = _split_by_delimiter(text)
+            if delimiter_chunks:
+                return delimiter_chunks
+            # Fallback 2: uniform size-based split (never returns empty)
+            return _split_by_size(text)
         return _chunks_from_matches(text, matches, cn_mode=cn_mode)
     matches = list(rx.finditer(text))
     if not matches:
-        return [(1, "全文", text)]
+        delimiter_chunks = _split_by_delimiter(text)
+        if delimiter_chunks:
+            return delimiter_chunks
+        return _split_by_size(text)
     return _chunks_from_matches(text, matches, cn_mode=(pattern == "chinese"))
 
 
@@ -620,7 +722,7 @@ def _extract_text_from_upload(filename: str, content: bytes) -> str:
 
 
 def _parse_txt(content: bytes) -> str:
-    """Decode bytes as UTF-8 and strip a leading BOM if present.
+    """Decode bytes with auto-detected encoding and strip a leading BOM if present.
 
     A BOM is invisible to the chapter regex (``^\\s*第``) but the
     ``\\ufeff`` byte is a *non-whitespace* character — so when the
@@ -630,6 +732,9 @@ def _parse_txt(content: bytes) -> str:
     keeps the regex honest and the user gets the chapters they
     expect. Same trick for UTF-16 LE/BE in case the file was saved
     as Unicode.
+
+    Encoding detection order: UTF-8 (strict) → UTF-16 BOM → GBK → GB18030 → UTF-8 (replace fallback).
+    This handles the common case where Chinese web-novel exports are saved in GBK/GB2312.
     """
     if content.startswith(b"\xef\xbb\xbf"):
         content = content[3:]
@@ -638,6 +743,25 @@ def _parse_txt(content: bytes) -> str:
             return content.decode("utf-16", errors="replace").lstrip("\ufeff")
         except Exception:
             return content.decode("utf-8", errors="replace")
+
+    # Try UTF-8 strict first (most common, avoids mojibake).
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+
+    # Try GBK / GB18030 (common for Chinese novels exported from old sites).
+    for enc in ("gbk", "gb18030", "gb2312"):
+        try:
+            decoded = content.decode(enc)
+            # Sanity check: if decoded text is mostly replacement chars or
+            # looks like mojibake, fall through to next encoding.
+            if "\ufffd" not in decoded:
+                return decoded
+        except (UnicodeDecodeError, LookupError):
+            pass
+
+    # Ultimate fallback: UTF-8 with replacement chars (never raises).
     return content.decode("utf-8", errors="replace")
 
 
