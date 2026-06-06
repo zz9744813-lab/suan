@@ -51,6 +51,12 @@ class LibraryItem(BaseModel):
     knowledge_score: float | None = None
     last_deepstudied_at: datetime | None = None
     cost_usd: float = 0.0
+    latest_run_id: int | None = None
+    latest_run_status: str | None = None
+    latest_run_mode: str | None = None
+    latest_run_stage: str | None = None
+    latest_run_progress: dict | None = None
+    latest_run_error: str | None = None
     project_id: int | None = None
     created_at: datetime
     updated_at: datetime

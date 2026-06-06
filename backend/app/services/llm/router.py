@@ -28,11 +28,26 @@ from app.services.llm.client import (
 )
 from app.services.llm.error_classifier import classify_llm_exception
 from app.services.model_capability import LEGACY_ROLE_TO_AGENT_KEY
+from app.services.model_call_recorder import ModelCallRecorder
+from app.services.model_selector import ModelCandidate, get_model_selector
 
 logger = logging.getLogger(__name__)
 
 # 单次 Agent 调用内最多 fallback 次数
 MAX_FALLBACK_ATTEMPTS = 2
+
+
+def _is_real_api_text_model(provider: ModelProvider, model_name: str | None) -> bool:
+    base_url = (provider.base_url or "").lower()
+    if base_url.startswith("mock://"):
+        return False
+    if "localhost" in base_url or "127.0.0.1" in base_url or base_url.startswith("http://local"):
+        return False
+    if not provider.api_key:
+        return False
+    from app.services.model_selector import is_text_role_model_compatible
+
+    return is_text_role_model_compatible("legacy_text_role", model_name or "")
 
 
 @dataclass
@@ -58,7 +73,6 @@ class LLMRouter:
         agent_key = LEGACY_ROLE_TO_AGENT_KEY.get(role)
         if agent_key:
             try:
-                from app.services.model_selector import get_model_selector
                 selected = await get_model_selector().select_for_agent(
                     db, agent_role_key=agent_key, legacy_role=role,
                 )
@@ -89,7 +103,10 @@ class LLMRouter:
         result = (
             await db.execute(stmt.order_by(ModelRoleAssignment.id.asc()))
         ).scalars().first()
-        if result and result.provider and result.provider.enabled:
+        if (
+            result and result.provider and result.provider.enabled
+            and _is_real_api_text_model(result.provider, result.model)
+        ):
             return ResolvedCall(
                 provider=result.provider,
                 model=result.model,
@@ -98,6 +115,32 @@ class LLMRouter:
                 selection_mode="manual",
                 selection_reason=f"旧绑定: {result.provider.name}/{result.model}",
             )
+        providers = (await db.execute(
+            select(ModelProvider)
+            .where(ModelProvider.enabled.is_(True))
+            .order_by(ModelProvider.id.asc())
+        )).scalars().all()
+        for first in providers:
+            models = list(first.model_list or [])
+            if first.default_model and first.default_model not in models:
+                models.insert(0, first.default_model)
+            model = next((m for m in models if _is_real_api_text_model(first, m)), None)
+            if not model:
+                continue
+            return ResolvedCall(
+                provider=first,
+                model=model,
+                temperature=0.8,
+                max_tokens=2048,
+                selection_mode="auto",
+                selection_reason=f"legacy API fallback: {first.name}/{model}",
+            )
+
+        raise bad_request(
+            f"Role '{role}' has no real API text model available",
+            suggestion="Configure an API-key chat/text provider; stub, local, image, video, and audio models are not valid for text agents.",
+        )
+
         # fallback: first enabled provider
         stmt_first = (
             select(ModelProvider)
@@ -139,8 +182,10 @@ class LLMRouter:
         response_format: dict[str, str] | None = None,
         extra: dict[str, Any] | None = None,
         stream: bool = True,
+        task_id: int | None = None,
         chapter_id: int | None = None,
         step_key: str | None = None,
+        agent_step_id: int | None = None,
         project_id: int | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult]:
         """调用 LLM, 支持 fallback 链.
@@ -159,7 +204,6 @@ class LLMRouter:
         )
 
         # ── 记录选择事件 ──
-        from app.services.model_call_recorder import ModelCallRecorder
         recorder = ModelCallRecorder()
         event = await recorder.record_selection(
             db,
@@ -170,7 +214,9 @@ class LLMRouter:
             selection_score=resolved.selection_score,
             selection_reason=resolved.selection_reason,
             project_id=project_id,
+            task_id=task_id,
             chapter_id=chapter_id,
+            agent_step_id=agent_step_id,
             step_key=step_key,
             provider_name=resolved.provider.name,
         )
@@ -217,6 +263,11 @@ class LLMRouter:
                     primary_failure_type=failure_type,
                     primary_provider_name=resolved.provider.name,
                     primary_model_name=resolved.model,
+                    project_id=project_id,
+                    task_id=task_id,
+                    chapter_id=chapter_id,
+                    step_key=step_key,
+                    agent_step_id=agent_step_id,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -256,14 +307,17 @@ class LLMRouter:
         primary_failure_type: str | None = None,
         primary_provider_name: str | None = None,
         primary_model_name: str | None = None,
+        project_id: int | None = None,
+        task_id: int | None = None,
+        chapter_id: int | None = None,
+        step_key: str | None = None,
+        agent_step_id: int | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult] | None:
         """尝试 fallback 到候选列表中的下一个可用模型.
 
         P0-Model-Failover fix: 不再只试一次, 而是循环遍历候选列表
         (最多 MAX_FALLBACK_ATTEMPTS 次), 跳过已失败的 provider/model 组合.
         """
-        from app.services.model_selector import get_model_selector
-
         try:
             selected = await get_model_selector().select_for_agent(
                 db, agent_role_key=agent_key, legacy_role=role,
@@ -288,9 +342,8 @@ class LLMRouter:
         if not fallback_candidates:
             # 仍然把 selected 自身作为第一个候选尝试
             # (选择器可能已挑了不同于主模型的最优候选)
-            from app.services.model_selector import ModelCandidate as MC
             fallback_candidates = [
-                MC(
+                ModelCandidate(
                     provider_id=selected.provider.id,
                     provider_name=selected.provider.name,
                     base_url=selected.provider.base_url,
@@ -347,6 +400,11 @@ class LLMRouter:
                     selection_mode="manual_with_fallback",
                     selection_score=fallback_resolved.selection_score,
                     selection_reason=f"fallback#{attempt_no} (主模型{primary_failure_type})",
+                    project_id=project_id,
+                    task_id=task_id,
+                    chapter_id=chapter_id,
+                    step_key=step_key,
+                    agent_step_id=agent_step_id,
                     provider_name=fallback_resolved.provider.name,
                     event_type="fallback_triggered",
                     event_category="routing",

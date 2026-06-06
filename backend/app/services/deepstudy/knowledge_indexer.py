@@ -8,6 +8,7 @@ exist for 主角 + 公开羞辱" and get ranked results.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
@@ -25,6 +26,15 @@ from app.models.deepstudy import (
 from app.models.study import BehaviorPattern, StudyChapter, StudyMaterial
 
 
+@asynccontextmanager
+async def _db_context(existing_db=None):
+    if existing_db is not None:
+        yield existing_db
+    else:
+        async with session_scope() as db:
+            yield db
+
+
 class KnowledgeIndexer:
     """Builds searchable indexes from DeepStudy analysis output.
 
@@ -32,7 +42,7 @@ class KnowledgeIndexer:
     suitable for keyword and semantic retrieval.
     """
 
-    async def index_material(self, material_id: int) -> None:
+    async def index_material(self, material_id: int, db=None) -> None:
         """Index all DeepStudy outputs for retrieval.
 
         Builds per-material indexes:
@@ -45,7 +55,7 @@ class KnowledgeIndexer:
         In production this writes to a vector store or FTS table.
         For the MVP it validates data integrity and computes stats.
         """
-        async with session_scope() as db:
+        async with _db_context(db) as db:
             material = await db.get(StudyMaterial, material_id)
             if material is None:
                 return

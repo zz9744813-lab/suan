@@ -203,6 +203,12 @@ async def list_library(
             knowledge_score=m.knowledge_score,
             last_deepstudied_at=m.last_deepstudied_at,
             cost_usd=cost_by_material.get(m.id, 0.0),
+            latest_run_id=latest.id if latest else None,
+            latest_run_status=latest.status if latest else None,
+            latest_run_mode=latest.mode if latest else None,
+            latest_run_stage=(latest.progress or {}).get("current_stage") or latest.current_stage if latest else None,
+            latest_run_progress=latest.progress if latest else None,
+            latest_run_error=latest.error if latest else None,
             project_id=m.project_id,
             created_at=m.created_at, updated_at=m.updated_at,
         ))
@@ -307,6 +313,9 @@ async def start_run(
         "model_roles": body.model_roles,
         "stages": _stages_for_mode(body.mode),
     }
+    completed_stages = []
+    if (material.chapter_count or 0) > 0 or material.status == "ready":
+        completed_stages = ["ingest", "chapterize"]
     run = StudyRun(
         material_id=material_id,
         project_id=material.project_id,
@@ -316,7 +325,11 @@ async def start_run(
         processed_chapters=0,
         current_stage=None,
         agent_plan=agent_plan,
-        progress={stage: 0 for stage in agent_plan["stages"]},
+        progress={
+            "completed_stages": completed_stages,
+            "current_stage": None,
+            **{stage: (100 if stage in completed_stages else 0) for stage in agent_plan["stages"]},
+        },
         started_at=datetime.utcnow(),
     )
     db.add(run)
@@ -352,25 +365,29 @@ def _stages_for_mode(mode: str) -> list[str]:
     requested slice so a re-run is cheap.
     """
     if mode == "entities_only":
-        return ["chapter_profile", "entity", "scene_beat"]
+        return ["chapter_profile", "entity_extract", "scene_beat_extract"]
     if mode == "relationships_only":
-        return ["chapter_profile", "relationship"]
+        return ["chapter_profile", "entity_extract", "event_extract", "relationship_analyze"]
     if mode == "behaviors_only":
-        return ["chapter_profile", "behavior"]
+        return ["chapter_profile", "entity_extract", "event_extract", "scene_beat_extract", "behavior_pattern_mine"]
     if mode == "techniques_only":
-        return ["behavior", "technique"]
+        return ["behavior_pattern_mine", "foreshadow_analyze", "technique_mine"]
     if mode == "repair_failed":
         # The actual re-run is decided per-stage by the worker based
         # on which sub-tasks errored; we list all so the UI can show
         # the planned skeleton.
         return [
-            "chapter_profile", "entity", "scene_beat", "relationship",
-            "foreshadow", "behavior", "technique", "graph", "critic",
+            "ingest", "chapterize", "chapter_profile", "entity_extract",
+            "event_extract", "scene_beat_extract", "relationship_analyze",
+            "foreshadow_analyze", "behavior_pattern_mine", "technique_mine",
+            "graph_finalize", "study_critic", "knowledge_index", "writing_context_sync",
         ]
     # "full"
     return [
-        "chapter_profile", "entity", "scene_beat", "relationship",
-        "foreshadow", "behavior", "technique", "graph", "critic",
+        "ingest", "chapterize", "chapter_profile", "entity_extract",
+        "event_extract", "scene_beat_extract", "relationship_analyze",
+        "foreshadow_analyze", "behavior_pattern_mine", "technique_mine",
+        "graph_finalize", "study_critic", "knowledge_index", "writing_context_sync",
     ]
 
 

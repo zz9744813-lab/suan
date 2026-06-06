@@ -15,12 +15,11 @@ import {
 import type { AgentTask, AgentStep } from "../types";
 import "./TasksPage.css";
 
-type DomainTab = "all" | "writing" | "deepstudy" | "model" | "discussion" | "memory" | "export" | "failed";
+type DomainTab = "all" | "writing" | "model" | "discussion" | "memory" | "export" | "failed";
 
 const DOMAINS: { key: DomainTab; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "writing", label: "写作" },
-  { key: "deepstudy", label: "拆书" },
   { key: "model", label: "模型" },
   { key: "discussion", label: "讨论" },
   { key: "memory", label: "记忆" },
@@ -37,6 +36,17 @@ const STAGE_LABELS: Record<string, string> = {
   planner:"规划", draft:"写作", critic:"评审", reader_feedback:"读者反馈",
   discussion:"讨论", rewrite:"返工", continuity:"连续", learning:"学习", memory_update:"记忆更新",
 };
+
+function isDeepStudyTask(task: AgentTask) {
+  const domain = task.domain || "";
+  const kind = task.task_kind || task.task_type || "";
+  return domain === "deepstudy"
+    || kind.startsWith("deepstudy")
+    || kind === "study"
+    || kind === "study_bulk"
+    || kind === "chapterize"
+    || kind === "study_material";
+}
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
@@ -104,14 +114,16 @@ export function TasksPage() {
     }
   }
 
+  const visibleTasks = useMemo(() => tasks.filter((t) => !isDeepStudyTask(t)), [tasks]);
+
   const stats = useMemo(() => ({
-    running: tasks.filter((t) => t.status === "running").length,
-    pending: tasks.filter((t) => t.status === "pending" || t.status === "queued").length,
-    failed: tasks.filter((t) => t.status === "failed").length,
-    succeeded: tasks.filter((t) => t.status === "succeeded").length,
-    cost: tasks.reduce((s, t) => s + (t.cost_usd || 0), 0),
-    tokens: tasks.reduce((s, t) => s + (t.input_tokens || 0) + (t.output_tokens || 0), 0),
-  }), [tasks]);
+    running: visibleTasks.filter((t) => t.status === "running").length,
+    pending: visibleTasks.filter((t) => t.status === "pending" || t.status === "queued").length,
+    failed: visibleTasks.filter((t) => t.status === "failed").length,
+    succeeded: visibleTasks.filter((t) => t.status === "succeeded").length,
+    cost: visibleTasks.reduce((s, t) => s + (t.cost_usd || 0), 0),
+    tokens: visibleTasks.reduce((s, t) => s + (t.input_tokens || 0) + (t.output_tokens || 0), 0),
+  }), [visibleTasks]);
 
   // Internal steps: filter out user-level
   const userSteps = useMemo(() => steps.filter((s) => s.step_name !== "study_character" && s.step_name !== "study_event"), [steps]);
@@ -166,12 +178,12 @@ export function TasksPage() {
 
       {/* Task card list */}
       <div className="tasks-card-list">
-        {tasks.length === 0 ? (
+        {visibleTasks.length === 0 ? (
           <div className="card" style={{ padding: 24, textAlign: "center" }}>
             <div className="muted">暂无任务</div>
           </div>
         ) : (
-          tasks.map((t) => {
+          visibleTasks.map((t) => {
             const expanded = expandedId === t.id;
             const progressPct = (t.progress_total ?? 0) > 0
               ? Math.min(100, Math.round(((t.progress_current ?? 0) / (t.progress_total ?? 1)) * 100))

@@ -60,8 +60,13 @@ class TestLLMRouterFallback:
         )
 
         with patch.object(router, "resolve", return_value=resolved):
-            with patch("app.services.llm.router.ModelCallRecorder"):
-                with patch("app.services.model_circuit_breaker.CircuitBreakerService"):
+            with patch("app.services.llm.router.ModelCallRecorder") as MockRecorder:
+                recorder = MockRecorder.return_value
+                recorder.record_selection = AsyncMock(return_value=MagicMock())
+                recorder.record_success = AsyncMock()
+                recorder.record_failure = AsyncMock()
+                with patch("app.services.model_circuit_breaker.CircuitBreakerService") as MockCircuit:
+                    MockCircuit.return_value.record_failure = AsyncMock()
                     res_call, result = await router.chat(
                         mock_db, role="draft",
                         messages=[],
@@ -117,9 +122,14 @@ class TestLLMRouterFallback:
         )
 
         with patch.object(router, "resolve", return_value=resolved):
-            with patch("app.services.llm.router.ModelCallRecorder"):
+            with patch("app.services.llm.router.ModelCallRecorder") as MockRecorder:
+                recorder = MockRecorder.return_value
+                recorder.record_selection = AsyncMock(return_value=MagicMock())
+                recorder.record_success = AsyncMock()
+                recorder.record_failure = AsyncMock()
                 with patch("app.services.llm.router.classify_llm_exception", return_value="connection_error"):
-                    with patch("app.services.model_circuit_breaker.CircuitBreakerService"):
+                    with patch("app.services.model_circuit_breaker.CircuitBreakerService") as MockCircuit:
+                        MockCircuit.return_value.record_failure = AsyncMock()
                         with patch("app.services.llm.router.get_model_selector") as mock_sel:
                             mock_sel.return_value.select_for_agent = AsyncMock(return_value=selected_model)
                             mock_db.get = AsyncMock(return_value=fb_provider)
@@ -200,9 +210,14 @@ class TestLLMRouterFallback:
         )
 
         with patch.object(router, "resolve", return_value=resolved):
-            with patch("app.services.llm.router.ModelCallRecorder"):
+            with patch("app.services.llm.router.ModelCallRecorder") as MockRecorder:
+                recorder = MockRecorder.return_value
+                recorder.record_selection = AsyncMock(return_value=MagicMock())
+                recorder.record_success = AsyncMock()
+                recorder.record_failure = AsyncMock()
                 with patch("app.services.llm.router.classify_llm_exception", return_value="connection_error"):
-                    with patch("app.services.model_circuit_breaker.CircuitBreakerService"):
+                    with patch("app.services.model_circuit_breaker.CircuitBreakerService") as MockCircuit:
+                        MockCircuit.return_value.record_failure = AsyncMock()
                         with pytest.raises(Exception):
                             await router.chat(
                                 mock_db, role="draft",

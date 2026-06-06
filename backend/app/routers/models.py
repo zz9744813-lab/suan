@@ -38,6 +38,8 @@ from app.services.llm.client import (
     LLMMessage,
     get_llm_client,
 )
+from app.services.model_call_recorder import ModelCallRecorder
+from app.services.model_selector import is_text_role_model_compatible
 
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -357,6 +359,40 @@ async def health_check_provider(
                 recommended_roles={},
             )}
 
+    if not is_text_role_model_compatible("health_check", target_model):
+        checked_at = datetime.utcnow()
+        message = "已跳过：该模型看起来是生图、视频、音频或视觉专用模型，不执行文本 Agent 健康探针。"
+        row.last_health_status = "unknown_error"
+        row.last_health_message = message
+        row.last_health_latency_ms = 0
+        row.last_health_model = target_model
+        row.last_health_at = checked_at
+        row.last_health_full = {
+            "results": [
+                _skipped_item("short_chat", message).model_dump(),
+                _skipped_item("json_output", message).model_dump(),
+                _skipped_item("critic_schema", message).model_dump(),
+                _skipped_item("long_text", message).model_dump(),
+            ],
+            "score": 0,
+            "recommended_roles": {},
+            "checked_at": checked_at.isoformat(),
+            "skipped_reason": "media_model",
+        }
+        await db.flush()
+        return {"ok": True, "data": ModelHealthCheckResult(
+            ok=False,
+            status="unknown_error",
+            message=message,
+            suggestion="给文本 Agent 绑定 chat/completions 文本模型；生图、视频、音频模型不要放进自动分配池。",
+            model=target_model,
+            latency_ms=0,
+            checked_at=checked_at,
+            results=[ModelHealthCheckItem(**r) for r in row.last_health_full["results"]],
+            score=0,
+            recommended_roles={},
+        )}
+
     client = get_llm_client()
     checked_at = datetime.utcnow()
 
@@ -368,28 +404,28 @@ async def health_check_provider(
     fatal: tuple[HealthStatus, str, str | None] | None = None
 
     # ---- 1. short_chat ----
-    item = await _probe_short_chat(client, row, target_model)
+    item = await _probe_short_chat(client, row, target_model, db)
     results.append(item)
     if item.status == "failed":
         fatal = _fatal_from_message(item.message)
 
     # ---- 2. json_output ----
     if fatal is None:
-        item = await _probe_json_output(client, row, target_model)
+        item = await _probe_json_output(client, row, target_model, db)
         results.append(item)
     else:
         results.append(_skipped_item("json_output", fatal[1]))
 
     # ---- 3. critic_schema ----
     if fatal is None:
-        item = await _probe_critic_schema(client, row, target_model)
+        item = await _probe_critic_schema(client, row, target_model, db)
         results.append(item)
     else:
         results.append(_skipped_item("critic_schema", fatal[1]))
 
     # ---- 4. long_text ----
     if fatal is None:
-        item = await _probe_long_text(client, row, target_model)
+        item = await _probe_long_text(client, row, target_model, db)
         results.append(item)
     else:
         results.append(_skipped_item("long_text", fatal[1]))
@@ -461,6 +497,8 @@ async def _run_probe(
     row: ModelProvider,
     target_model: str,
     *,
+    db: AsyncSession | None = None,
+    probe_name: str,
     messages: list[LLMMessage],
     max_tokens: int,
     response_format: dict[str, str] | None = None,
@@ -482,15 +520,52 @@ async def _run_probe(
         response_format=response_format,
     )
     t0 = time.perf_counter()
+    event = None
+    if db is not None:
+        recorder = ModelCallRecorder()
+        event = await recorder.record_selection(
+            db,
+            provider_id=row.id,
+            model_name=target_model,
+            agent_role_key=f"health_check:{probe_name}",
+            selection_mode="health_check",
+            provider_name=row.name,
+            event_type="model_health_check",
+            event_category="health",
+            summary=f"健康测试 {probe_name}: {row.name}/{target_model}",
+        )
     try:
         coro = client.chat(
             base_url=row.base_url, api_key=row.api_key, request=request,
         )
         result = await asyncio.wait_for(coro, timeout=probe_timeout)
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        if db is not None and event is not None:
+            recorder = ModelCallRecorder()
+            await recorder.record_success(
+                db,
+                event,
+                latency_ms=latency_ms,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.cost_usd,
+            )
+            event.event_type = "model_health_check"
+            event.event_category = "health"
+            event.summary = f"健康测试 {probe_name} 通过: {row.name}/{target_model} · {latency_ms}ms"
         return latency_ms, result.content, None
     except asyncio.TimeoutError:
         latency_ms = int((time.perf_counter() - t0) * 1000)
+        if db is not None and event is not None:
+            recorder = ModelCallRecorder()
+            await recorder.record_failure(
+                db,
+                event,
+                "timeout",
+                f"健康测试 {probe_name} 超过 {probe_timeout:.0f}s 未返回",
+            )
+            event.event_type = "model_health_check"
+            event.event_category = "health"
         return (
             latency_ms,
             "",
@@ -499,14 +574,36 @@ async def _run_probe(
     except (LLMAuthError, LLMConnectionError, LLMRateLimitError, LLMResponseError) as exc:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         status, msg, sug = _classify_health_error(exc)
+        if db is not None and event is not None:
+            recorder = ModelCallRecorder()
+            await recorder.record_failure(
+                db,
+                event,
+                _health_status_to_failure_type(status),
+                msg,
+            )
+            event.event_type = "model_health_check"
+            event.event_category = "health"
         # squash the long trace; the caller will format a short error
         return latency_ms, "", f"{status}: {msg} | {sug or ''}".strip(" |")
 
 
-async def _probe_short_chat(client, row, target_model) -> ModelHealthCheckItem:
+def _health_status_to_failure_type(status: HealthStatus) -> str:
+    if status == "auth_failed":
+        return "auth_error"
+    if status == "unreachable":
+        return "connection_error"
+    if status == "model_missing":
+        return "model_not_found"
+    if status == "degraded":
+        return "rate_limited"
+    return "unknown"
+
+
+async def _probe_short_chat(client, row, target_model, db: AsyncSession) -> ModelHealthCheckItem:
     messages = [LLMMessage(role="user", content="ping")]
     latency_ms, content, err = await _run_probe(
-        client, row, target_model, messages=messages, max_tokens=4,
+        client, row, target_model, db=db, probe_name="short_chat", messages=messages, max_tokens=4,
         probe_timeout=_HEALTHY_MS_PER_TEST["short_chat"] / 1000 + 5,
     )
     if err:
@@ -538,7 +635,7 @@ async def _probe_short_chat(client, row, target_model) -> ModelHealthCheckItem:
     )
 
 
-async def _probe_json_output(client, row, target_model) -> ModelHealthCheckItem:
+async def _probe_json_output(client, row, target_model, db: AsyncSession) -> ModelHealthCheckItem:
     """P15 / P0-HEALTH-1: ask the model to output STRICT JSON.
 
     The prompt explicitly forbids markdown fences and leading prose.
@@ -553,6 +650,8 @@ async def _probe_json_output(client, row, target_model) -> ModelHealthCheckItem:
     messages = [LLMMessage(role="user", content=prompt)]
     latency_ms, content, err = await _run_probe(
         client, row, target_model,
+        db=db,
+        probe_name="json_output",
         messages=messages, max_tokens=200,
         response_format={"type": "json_object"},
         probe_timeout=_HEALTHY_MS_PER_TEST["json_output"] / 1000 + 5,
@@ -634,7 +733,7 @@ async def _probe_json_output(client, row, target_model) -> ModelHealthCheckItem:
     )
 
 
-async def _probe_critic_schema(client, row, target_model) -> ModelHealthCheckItem:
+async def _probe_critic_schema(client, row, target_model, db: AsyncSession) -> ModelHealthCheckItem:
     """P15 / P0-HEALTH-1: ask the model to act as a Critic and return
     the full Critic JSON schema. We validate field-by-field so the UI
     can show *which* field the model got wrong."""
@@ -653,6 +752,8 @@ async def _probe_critic_schema(client, row, target_model) -> ModelHealthCheckIte
     messages = [LLMMessage(role="user", content=prompt)]
     latency_ms, content, err = await _run_probe(
         client, row, target_model,
+        db=db,
+        probe_name="critic_schema",
         messages=messages, max_tokens=600,
         response_format={"type": "json_object"},
         probe_timeout=_HEALTHY_MS_PER_TEST["critic_schema"] / 1000 + 5,
@@ -731,7 +832,7 @@ async def _probe_critic_schema(client, row, target_model) -> ModelHealthCheckIte
     )
 
 
-async def _probe_long_text(client, row, target_model) -> ModelHealthCheckItem:
+async def _probe_long_text(client, row, target_model, db: AsyncSession) -> ModelHealthCheckItem:
     """P15 / P0-HEALTH-1: ask the model to output ≥ 1000 Chinese chars.
 
     We don't measure "quality" — we measure "can it actually generate
@@ -756,7 +857,7 @@ async def _probe_long_text(client, row, target_model) -> ModelHealthCheckItem:
     )
     messages = [LLMMessage(role="user", content=prompt)]
     latency_ms, content, err = await _run_probe(
-        client, row, target_model, messages=messages, max_tokens=800,
+        client, row, target_model, db=db, probe_name="long_text", messages=messages, max_tokens=800,
         probe_timeout=_HEALTHY_MS_PER_TEST["long_text"] / 1000 + 10,
     )
     if err:
@@ -769,21 +870,21 @@ async def _probe_long_text(client, row, target_model) -> ModelHealthCheckItem:
             raw_preview=None,
         )
     chars = len(content or "")
-    if chars < 1000:
+    if chars < 500:
         return ModelHealthCheckItem(
             name="long_text",
             status="failed",
             latency_ms=latency_ms,
-            message=f"长文本输出不足：{chars} 字符 < 1000",
-            suggestion="该模型不能用于 Draft / Rewrite，单章写不满 1000 字。",
+            message=f"长文本输出不足：{chars} 字符 < 500",
+            suggestion="该模型不能用于 Draft / Rewrite，单章输出太短。",
             raw_preview=(content or "")[:500],
         )
-    if chars < 1100:
+    if chars < 600:
         return ModelHealthCheckItem(
             name="long_text",
             status="warning",
             latency_ms=latency_ms,
-            message=f"长文本输出勉强：{chars} 字符（接近 1000 下限）",
+            message=f"长文本输出勉强：{chars} 字符（接近 600 目标）",
             suggestion="可继续用于 Draft / Rewrite，但建议观察字数达标率。",
             raw_preview=(content or "")[:200],
         )
@@ -971,13 +1072,40 @@ async def full_provider_health(
         from fastapi import HTTPException
         raise HTTPException(404, f"Provider {provider_id} 不存在")
 
+    text_models = [
+        m for m in (provider.model_list or [])
+        if is_text_role_model_compatible("health_check", m)
+    ]
+    original_default = provider.default_model
+    if provider.default_model and not is_text_role_model_compatible("health_check", provider.default_model):
+        provider.default_model = text_models[0] if text_models else None
+    if not provider.default_model and text_models:
+        provider.default_model = text_models[0]
+
+    if not provider.default_model:
+        provider.last_health_status = "unknown_error"
+        provider.last_health_message = "没有可用于文本 Agent 的模型；已跳过生图/视频/音频模型。"
+        provider.last_health_latency_ms = 0
+        provider.last_health_at = datetime.utcnow()
+        provider.default_model = original_default
+        await db.commit()
+        return ProviderHealthFullResponse(
+            provider_id=provider_id,
+            status=provider.last_health_status,
+            health_score=0,
+            latency_ms=0,
+            models=[],
+        ).model_dump()
+
     result = await ProviderHealthService().check_provider(db, provider, lightweight=False)
+    if original_default and original_default != provider.default_model:
+        provider.default_model = original_default
     await db.commit()
 
     # 构建模型结果
     hf = provider.last_health_full or {}
     model_items = []
-    for m in (provider.model_list or [])[:20]:
+    for m in [m for m in (provider.model_list or []) if is_text_role_model_compatible("health_check", m)][:20]:
         mr = hf.get("details", {}).get(m, {})
         model_items.append(ProviderHealthFullModelItem(
             model=m,

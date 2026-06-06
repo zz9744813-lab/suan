@@ -37,8 +37,12 @@ export function AutoConfigureToolbar({ roleId, agentRoleKey, onConfigured }: Pro
     setConfiguring(true);
     setMessage(null);
     try {
-      const res = await autoConfigureAgents({ scope: "auto_only" });
-      setMessage(`已更新 ${res.updated} 个角色${res.skipped_manual > 0 ? `，跳过 ${res.skipped_manual} 个手动绑定` : ""}`);
+      const res = await autoConfigureAgents({
+        scope: "all",
+        strategy: "quality_first",
+        overwrite_manual: true,
+      });
+      setMessage(`已智能分配 ${res.updated} 个角色${res.failed > 0 ? `，失败 ${res.failed} 个` : ""}`);
       onConfigured();
     } catch (e: any) {
       setMessage(`配置失败: ${e?.message ?? e}`);

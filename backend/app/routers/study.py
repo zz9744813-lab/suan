@@ -20,6 +20,7 @@ from app.agents.study import (
 )
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import bad_request, not_found
+from app.models.deepstudy import StudyRun
 from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
 from app.models.task import AgentTask
 from app.schemas import (
@@ -53,6 +54,108 @@ from app.services.prompt_engine import get_prompt_engine
 
 
 router = APIRouter(prefix="/study", tags=["study"])
+
+
+async def _chapterize_and_queue_deepstudy(
+    db: AsyncSession,
+    row: StudyMaterial,
+    *,
+    min_chapter_chars: int = 200,
+    queue_deepstudy: bool = True,
+    auto_start_worker: bool = True,
+) -> tuple[int, int | None, str | None]:
+    """Upload-time automation: split chapters, queue DeepStudy, start worker."""
+    try:
+        chunks = _split_chapters(row.raw_text or "", pattern="auto")
+        created = 0
+        if chunks:
+            for idx, title, body in chunks:
+                if len(body) < min_chapter_chars:
+                    continue
+                db.add(StudyChapter(
+                    material_id=row.id,
+                    chapter_index=idx,
+                    title=title,
+                    content=body,
+                    char_count=len(body),
+                ))
+                created += 1
+            await db.flush()
+
+        row.chapter_count = created
+        row.status = "ready" if created else "draft"
+        row.study_status = "chapterized" if created else "uploaded"
+
+        run_id: int | None = None
+        if created and queue_deepstudy:
+            from app.services.deepstudy.job_graph import DEEPSTUDY_DAG
+
+            run = StudyRun(
+                material_id=row.id,
+                project_id=row.project_id,
+                status="queued",
+                mode="full",
+                total_chapters=created,
+                processed_chapters=0,
+                current_stage=None,
+                agent_plan={
+                    "mode": "full",
+                    "chapter_range": None,
+                    "max_concurrency": 3,
+                    "model_roles": {},
+                    "stages": list(DEEPSTUDY_DAG.keys()),
+                    "auto_started": True,
+                    "source": "upload",
+                },
+                progress={
+                    "completed_stages": ["ingest", "chapterize"],
+                    "current_stage": None,
+                    "auto_started": True,
+                },
+                started_at=datetime.utcnow(),
+            )
+            db.add(run)
+            await db.flush()
+            run_id = run.id
+            row.study_status = "studying"
+            row.study_progress = {
+                "run_id": run.id,
+                "total_chapters": created,
+                "processed_chapters": 0,
+                "current_stage": None,
+                "errors": [],
+                "auto_started": True,
+            }
+            row.extra = {
+                **(row.extra or {}),
+                "automation": {
+                    "auto_chapterized": True,
+                    "auto_deepstudy": queue_deepstudy,
+                    "deepstudy_run_id": run.id,
+                },
+            }
+            await db.flush()
+
+        if auto_start_worker and run_id is not None:
+            try:
+                from app.workers.worker import get_worker
+
+                await get_worker().start()
+            except Exception as exc:
+                row.extra = {
+                    **(row.extra or {}),
+                    "automation_warning": f"worker_start_failed: {exc}",
+                }
+                await db.flush()
+                return created, run_id, str(exc)
+
+        return created, run_id, None
+    except Exception as exc:
+        row.status = "failed"
+        row.study_status = "failed"
+        row.error = str(exc)
+        await db.flush()
+        return 0, None, str(exc)
 
 
 # -------------------- chapterize helpers --------------------
@@ -300,46 +403,24 @@ async def upload_materials_batch(
                 },
             }
             if auto_chapterize and row.raw_text:
-                try:
-                    chunks = _split_chapters(row.raw_text, pattern="auto")
-                    created = 0
-                    if chunks:
-                        for idx, t, body in chunks:
-                            if len(body) < min_chapter_chars:
-                                continue
-                            # Use a direct INSERT instead of
-                            # ``row.chapters.append(StudyChapter(...))``
-                            # — appending onto a relationship triggers
-                            # a lazy-load of the collection on first
-                            # access, and that lazy load is sync-IO
-                            # inside an async session (greenlet error).
-                            # Inserting the chapter row directly with
-                            # ``material_id`` sidesteps the relationship
-                            # walk entirely.
-                            db.add(StudyChapter(
-                                material_id=row.id,
-                                chapter_index=idx,
-                                title=t,
-                                content=body,
-                                char_count=len(body),
-                            ))
-                            created += 1
-                        # Flush so the new chapter rows reach the DB
-                        # before the response serialises chapter_count.
-                        await db.flush()
-                    row.chapter_count = created
-                    row.status = "ready" if created else "draft"
-                    # One more flush to push chapter_count + status
-                    # back to the DB and update the in-memory row
-                    # attributes that we read on the next two lines.
-                    await db.flush()
-                except Exception as exc:
-                    entry["chapterize_error"] = str(exc)
+                created, run_id, automation_error = await _chapterize_and_queue_deepstudy(
+                    db,
+                    row,
+                    min_chapter_chars=min_chapter_chars,
+                    auto_start_worker=True,
+                )
+                entry["data"]["deepstudy_run_id"] = run_id
+                entry["data"]["automation"] = {
+                    "auto_chapterized": created > 0,
+                    "auto_deepstudy": run_id is not None,
+                    "error": automation_error,
+                }
             # Reflect the post-chapterize values back into the entry
             # so the client gets the final chapter_count + status
             # without an extra GET.
             entry["data"]["chapter_count"] = row.chapter_count or 0
             entry["data"]["status"] = row.status
+            entry["data"]["study_status"] = row.study_status
             results.append(entry)
         except Exception as exc:
             results.append({
@@ -355,6 +436,9 @@ async def upload_material(
     title: str = Form(...),
     author: str = Form(""),
     project_id: int | None = Form(default=None),
+    auto_chapterize: bool = Form(default=True),
+    auto_deepstudy: bool = Form(default=True),
+    min_chapter_chars: int = Form(default=200),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[StudyMaterialRead]:
@@ -403,6 +487,14 @@ async def upload_material(
     )
     db.add(row)
     await db.flush()
+    if auto_chapterize and row.raw_text:
+        await _chapterize_and_queue_deepstudy(
+            db,
+            row,
+            min_chapter_chars=min_chapter_chars,
+            queue_deepstudy=auto_deepstudy,
+            auto_start_worker=auto_deepstudy,
+        )
     return {"ok": True, "data": StudyMaterialRead.from_orm_trimmed(row)}
 
 

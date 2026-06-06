@@ -1,9 +1,12 @@
 """Project / Bible / outline routes."""
 from __future__ import annotations
 
+import html
+import json
 from datetime import datetime
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.errors import not_found
 from app.models.memory import MemoryCharacter
-from app.models.project import Bible, Chapter, Outline, Project
+from app.models.project import Bible, Chapter, ChapterVersion, Outline, Project
 from app.models.task import AgentTask, WorkerPolicy
 from app.schemas import (
     APIResponse,
@@ -31,6 +34,139 @@ from app.schemas import (
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _safe_export_stem(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() or ch in (" ", "-", "_") else "_" for ch in name).strip()
+    return cleaned[:80] or "novel"
+
+
+def _attachment_headers(filename: str) -> dict[str, str]:
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{quote(filename)}"; '
+            f"filename*=UTF-8''{quote(filename)}"
+        )
+    }
+
+
+def _pick_export_version(versions: list[ChapterVersion]) -> ChapterVersion | None:
+    for kind in ("final", "rewrite", "draft"):
+        candidates = [v for v in versions if v.version_kind == kind]
+        if candidates:
+            return max(candidates, key=lambda v: (v.version_no, v.id))
+    if versions:
+        return max(versions, key=lambda v: (v.created_at, v.id))
+    return None
+
+
+async def _export_payload(db: AsyncSession, project_id: int) -> tuple[Project, list[dict]]:
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise not_found("Project", project_id)
+    chapters = (await db.execute(
+        select(Chapter)
+        .where(Chapter.project_id == project_id)
+        .order_by(Chapter.chapter_no.asc(), Chapter.id.asc())
+    )).scalars().all()
+    chapter_ids = [c.id for c in chapters]
+    versions_by_chapter: dict[int, list[ChapterVersion]] = {cid: [] for cid in chapter_ids}
+    if chapter_ids:
+        versions = (await db.execute(
+            select(ChapterVersion)
+            .where(ChapterVersion.chapter_id.in_(chapter_ids))
+            .order_by(ChapterVersion.chapter_id.asc(), ChapterVersion.version_kind.asc(), ChapterVersion.version_no.asc())
+        )).scalars().all()
+        for version in versions:
+            versions_by_chapter.setdefault(version.chapter_id, []).append(version)
+    rows: list[dict] = []
+    for chapter in chapters:
+        version = _pick_export_version(versions_by_chapter.get(chapter.id, []))
+        content = version.content if version else ""
+        rows.append({
+            "id": chapter.id,
+            "chapter_no": chapter.chapter_no,
+            "title": chapter.title,
+            "status": chapter.status,
+            "target_word_count": chapter.target_word_count,
+            "actual_word_count": chapter.actual_word_count,
+            "score": chapter.current_score,
+            "version_kind": version.version_kind if version else None,
+            "version_no": version.version_no if version else None,
+            "version_score": version.score if version else None,
+            "summary": version.summary if version else None,
+            "content": content,
+        })
+    return project, rows
+
+
+def _render_export(project: Project, chapters: list[dict], export_format: str) -> tuple[str, str, str]:
+    exported_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    stem = _safe_export_stem(project.name)
+    if export_format in ("markdown", "md"):
+        lines = [
+            f"# {project.name}",
+            "",
+            f"- Genre: {project.genre}",
+            f"- Status: {project.status}",
+            f"- Exported at: {exported_at}",
+            f"- Chapters: {len(chapters)}",
+            "",
+        ]
+        for chapter in chapters:
+            lines.extend([
+                f"## Chapter {chapter['chapter_no']}: {chapter['title']}",
+                "",
+                chapter["content"].strip() or "[No exported content]",
+                "",
+            ])
+        return "\n".join(lines), "text/markdown; charset=utf-8", f"{stem}.md"
+    if export_format == "txt":
+        lines = [
+            project.name,
+            f"Genre: {project.genre}",
+            f"Status: {project.status}",
+            f"Exported at: {exported_at}",
+            "",
+        ]
+        for chapter in chapters:
+            lines.extend([
+                f"Chapter {chapter['chapter_no']}: {chapter['title']}",
+                "",
+                chapter["content"].strip() or "[No exported content]",
+                "",
+            ])
+        return "\n".join(lines), "text/plain; charset=utf-8", f"{stem}.txt"
+    if export_format == "json":
+        payload = {
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "genre": project.genre,
+                "status": project.status,
+                "exported_at": exported_at,
+            },
+            "chapters": chapters,
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2), "application/json; charset=utf-8", f"{stem}.json"
+    html_chapters = "\n".join(
+        "<section>"
+        f"<h2>Chapter {c['chapter_no']}: {html.escape(c['title'])}</h2>"
+        f"<pre>{html.escape((c['content'] or '[No exported content]').strip())}</pre>"
+        "</section>"
+        for c in chapters
+    )
+    doc = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<title>{html.escape(project.name)}</title>"
+        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.7;max-width:860px;margin:40px auto;padding:0 24px;color:#222}"
+        "pre{white-space:pre-wrap;font-family:inherit}section{border-top:1px solid #ddd;padding-top:20px;margin-top:28px}</style>"
+        "</head><body>"
+        f"<h1>{html.escape(project.name)}</h1>"
+        f"<p>Genre: {html.escape(project.genre)} · Status: {html.escape(project.status)} · Exported at: {exported_at}</p>"
+        f"{html_chapters}</body></html>"
+    )
+    return doc, "text/html; charset=utf-8", f"{stem}.html"
 
 
 async def _project_to_read(db: AsyncSession, p: Project) -> ProjectRead:
@@ -178,6 +314,21 @@ async def delete_project(
         raise not_found("Project", project_id)
     await db.delete(p)
     return {"ok": True, "data": {"deleted": project_id}}
+
+
+@router.get("/{project_id}/export")
+async def export_project(
+    project_id: int,
+    export_format: str = Query(default="markdown", alias="format", pattern="^(txt|markdown|md|json|html)$"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    project, chapters = await _export_payload(db, project_id)
+    content, media_type, filename = _render_export(project, chapters, export_format)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers=_attachment_headers(filename),
+    )
 
 
 # ----- Bible -----

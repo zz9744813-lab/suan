@@ -33,8 +33,12 @@ class APIError(HTTPException):
         self.details = details or {}
 
 
-def model_connection_error(message: str, suggestion: str | None = None) -> APIError:
-    return APIError(
+class ModelConnectionError(APIError):
+    """Structured model connectivity/configuration error."""
+
+
+def model_connection_error(message: str, suggestion: str | None = None) -> ModelConnectionError:
+    return ModelConnectionError(
         status_code=status.HTTP_400_BAD_REQUEST,
         error_type="ModelConnectionError",
         message=message,

@@ -69,7 +69,7 @@ class AutoRepair:
             # In production, ChapterAnalysis has a stage_key field or
             # we infer it from the run's progress + current_stage.
             failed_stage_keys: set[str] = set()
-            progress = run.progress or {}
+            progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
             if isinstance(progress, dict):
                 completed = set(progress.get("completed_stages", []) or [])
                 # Any stage in progress but with failed chapters

@@ -174,14 +174,15 @@ def test_agent_role_matrix_item_shape():
 
 
 def test_default_agent_roles_count():
-    """P4 §10: 默认 11 个 AgentRole, 包含 5 写作 + 1 记忆 + 1 拆书 +
-    1 讨论 + 3 高级 (consolidator/technique/study_critic)."""
+    """默认 AgentRole 覆盖写作、拆书、讨论、记忆、读者反馈和评论分流."""
     from app.seed import DEFAULT_AGENT_ROLES
-    assert len(DEFAULT_AGENT_ROLES) == 11, f"DEFAULT_AGENT_ROLES 数量 {len(DEFAULT_AGENT_ROLES)} != 11"
+    assert len(DEFAULT_AGENT_ROLES) == 17, f"DEFAULT_AGENT_ROLES 数量 {len(DEFAULT_AGENT_ROLES)} != 17"
     keys = {r["key"] for r in DEFAULT_AGENT_ROLES}
     expected = {"planner", "drafter", "critic", "rewriter", "continuity",
                 "memory_update", "deep_study", "discussion",
-                "memory_consolidator", "technique_distill", "study_critic"}
+                "memory_consolidator", "technique_distill", "study_critic",
+                "reader_hook", "reader_emotion", "reader_logic",
+                "reader_commercial", "reader_toxic", "chief_comment_moderator"}
     assert keys == expected, f"default 角色 keys 不全: {keys - expected}"
 
 

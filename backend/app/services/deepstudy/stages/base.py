@@ -63,11 +63,12 @@ class BaseStage(ABC):
                 # Continue to next chapter, don't fail the whole run
 
         # Mark stage as completed in run progress
-        if not isinstance(run.progress, dict):
-            run.progress = {}
-        completed = list(run.progress.get("completed_stages", []) or [])
+        progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
+        completed = list(progress.get("completed_stages", []) or [])
         if self.stage_key not in completed:
             completed.append(self.stage_key)
-        run.progress["completed_stages"] = completed
+        progress["completed_stages"] = completed
+        progress["current_stage"] = self.stage_key
+        run.progress = progress
 
         await db.commit()

@@ -483,7 +483,7 @@ async def get_template_performance(
             "ok": True,
             "data": {
                 "template_id": template_id,
-                "template_key": tpl.key,
+                "template_key": tpl.template_key,
                 "template_name": tpl.name,
                 "performances": [],
             },
@@ -493,7 +493,7 @@ async def get_template_performance(
         "ok": True,
         "data": {
             "template_id": template_id,
-            "template_key": tpl.key,
+            "template_key": tpl.template_key,
             "template_name": tpl.name,
             "performances": [
                 {

@@ -24,6 +24,7 @@ Edge conventions:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
@@ -40,6 +41,15 @@ from app.models.deepstudy import (
     WritingTechnique,
 )
 from app.models.study import StudyChapter
+
+
+@asynccontextmanager
+async def _db_context(existing_db=None):
+    if existing_db is not None:
+        yield existing_db
+    else:
+        async with session_scope() as db:
+            yield db
 
 
 class GraphMaterializer:
@@ -166,7 +176,7 @@ class GraphMaterializer:
             # - create edges to source entities/scenes/behaviours
             pass
 
-    async def finalize_graph(self, material_id: int) -> None:
+    async def finalize_graph(self, material_id: int, db=None) -> None:
         """Clean up, merge duplicates, compute importance, generate stats.
 
         Called after all stages complete.
@@ -187,7 +197,7 @@ class GraphMaterializer:
             DeepStudyGraphNode,
         )
 
-        async with session_scope() as db:
+        async with _db_context(db) as db:
             # Compute entity counts per entity_type for stats
             result = await db.execute(
                 select(Entity.entity_type, Entity.id)

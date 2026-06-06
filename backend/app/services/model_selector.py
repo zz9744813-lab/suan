@@ -122,6 +122,116 @@ def cost_score(model_name: str) -> float:
     return 0.65
 
 
+def provider_priority_score(p: ModelProvider) -> float:
+    """Prefer user-configured API providers over local/mock fallbacks."""
+    base_url = (p.base_url or "").lower()
+    name = (p.name or "").lower()
+    if base_url.startswith("mock://") or name in {"stub", "mock"}:
+        return 0.0
+    if "localhost" in base_url or "127.0.0.1" in base_url or base_url.startswith("http://local"):
+        return 0.35
+    if p.api_key:
+        return 1.0
+    return 0.55
+
+
+def model_power_score(model_name: str) -> float:
+    """Rough model-size / quality heuristic from the public model name."""
+    name = model_name.lower()
+    premium = (
+        "opus", "o3", "o1", "ultra", "max", "sonnet", "gpt-4.1", "gpt-4o",
+        "deepseek-reasoner", "gemini-2.5-pro", "claude-3.5", "claude-3-5",
+    )
+    strong = ("pro", "v3", "72b", "70b", "32b", "qwen-max", "reasoner")
+    small = ("mini", "flash", "lite", "tiny", "small", "8b", "7b", "3b")
+    if any(k in name for k in premium):
+        return 1.0
+    if any(k in name for k in strong):
+        return 0.78
+    if any(k in name for k in small):
+        return 0.42
+    return 0.62
+
+
+def role_quality_need(profile: dict, role_key: str) -> float:
+    """High-risk creative/reasoning roles should get stronger models."""
+    low_risk_roles = {"reader_hook", "comment_triage", "memory_update", "learner"}
+    if role_key in low_risk_roles:
+        return 0.35
+    signals = [
+        float(profile.get("needs_reasoning") or 0),
+        float(profile.get("needs_style") or 0),
+        float(profile.get("needs_creativity") or 0),
+        0.85 if profile.get("needs_long_output") else 0.0,
+        0.75 if profile.get("needs_long_context") else 0.0,
+    ]
+    return _clamp(max(signals) if signals else 0.6, 0.35, 0.95)
+
+
+def text_role_modality_penalty(role_key: str, model_name: str) -> float:
+    """Penalize multimodal-specialty models for normal text agents."""
+    role = (role_key or "").lower()
+    if any(k in role for k in ("image", "vision", "video", "audio")):
+        return 0.0
+    name = (model_name or "").lower()
+    if any(k in name for k in ("video", "t2v", "i2v")):
+        return 0.35
+    if any(k in name for k in ("vision", "image", "audio", "asr", "tts", "speech", "whisper")):
+        return 0.28
+    if any(k in name for k in ("-vl", "_vl", ".vl", "/vl")):
+        return 0.28
+    return 0.0
+
+
+def is_text_role_model_compatible(role_key: str, model_name: str) -> bool:
+    """Return False when a normal text role is pointed at a media model."""
+    return text_role_modality_penalty(role_key, model_name) == 0.0
+
+
+def _usable_runtime_stat(stats: Any) -> bool:
+    """Return True only for runtime stat objects with numeric counters."""
+    if stats is None:
+        return False
+    total_calls = getattr(stats, "total_calls", None)
+    success_calls = getattr(stats, "success_calls", None)
+    return isinstance(total_calls, (int, float)) and isinstance(success_calls, (int, float))
+
+
+_MODEL_LOCAL_FAILURE_TYPES = {"model_not_found", "timeout", "empty_response", "json_parse_failed"}
+_PROVIDER_WIDE_FAILURE_TYPES = {"auth_error", "rate_limited", "budget_exhausted", "connection_error", "server_error"}
+
+
+def _should_skip_open_provider(provider: ModelProvider) -> bool:
+    """Only provider-wide failures should remove every model on that provider."""
+    if provider.circuit_state != "open":
+        return False
+    if provider.circuit_open_until and provider.circuit_open_until <= datetime.utcnow():
+        return False
+    raw_failure_type = getattr(provider, "last_failure_type", None)
+    failure_type = raw_failure_type if isinstance(raw_failure_type, str) else ""
+    if failure_type in _MODEL_LOCAL_FAILURE_TYPES:
+        return False
+    return failure_type in _PROVIDER_WIDE_FAILURE_TYPES or not failure_type
+
+
+async def _recent_model_failure(
+    db: AsyncSession,
+    provider_id: int,
+    model_name: str,
+) -> str | None:
+    row = (await db.execute(
+        select(ModelCallEvent).where(
+            and_(
+                ModelCallEvent.provider_id == provider_id,
+                ModelCallEvent.model_name == model_name,
+                ModelCallEvent.failure_type.in_(_MODEL_LOCAL_FAILURE_TYPES),
+            )
+        ).order_by(ModelCallEvent.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    failure_type = getattr(row, "failure_type", None) if row else None
+    return failure_type if isinstance(failure_type, str) else None
+
+
 def json_stability_score(stats: ModelRuntimeStat | None) -> float:
     if stats is None or stats.total_calls < 5:
         return 0.7
@@ -259,6 +369,10 @@ class ModelSelectorService:
         if provider is None:
             raise ValueError(f"Provider {binding.provider_id} 不存在")
         model = binding.model_name or provider.default_model or "unknown"
+        if not is_text_role_model_compatible(role_key, model):
+            raise ValueError(
+                f"Agent {role_key} is bound to media model {model}; text agents require a chat/text model"
+            )
         return SelectedModel(
             provider=provider,
             model_name=model,
@@ -282,6 +396,9 @@ class ModelSelectorService:
         if provider.circuit_state == "open":
             if provider.circuit_open_until and provider.circuit_open_until > datetime.utcnow():
                 return False
+        model = binding.model_name or provider.default_model or ""
+        if model and not is_text_role_model_compatible("", model):
+            return False
         return True
 
     async def _score_all_candidates(
@@ -319,8 +436,10 @@ class ModelSelectorService:
         candidates: list[ModelCandidate] = []
 
         for p in providers:
+            if provider_priority_score(p) < 0.5:
+                continue
             health = provider_health_score(p)
-            if health <= 0.0 and p.circuit_state == "open":
+            if _should_skip_open_provider(p):
                 # 完全熔断, 跳过
                 if not (p.circuit_open_until and p.circuit_open_until <= datetime.utcnow()):
                     continue
@@ -340,6 +459,10 @@ class ModelSelectorService:
                     models_to_score.insert(0, p.default_model)
 
             for model_name in models_to_score:
+                if not is_text_role_model_compatible(role_key, model_name):
+                    continue
+                if await _recent_model_failure(db, p.id, model_name):
+                    continue
                 # 获取运行统计
                 stat = (await db.execute(
                     select(ModelRuntimeStat).where(
@@ -351,6 +474,8 @@ class ModelSelectorService:
                         )
                     )
                 )).scalar_one_or_none()
+                if not _usable_runtime_stat(stat):
+                    stat = None
 
                 # 计算各项分数
                 cap = capability_match(profile, p, model_name, stat)
@@ -358,21 +483,34 @@ class ModelSelectorService:
                 succ = _clamp(stat.success_calls / max(stat.total_calls, 1)) if stat else 0.8
                 lat = latency_score(stat.avg_latency_ms if stat else p.avg_latency_ms)
                 cst = cost_score(model_name)
+                api = provider_priority_score(p)
+                power = model_power_score(model_name)
+                quality_need = role_quality_need(profile, role_key)
+                role_fit = _clamp(power * quality_need + cst * (1 - quality_need))
+                modality_penalty = text_role_modality_penalty(role_key, model_name)
                 jsn = json_stability_score(stat)
                 ctx = 0.7  # 简化: 暂不区分上下文长度
 
                 # 风险检查
                 risks: list[str] = []
+                if api <= 0.0:
+                    risks.append("mock/provider 仅作兜底")
+                elif api < 0.5:
+                    risks.append("本地 provider 低优先级")
+                if quality_need >= 0.75 and power < 0.55:
+                    risks.append("小模型不适合高质量角色")
                 if p.circuit_state == "half_open":
                     risks.append("熔断恢复探测中")
                 if p.consecutive_failures >= 2:
                     risks.append(f"连续失败{p.consecutive_failures}次")
                 if stat and stat.json_parse_failures > 3 and profile.get("needs_json"):
                     risks.append(f"JSON解析失败{stat.json_parse_failures}次")
-                risk_penalty = len(risks) * 0.05
+                if modality_penalty:
+                    risks.append("多媒体专用模型不适合文本角色")
+                risk_penalty = len(risks) * 0.05 + modality_penalty
 
                 # 综合评分
-                score = (
+                base_score = (
                     cap * weights.get("capability", 0.30)
                     + hlth * weights.get("health", 0.25)
                     + succ * weights.get("success", 0.18)
@@ -380,11 +518,26 @@ class ModelSelectorService:
                     + cst * weights.get("cost", 0.08)
                     + jsn * weights.get("json", 0.06)
                     + ctx * weights.get("context", 0.03)
+                )
+                score = (
+                    base_score * 0.78
+                    + api * 0.12
+                    + role_fit * 0.10
                     - risk_penalty
                 )
                 score = _clamp(score, 0, 1)
 
                 reason_parts = []
+                if api >= 0.9:
+                    reason_parts.append("真实API优先")
+                elif api < 0.5:
+                    reason_parts.append("本地/Mock降权")
+                if modality_penalty:
+                    reason_parts.append("多媒体模型不适合文本角色")
+                if quality_need >= 0.75 and power >= 0.75:
+                    reason_parts.append("高质量角色匹配大模型")
+                if quality_need < 0.5 and cst > 0.8:
+                    reason_parts.append("低风险角色匹配小模型")
                 if hlth < 0.5:
                     reason_parts.append(f"健康分低({hlth:.0%})")
                 if succ < 0.9:
@@ -420,6 +573,10 @@ class ModelSelectorService:
             if pid and mname and not any(
                 c.provider_id == pid and c.model_name == mname for c in candidates
             ):
+                if not is_text_role_model_compatible(role_key, mname):
+                    continue
+                if await _recent_model_failure(db, pid, mname):
+                    continue
                 fp = await db.get(ModelProvider, pid)
                 if fp and fp.enabled:
                     # 计算真实评分，而非固定 0.1
@@ -436,10 +593,13 @@ class ModelSelectorService:
                             )
                         )
                     )).scalar_one_or_none()
+                    if not _usable_runtime_stat(fb_stat):
+                        fb_stat = None
                     fb_succ = _clamp(fb_stat.success_calls / max(fb_stat.total_calls, 1)) if fb_stat else 0.7
                     fb_lat = latency_score(fb_stat.avg_latency_ms if fb_stat else fp.avg_latency_ms)
                     fb_cst = cost_score(mname)
                     fb_jsn = json_stability_score(fb_stat)
+                    fb_modality_penalty = text_role_modality_penalty(role_key, mname)
                     fb_score = _clamp(
                         (
                             fb_hlth * weights.get("health", 0.25)
@@ -447,7 +607,7 @@ class ModelSelectorService:
                             + fb_lat * weights.get("latency", 0.10)
                             + fb_cst * weights.get("cost", 0.08)
                             + fb_jsn * weights.get("json", 0.06)
-                        ) * 0.75,  # fallback 衰减系数，保证低于主候选
+                        ) * 0.75 - fb_modality_penalty,  # fallback 衰减系数，保证低于主候选
                         0.05, 0.65,
                     )
                     candidates.append(ModelCandidate(
@@ -462,6 +622,7 @@ class ModelSelectorService:
                         success_rate=fb_succ,
                         latency_ms=fb_stat.avg_latency_ms if fb_stat else fp.avg_latency_ms,
                         cost_score=fb_cst,
+                        risk=(["多媒体专用模型不适合文本角色"] if fb_modality_penalty else []),
                     ))
 
         # 按分数降序排列
@@ -472,29 +633,48 @@ class ModelSelectorService:
         self, db: AsyncSession, role_key: str, role: AgentRole | None,
     ) -> SelectedModel:
         """最终兜底: 选第一个 enabled 的真实 Provider."""
-        provider = (await db.execute(
+        providers = (await db.execute(
             select(ModelProvider).where(
                 and_(
                     ModelProvider.enabled == True,  # noqa: E712
                     ModelProvider.base_url != "mock://",
                 )
-            ).limit(1)
-        )).scalar_one_or_none()
+            )
+        )).scalars().all()
 
-        if provider is None:
-            raise ValueError(f"Agent {role_key} 无可用 Provider (所有 Provider 已禁用或熔断)")
+        providers = sorted(providers, key=provider_priority_score, reverse=True)
+        for provider in providers:
+            if provider_priority_score(provider) < 0.5:
+                continue
+            if _should_skip_open_provider(provider):
+                continue
+            models = list(provider.model_list or [])
+            if provider.default_model and provider.default_model not in models:
+                models.insert(0, provider.default_model)
+            model = None
+            for candidate in models:
+                if not is_text_role_model_compatible(role_key, candidate):
+                    continue
+                if await _recent_model_failure(db, provider.id, candidate):
+                    continue
+                model = candidate
+                break
+            if not model:
+                continue
+            return SelectedModel(
+                provider=provider,
+                model_name=model,
+                temperature=0.7,
+                max_tokens=2048,
+                extra_body=None,
+                selection_mode="auto",
+                selection_score=0.0,
+                selection_reason=f"Fallback selected: {provider.name}/{model}",
+                candidates=[],
+            )
 
-        return SelectedModel(
-            provider=provider,
-            model_name=provider.default_model or "unknown",
-            temperature=0.7,
-            max_tokens=2048,
-            extra_body=None,
-            selection_mode="auto",
-            selection_score=0.0,
-            selection_reason=f"兜底选择: {provider.name}/{provider.default_model}",
-            candidates=[],
-        )
+        raise ValueError(f"Agent {role_key} has no compatible text provider/model")
+
 
 
 # ── 单例 ──────────────────────────────────────────────

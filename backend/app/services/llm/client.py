@@ -484,6 +484,8 @@ class LLMClient:
             raise
         except LLMResponseError:
             raise
+        except LLMRateLimitError:
+            raise
         except LLMConnectionError:
             raise
         except Exception as exc:  # pragma: no cover

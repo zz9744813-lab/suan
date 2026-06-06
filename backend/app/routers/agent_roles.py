@@ -459,6 +459,8 @@ async def auto_configure_agents(
     skipped = 0
     failed = 0
     items: list[AutoConfigureItem] = []
+    used_models: dict[tuple[int, str], int] = {}
+    used_providers: dict[int, int] = {}
 
     for role in roles:
         binding = (await db.execute(
@@ -469,11 +471,41 @@ async def auto_configure_agents(
         if binding and binding.selection_mode == "manual" and not payload.overwrite_manual:
             skipped += 1
             continue
+        if binding and binding.selection_mode in ("manual", "manual_with_fallback") and payload.overwrite_manual:
+            binding.selection_mode = "auto"
+            binding.binding_mode = "auto"
+            binding.locked_reason = None
+            if hasattr(binding, "locked_by_user"):
+                binding.locked_by_user = False
+            await db.flush()
 
         try:
             selected = await get_model_selector().select_for_agent(
                 db, agent_role_key=role.key,
             )
+            diversified = None
+            if selected.candidates:
+                top_score = selected.candidates[0].score
+                near_top = [
+                    c for c in selected.candidates[:8]
+                    if c.score >= max(0.0, top_score - 0.08)
+                ]
+                near_top.sort(key=lambda c: (
+                    used_models.get((c.provider_id, c.model_name), 0),
+                    used_providers.get(c.provider_id, 0),
+                    -c.score,
+                ))
+                diversified = near_top[0] if near_top else selected.candidates[0]
+            if diversified is not None:
+                provider = await db.get(ModelProvider, diversified.provider_id)
+                if provider is not None:
+                    selected.provider = provider
+                    selected.model_name = diversified.model_name
+                    selected.selection_score = diversified.score
+                    selected.selection_reason = (
+                        f"{diversified.reason}; 自动错峰分配"
+                        if diversified.reason else "自动错峰分配"
+                    )
             if binding is None:
                 binding = AgentModelBinding(
                     agent_role_id=role.id,
@@ -489,12 +521,18 @@ async def auto_configure_agents(
             binding.max_tokens = selected.max_tokens
             binding.extra_body = selected.extra_body
             binding.selection_mode = "auto"
+            binding.binding_mode = "auto"
+            binding.allow_auto_switch = True
+            binding.allow_fallback = True
             binding.auto_strategy = payload.strategy
             binding.last_selected_provider_id = selected.provider.id
             binding.last_selected_model_name = selected.model_name
             binding.last_selection_score = selected.selection_score
             binding.last_selection_reason = selected.selection_reason
             binding.last_selection_at = datetime.utcnow()
+            used_key = (selected.provider.id, selected.model_name)
+            used_models[used_key] = used_models.get(used_key, 0) + 1
+            used_providers[selected.provider.id] = used_providers.get(selected.provider.id, 0) + 1
 
             updated += 1
             items.append(AutoConfigureItem(

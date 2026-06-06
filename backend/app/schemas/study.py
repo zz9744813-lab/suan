@@ -45,6 +45,13 @@ class StudyMaterialRead(BaseModel):
     error: str | None
     chapter_count: int
     character_count: int
+    study_status: str = "empty"
+    deepstudy_version: str | None = None
+    shelf_category: str | None = None
+    cover_theme: dict[str, Any] | None = None
+    study_progress: dict[str, Any] | None = None
+    knowledge_score: float | None = None
+    last_deepstudied_at: datetime | None = None
     # Don't serialise the full raw_text on the list endpoint — a 5 MB
     # novel bloats every list response. The detail endpoint can opt in
     # via ``?include_text=1``.
@@ -65,6 +72,13 @@ class StudyMaterialRead(BaseModel):
             error=obj.error,
             chapter_count=obj.chapter_count,
             character_count=obj.character_count,
+            study_status=obj.study_status or "empty",
+            deepstudy_version=obj.deepstudy_version,
+            shelf_category=obj.shelf_category,
+            cover_theme=obj.cover_theme,
+            study_progress=obj.study_progress,
+            knowledge_score=obj.knowledge_score,
+            last_deepstudied_at=obj.last_deepstudied_at,
             raw_text_length=len(obj.raw_text or "") if not include_text else 0,
             extra=obj.extra,
             created_at=obj.created_at,

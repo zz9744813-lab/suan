@@ -32,7 +32,7 @@ export function ModelSelectionPreviewPanel({ data, loading }: Props) {
       {selected.health != null && (
         <div style={{ fontSize: 12, marginBottom: 4 }}>
           <span className="muted small">Health</span> · {selected.health.toFixed(2)}
-          {selected.success_rate != null && ` · Success ${selected.success_rate.toFixed(0)}%`}
+          {selected.success_rate != null && ` · Success ${(selected.success_rate * 100).toFixed(0)}%`}
           {selected.latency_ms != null && ` · ${selected.latency_ms}ms`}
           {selected.cost_score != null && ` · Cost ${selected.cost_score.toFixed(2)}`}
         </div>

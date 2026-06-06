@@ -142,8 +142,13 @@ export function ModelsPage() {
     setBusyProviders((p) => ({ ...p, [id]: { ...p[id], test: true } }));
     try {
       const r = await testProvider(id);
-      setSuccessMsg(r.ok ? `${r.message} (${r.latency_ms}ms)` : r.message);
-      setErrorMsg(r.ok ? null : (r.suggestion ?? r.message));
+      if (r.ok) {
+        setSuccessMsg(`${r.message} (${r.latency_ms}ms)`);
+        setErrorMsg(null);
+      } else {
+        setSuccessMsg(null);
+        setErrorMsg(r.suggestion ? `${r.message}\n${r.suggestion}` : r.message);
+      }
       load();
     } catch (e: any) { setErrorMsg(String(e?.message ?? e)); }
     finally {
@@ -154,7 +159,25 @@ export function ModelsPage() {
     setBusyProviders((p) => ({ ...p, [id]: { ...p[id], health: true } }));
     try {
       const r = await healthCheckProvider(id, model);
-      setSuccessMsg(`健康检查: ${r.status} · 评分 ${r.score.toFixed(2)}`);
+      const failedItems = r.results.filter((it) => it.status === "failed");
+      const warningItems = r.results.filter((it) => it.status === "warning");
+      if (r.ok) {
+        const warning = warningItems[0];
+        setSuccessMsg(
+          warning
+            ? `健康检查可用: ${r.model} · ${r.score} 分 · ${r.latency_ms}ms；提醒：${warning.name} ${warning.message}`
+            : `健康检查通过: ${r.model} · ${r.score} 分 · ${r.latency_ms}ms`,
+        );
+        setErrorMsg(null);
+      } else {
+        setSuccessMsg(null);
+        const detail = failedItems[0] ?? warningItems[0];
+        setErrorMsg(
+          detail
+            ? `${r.message}\n${detail.name}: ${detail.message}${detail.suggestion ? `\n${detail.suggestion}` : ""}`
+            : r.message,
+        );
+      }
       load();
     } catch (e: any) { setErrorMsg(String(e?.message ?? e)); }
     finally {
@@ -165,7 +188,13 @@ export function ModelsPage() {
     setBusyProviders((p) => ({ ...p, [id]: { ...p[id], preview: true } }));
     try {
       const r = await previewProviderModels(baseUrl, apiKey);
-      setSuccessMsg(`拉到 ${r.models.length} 个模型`);
+      if (r.ok) {
+        setSuccessMsg(`拉到 ${r.models.length} 个模型`);
+        setErrorMsg(null);
+      } else {
+        setSuccessMsg(null);
+        setErrorMsg(r.suggestion ? `${r.message}\n${r.suggestion}` : r.message);
+      }
       load();
       return r.models;
     } catch (e: any) {

@@ -76,35 +76,39 @@ def test_library_item_required_fields():
 # ============================================================
 
 def test_stages_for_full_mode():
-    """Full mode runs all 9 stages incl. graph + critic."""
+    """Full mode uses the real DAG stage keys."""
     from app.routers.deepstudy import _stages_for_mode
     stages = _stages_for_mode("full")
     assert stages == [
-        "chapter_profile", "entity", "scene_beat", "relationship",
-        "foreshadow", "behavior", "technique", "graph", "critic",
+        "ingest", "chapterize", "chapter_profile", "entity_extract",
+        "event_extract", "scene_beat_extract", "relationship_analyze",
+        "foreshadow_analyze", "behavior_pattern_mine", "technique_mine",
+        "graph_finalize", "study_critic", "knowledge_index",
+        "writing_context_sync",
     ]
-    assert len(stages) == 9
+    assert len(stages) == 14
 
 
 def test_stages_for_entities_only():
     """entities_only trims to chapter_profile + entity + scene_beat."""
     from app.routers.deepstudy import _stages_for_mode
     assert _stages_for_mode("entities_only") == [
-        "chapter_profile", "entity", "scene_beat",
+        "chapter_profile", "entity_extract", "scene_beat_extract",
     ]
 
 
 def test_stages_for_relationships_only():
     from app.routers.deepstudy import _stages_for_mode
     assert _stages_for_mode("relationships_only") == [
-        "chapter_profile", "relationship",
+        "chapter_profile", "entity_extract", "event_extract", "relationship_analyze",
     ]
 
 
 def test_stages_for_behaviors_only():
     from app.routers.deepstudy import _stages_for_mode
     assert _stages_for_mode("behaviors_only") == [
-        "chapter_profile", "behavior",
+        "chapter_profile", "entity_extract", "event_extract",
+        "scene_beat_extract", "behavior_pattern_mine",
     ]
 
 
@@ -112,7 +116,9 @@ def test_stages_for_techniques_only():
     """techniques_only: behavior is the dependency stage that
     must run first (per spec section 5.7)."""
     from app.routers.deepstudy import _stages_for_mode
-    assert _stages_for_mode("techniques_only") == ["behavior", "technique"]
+    assert _stages_for_mode("techniques_only") == [
+        "behavior_pattern_mine", "foreshadow_analyze", "technique_mine",
+    ]
 
 
 def test_stages_for_repair_failed_includes_all():
@@ -122,9 +128,9 @@ def test_stages_for_repair_failed_includes_all():
     """
     from app.routers.deepstudy import _stages_for_mode
     stages = _stages_for_mode("repair_failed")
-    assert len(stages) == 9
-    assert "graph" in stages
-    assert "critic" in stages
+    assert len(stages) == 14
+    assert "graph_finalize" in stages
+    assert "study_critic" in stages
 
 
 # ============================================================

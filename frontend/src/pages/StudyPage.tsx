@@ -2,14 +2,14 @@
  * StudyPage (P0 DeepStudy 自动联动重构)
  *
  * 旧的 "手动按钮" 模式已废弃。现在的设计原则:
- *   上传/粘贴参考书 → 启动 DeepStudy → 自动生成图谱/行为模式/技巧
+ *   上传/粘贴参考书 → 系统自动拆书 → 自动生成图谱/行为模式/技巧
  *   用户只看结果，不操作内部工序。
  *
  * 页面结构:
  *   Tab 1: 📚 我的书库 — 书卡网格, 每本书展开后显示:
  *     - 自动 DeepStudy 进度 (Run 状态/阶段/产物预览)
  *     - 章节树 (只读, 查看已抽取的人物)
- *     - "启动 DeepStudy" / "查看图谱" / "查看行为模式" / "查看技巧"
+ *     - 自动进度 / "查看图谱" / "查看行为模式" / "查看技巧"
  *   Tab 2: 🧩 行为模式 — 标签筛选 + 搜索 + 卡片列表
  *
  * 已删除的手动按钮: 批量抽人物 / 批量抽事件 / 试抽5章 / 提取行为模式 /
@@ -30,7 +30,6 @@ import {
   deleteBehaviorPattern,
   deleteStudyMaterial,
   getStudyMaterialOverview,
-  startDeepStudyRun,
   getDeepStudyRun,
 } from "../api";
 import type {
@@ -112,7 +111,6 @@ function BookLibrary() {
   const [overviews, setOverviews] = useState<Record<number, StudyMaterialOverview>>({});
   // P0 DeepStudy: per-material run state for progress display
   const [deepstudyRuns, setDeepstudyRuns] = useState<Record<number, any>>({});
-  const [deepstudyLaunchBusy, setDeepstudyLaunchBusy] = useState<Record<number, boolean>>({});
 
   const refresh = () => {
     listStudyMaterials()
@@ -277,22 +275,6 @@ function BookLibrary() {
     refresh();
   };
 
-  // P0 DeepStudy: launch a DeepStudy run for this material
-  const onLaunchDeepStudy = async (materialId: number) => {
-    setDeepstudyLaunchBusy((prev) => ({ ...prev, [materialId]: true }));
-    setErrorMsg(null);
-    try {
-      const r = await startDeepStudyRun(materialId, { mode: "full" });
-      setDeepstudyRuns((prev) => ({ ...prev, [materialId]: r }));
-      // Poll for updates
-      pollDeepStudyRun(materialId, r.run_id);
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? String(e));
-    } finally {
-      setDeepstudyLaunchBusy((prev) => ({ ...prev, [materialId]: false }));
-    }
-  };
-
   const pollDeepStudyRun = (materialId: number, runId: number) => {
     const tick = async () => {
       try {
@@ -315,7 +297,12 @@ function BookLibrary() {
       // The material's study_progress may have last run info
       if ((m as any).study_progress?.last_run_id) {
         getDeepStudyRun((m as any).study_progress.last_run_id)
-          .then((r) => setDeepstudyRuns((prev) => ({ ...prev, [m.id]: r })))
+          .then((r) => {
+            setDeepstudyRuns((prev) => ({ ...prev, [m.id]: r }));
+            if (r.status === "running" || r.status === "queued") {
+              pollDeepStudyRun(m.id, r.id);
+            }
+          })
           .catch(() => {});
       }
     });
@@ -462,9 +449,7 @@ function BookLibrary() {
               onRunStudy={onRunStudy}
               onDeleteCharacter={onDeleteCharacter}
               overview={overviews[m.id] ?? null}
-              onLaunchDeepStudy={() => onLaunchDeepStudy(m.id)}
               deepstudyRun={deepstudyRuns[m.id] ?? null}
-              launchBusy={!!deepstudyLaunchBusy[m.id]}
             />
           ))}
         </div>
@@ -476,7 +461,7 @@ function BookLibrary() {
 function BookCard({
   material, expanded, detail, busy,
   onToggle, onChapterize, onDelete, onRunStudy, onDeleteCharacter,
-  overview, onLaunchDeepStudy, deepstudyRun, launchBusy,
+  overview, deepstudyRun,
 }: {
   material: StudyMaterial;
   expanded: boolean;
@@ -488,9 +473,7 @@ function BookCard({
   onRunStudy: (ch: StudyChapter) => void;
   onDeleteCharacter: (id: number) => void;
   overview: StudyMaterialOverview | null;
-  onLaunchDeepStudy: () => void;
   deepstudyRun: any | null;
-  launchBusy: boolean;
 }) {
   // The detail fetch belongs to the EXPANDED book only; if this
   // card isn't the active one, we just show the summary fields
@@ -537,18 +520,6 @@ function BookCard({
             <span className="spacer" />
             <button onClick={onChapterize} disabled={busy || !material.raw_text_length} title="重新按「第 N 章 / Chapter N」切分正文">
               {busy ? "分章中…" : "重新分章"}
-            </button>
-            {/* P0 DeepStudy: 一键启动自动流水线 */}
-            <button
-              className="primary"
-              disabled={busy || launchBusy || !material.chapter_count || (deepstudyRun && deepstudyRun.status === "running")}
-              onClick={onLaunchDeepStudy}
-              title="启动 DeepStudy 自动流水线: 分章 → 实体抽取 → 事件抽取 → 关系分析 → 伏笔 → 行为模式 → 写作技巧 → 图谱生成 → 知识索引"
-            >
-              {launchBusy ? "启动中…"
-                : deepstudyRun && deepstudyRun.status === "running" ? "运行中…"
-                : deepstudyRun && deepstudyRun.status === "succeeded" ? "✅ DeepStudy 已完成"
-                : "🚀 启动 DeepStudy"}
             </button>
             {material.project_id && deepstudyRun && deepstudyRun.status === "succeeded" && (
               <button

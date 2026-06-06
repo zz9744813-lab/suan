@@ -55,11 +55,11 @@ class TestWorkerRetryDelay:
         mock_db.get = AsyncMock(return_value=task)
         # _get_or_create_status
         ws = _make_worker_status()
-        mock_db_get_ws = AsyncMock(return_value=ws)
-
         with patch.object(worker, "_get_or_create_status", return_value=ws):
-            # 直接调用 _mark_task_failed
-            await worker._mark_task_failed(1, "Connection timeout")
+            with patch("app.workers.worker.session_scope") as mock_scope:
+                mock_scope.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+                await worker._mark_task_failed(1, "Connection timeout")
 
         # retry_count < max_retries → 应设置 not_before_at 并保持 pending
         assert task.not_before_at is not None
@@ -127,7 +127,8 @@ class TestWorkerRetryDelay:
             with patch("app.workers.worker.session_scope") as mock_scope:
                 mock_scope.return_value.__aenter__ = AsyncMock(return_value=AsyncMock(get=AsyncMock(return_value=task)))
                 mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
-                with patch("app.workers.worker.event_bus"):
+                with patch("app.workers.worker.event_bus") as mock_bus:
+                    mock_bus.publish = AsyncMock()
                     await worker._mark_task_failed(1, "exhausted")
 
         # retry_count 递增到 3, 等于 max_retries=3 → 最终 failed

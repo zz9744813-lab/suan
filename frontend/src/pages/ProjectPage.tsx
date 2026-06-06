@@ -4,6 +4,7 @@ import {
   getBible, updateBible, listOutlines, createOutline, bulkCreateOutlines,
   listChapters, createChapter, getProject, getPolicy, updatePolicy,
   createTask, workerStart, listTasks, deleteProject, updateProject,
+  exportProjectFile, type ProjectExportFormat,
 } from "../api";
 import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask } from "../types";
 import { useProjectStore } from "../stores/projectStore";
@@ -168,12 +169,34 @@ function OverviewTab({ project, chapters, tasks, onSaveMeta }: {
   tasks: AgentTask[];
   onSaveMeta: (patch: Partial<Project>) => Promise<void>;
 }) {
+  const [exportFormat, setExportFormat] = useState<ProjectExportFormat>("markdown");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const done = chapters.filter((c) => c.status === "done").length;
   const reviewing = chapters.filter((c) => c.status === "needs_review").length;
   const totalWords = chapters.reduce((s, c) => s + c.actual_word_count, 0);
   const avgScore = chapters.filter((c) => c.current_score != null).reduce((s, c) => s + (c.current_score ?? 0), 0)
     / Math.max(1, chapters.filter((c) => c.current_score != null).length);
   const progressPct = Math.min(100, (totalWords / project.target_word_count) * 100);
+  const onExport = async () => {
+    setExportBusy(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await exportProjectFile(project.id, exportFormat);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: any) {
+      setExportError(e?.message ?? String(e));
+    } finally {
+      setExportBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -188,6 +211,34 @@ function OverviewTab({ project, chapters, tasks, onSaveMeta }: {
         <h3>总进度</h3>
         <div className="progress"><div className="fill" style={{ width: `${progressPct}%` }} /></div>
         <div className="muted tiny" style={{ marginTop: 6 }}>{progressPct.toFixed(1)}% · 目标 {project.target_word_count.toLocaleString()} 字 / {project.target_chapter_count} 章</div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h3>导出成品</h3>
+          <span className="muted small">{chapters.length} 章 · 优先导出 final 版本</span>
+        </div>
+        <div className="row gap-3" style={{ alignItems: "end" }}>
+          <div style={{ width: 220 }}>
+            <label>导出格式</label>
+            <select
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value as ProjectExportFormat)}
+            >
+              <option value="markdown">Markdown (.md)</option>
+              <option value="txt">纯文本 (.txt)</option>
+              <option value="html">网页 (.html)</option>
+              <option value="json">结构化 JSON</option>
+            </select>
+          </div>
+          <div className="muted small" style={{ flex: 1 }}>
+            系统会按 final → rewrite → draft 的顺序收集每章正文；没有正文的章节会明确标记，导出结果会直接下载。
+          </div>
+          <button className="primary" onClick={onExport} disabled={exportBusy || chapters.length === 0}>
+            {exportBusy ? "导出中..." : "导出成品"}
+          </button>
+        </div>
+        {exportError && <div className="error" style={{ marginTop: 10 }}>{exportError}</div>}
       </div>
 
       {/* Round 2: sidebar grouping metadata — edit the bucket this

@@ -105,7 +105,7 @@ class PromptAutoBinder:
 
         candidate_templates = [
             t for t in all_templates
-            if any(t.key.startswith(pfx) or pfx in t.key.lower() for pfx in prefixes)
+            if any(t.template_key.startswith(pfx) or pfx in t.template_key.lower() for pfx in prefixes)
         ]
 
         if not candidate_templates:
@@ -141,17 +141,18 @@ class PromptAutoBinder:
                 score = 0.5 + effect_by_tpl[tpl.id] * 0.5
 
             # genre 关键词匹配 (权重 0.2)
-            tpl_lower = tpl.key.lower() + (tpl.description or "").lower()
+            tpl_key = tpl.template_key
+            tpl_lower = tpl_key.lower() + (tpl.description or "").lower()
             kw_match = any(kw.lower() in tpl_lower for kw in genre_kws)
             if kw_match:
                 score += 0.2
 
             # 专有 genre 变体加分 (如 "drafter.xuanhuan")
-            if genre.lower() in tpl.key.lower():
+            if genre.lower() in tpl_key.lower():
                 score += 0.15
 
             # 通用 fallback 扣分
-            if "default" in tpl.key.lower() or "generic" in tpl.key.lower():
+            if "default" in tpl_key.lower() or "generic" in tpl_key.lower():
                 score -= 0.05
 
             reason_parts = []
@@ -178,7 +179,7 @@ class PromptAutoBinder:
             return {
                 "agent_role_key": agent_role_key, "genre": genre,
                 "selected_template_id": best_tpl.id,
-                "selected_template_key": best_tpl.key,
+                "selected_template_key": best_tpl.template_key,
                 "confidence_score": round(best_score, 4),
                 "reason": best_reason,
                 "action": "dry_run",
@@ -219,14 +220,14 @@ class PromptAutoBinder:
         await db.flush()
         logger.info(
             "PromptAutoBinder %s agent=%s genre=%s tpl=%s score=%.2f",
-            action, agent_role_key, genre, best_tpl.key, best_score,
+            action, agent_role_key, genre, best_tpl.template_key, best_score,
         )
 
         return {
             "agent_role_key": agent_role_key,
             "genre": genre,
             "selected_template_id": best_tpl.id,
-            "selected_template_key": best_tpl.key,
+            "selected_template_key": best_tpl.template_key,
             "confidence_score": round(best_score, 4),
             "reason": best_reason,
             "action": action,

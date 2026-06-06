@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 
 from app.core.database import session_scope
 from app.models.deepstudy import StudyRun
+from app.models.project import Project
 from app.models.study import StudyChapter, StudyMaterial
 from app.models.task import AgentTask
 
@@ -32,6 +33,9 @@ from .stages.chapter_profiler import ChapterProfilerStage
 from .stages.entity_extractor import EntityExtractorStage
 from .technique_miner import TechniqueMiner
 from .writing_context_sync import WritingContextSync
+
+
+_SCRATCH_PROJECT_NAME = "拆书·公共"
 
 
 class DeepStudyCoordinatorAgent:
@@ -119,9 +123,10 @@ class DeepStudyCoordinatorAgent:
             if not existing.scalar_one_or_none():
                 chapters_count = run.total_chapters or 0
                 title_value = f"DeepStudy《{material.title if material else 'Material #' + str(run.material_id)}》"
+                project_id = await self._resolve_task_project_id(db, run, material)
                 parent_task = AgentTask(
                     task_type="deepstudy_run",
-                    project_id=run.project_id,
+                    project_id=project_id,
                     visibility="user",
                     domain="deepstudy",
                     task_kind="deepstudy_material_run",
@@ -137,6 +142,28 @@ class DeepStudyCoordinatorAgent:
             # Execute the stage (real dispatch if handler exists, fallback otherwise)
             await self._execute_stage(db, run, next_stage)
 
+    async def _resolve_task_project_id(self, db, run: StudyRun, material: StudyMaterial | None) -> int:
+        """DeepStudy tasks need a non-null project even for global books."""
+        if run.project_id:
+            return run.project_id
+        if material and material.project_id:
+            run.project_id = material.project_id
+            return material.project_id
+
+        row = (await db.execute(
+            select(Project).where(Project.name == _SCRATCH_PROJECT_NAME)
+        )).scalar_one_or_none()
+        if row is None:
+            row = Project(
+                name=_SCRATCH_PROJECT_NAME,
+                category="study",
+                description="公共拆书任务项目，用于承载未绑定正式项目的自动研读任务。",
+            )
+            db.add(row)
+            await db.flush()
+        run.project_id = row.id
+        return row.id
+
     async def _execute_stage(self, db, run, stage_key: str) -> None:
         """Execute a single stage.
 
@@ -149,12 +176,13 @@ class DeepStudyCoordinatorAgent:
             await handler.execute_stage(db, run, self.stage_store)
         else:
             # Fallback: mark as completed (for stages without handlers yet)
-            if not isinstance(run.progress, dict):
-                run.progress = {}
-            completed = run.progress.get("completed_stages", [])
+            progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
+            completed = list(progress.get("completed_stages", []) or [])
             if stage_key not in completed:
                 completed.append(stage_key)
-            run.progress["completed_stages"] = completed
+            progress["completed_stages"] = completed
+            progress["current_stage"] = stage_key
+            run.progress = progress
             run.processed_chapters = run.total_chapters
 
         # Common: publish event for auto-linkage
@@ -179,23 +207,25 @@ class DeepStudyCoordinatorAgent:
             parent.cost_usd = run.cost_usd or 0
             parent.input_tokens = run.input_tokens or 0
 
-        # Check if all core stages done
+        # Check if the full DAG is done. Upload-triggered automation should
+        # finish the entire study pipeline, not stop after the early core
+        # extraction stages.
         completed = (run.progress or {}).get("completed_stages", [])
         all_stages = list(DEEPSTUDY_DAG.keys())
-        if all(s in completed for s in all_stages[:9]):  # First 9 are core stages
-            run.status = "succeeded"
-            run.finished_at = datetime.now(timezone.utc)
+        if all(s in completed for s in all_stages):
+            await self._finalize_run(db, run, completed)
 
         await db.flush()
 
     async def _advance_stage(self, db, run, stage_key: str) -> None:
         """Skip a stage when there are no chapters to process."""
-        if not isinstance(run.progress, dict):
-            run.progress = {}
-        completed: list[str] = list(run.progress.get("completed_stages", []) or [])
+        progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
+        completed: list[str] = list(progress.get("completed_stages", []) or [])
         if stage_key not in completed:
             completed.append(stage_key)
-        run.progress["completed_stages"] = completed
+        progress["completed_stages"] = completed
+        progress["current_stage"] = stage_key
+        run.progress = progress
 
         await deepstudy_event_bus.stage_completed(
             material_id=run.material_id,
@@ -236,15 +266,15 @@ class DeepStudyCoordinatorAgent:
 
         try:
             # Graph finalisation
-            await self.graph_materializer.finalize_graph(material_id)
+            await self.graph_materializer.finalize_graph(material_id, db=db)
             # Behaviour pattern consolidation
-            await self.behavior_miner.finalize_book_patterns(material_id)
+            await self.behavior_miner.finalize_book_patterns(material_id, db=db)
             # Technique consolidation
-            await self.technique_miner.finalize_techniques(material_id)
+            await self.technique_miner.finalize_techniques(material_id, db=db)
             # Knowledge indexing
-            await self.knowledge_indexer.index_material(material_id)
+            await self.knowledge_indexer.index_material(material_id, db=db)
             # Writing context sync
-            await self.writing_sync.sync_material(material_id)
+            await self.writing_sync.sync_material(material_id, db=db)
 
             # Mark material as completed
             from app.models.study import StudyMaterial

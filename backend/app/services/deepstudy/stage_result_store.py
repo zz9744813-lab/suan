@@ -155,10 +155,10 @@ class StageResultStore:
             if run is None:
                 return
 
-            progress = run.progress or {}
+            progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
             if isinstance(progress, dict):
-                completed = progress.get("completed_stages", [])
+                completed = list(progress.get("completed_stages", []) or [])
                 if stage_key not in completed:
                     completed.append(stage_key)
-                    progress["completed_stages"] = completed
-                    run.progress = progress
+                progress["completed_stages"] = completed
+                run.progress = progress

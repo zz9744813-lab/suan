@@ -126,12 +126,20 @@ class CircuitBreakerService:
         provider.last_failure_message = (message or "")[:2000]
         provider.last_success_at = provider.last_success_at  # 保持不变
 
+        # JSON 解析失败说明本次输出质量不可用，但通常不是 Provider 连通性坏了。
+        # 立即降低健康分，避免继续高优先级命中同一组合；不打开 Provider 熔断。
+        if failure_type == "json_parse_failed":
+            provider.health_score = max(0.1, (provider.health_score or 0.75) - 0.1)
+            logger.info(
+                f"Provider {provider.name} JSON 解析失败, health_score 降至 {provider.health_score:.2f}"
+            )
+
         # 检查是否需要熔断
         rule = CIRCUIT_RULES.get(failure_type, CIRCUIT_RULES.get("unknown", {}))
         required_consecutive = rule.get("consecutive", 3)
         duration = rule.get("duration")
 
-        if provider.consecutive_failures >= required_consecutive:
+        if failure_type != "json_parse_failed" and provider.consecutive_failures >= required_consecutive:
             if duration is not None:
                 # 有限时熔断
                 provider.circuit_state = "open"
@@ -146,13 +154,6 @@ class CircuitBreakerService:
                 logger.error(
                     f"Provider {provider.name} 鉴权失败, 熔断直到手动 reset"
                 )
-            elif failure_type == "json_parse_failed":
-                # JSON 失败不熔断 Provider, 只降低 health_score
-                provider.health_score = max(0.1, (provider.health_score or 0.75) - 0.1)
-                logger.info(
-                    f"Provider {provider.name} JSON 解析失败, health_score 降至 {provider.health_score:.2f}"
-                )
-
         # 写 call event
         event = ModelCallEvent(
             provider_id=provider_id,

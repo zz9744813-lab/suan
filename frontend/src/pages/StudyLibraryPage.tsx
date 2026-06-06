@@ -23,9 +23,8 @@
  * 加的聚合端点, 一次性返回 items + summary, 6 个深层 counter 各跑一个
  * GROUP BY 计数, 不需要前端 6 次往返.
  *
- * 启动 DeepStudy: ShelfDetailPanel "🚀 启动 DeepStudy" 按钮 →
- * POST /api/deepstudy/materials/{id}/runs { mode: "full" }.
- * 之后轮询 GET /api/deepstudy/runs/{run_id} 2.5s 一次看进度.
+ * 自动流程: 上传后后端自动拆章并创建 full run.
+ * 前端轮询 GET /api/deepstudy/runs/{run_id} 2.5s 一次看进度.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -110,8 +109,8 @@ const GROUPS: Group[] = [
     match: (it) => it.study_status === "studying",
   },
   {
-    key: "pending",   title: "待分章 / 待启动",
-    hint: "— 这一格还没有「已上传未分章」的书 —",
+    key: "pending",   title: "待自动处理",
+    hint: "— 新上传的书会自动拆章并排队深度拆解 —",
     match: (it) => it.study_status === "uploaded" || it.study_status === "empty",
   },
   {
@@ -284,8 +283,28 @@ export function StudyLibraryPage() {
   const selectedRun = useMemo(() => {
     if (!selected) return null;
     const runs = Object.values(activeRuns).filter((r) => r.material_id === selected.id);
-    if (runs.length === 0) return null;
-    return runs.sort((a, b) => b.id - a.id)[0];
+    if (runs.length > 0) return runs.sort((a, b) => b.id - a.id)[0];
+    if (!selected.latest_run_id || !selected.latest_run_status) return null;
+    return {
+      id: selected.latest_run_id,
+      material_id: selected.id,
+      project_id: selected.project_id,
+      status: selected.latest_run_status,
+      mode: selected.latest_run_mode ?? "full",
+      total_chapters: selected.chapter_count,
+      processed_chapters: selected.processed_chapters,
+      current_stage: selected.latest_run_stage,
+      agent_plan: null,
+      progress: selected.latest_run_progress,
+      cost_usd: selected.cost_usd,
+      input_tokens: 0,
+      output_tokens: 0,
+      error: selected.latest_run_error,
+      started_at: null,
+      finished_at: null,
+      created_at: selected.updated_at,
+      updated_at: selected.updated_at,
+    } satisfies StudyRunRead;
   }, [activeRuns, selected]);
 
   // 渲染 ----------------------------------------------------------------
@@ -327,9 +346,9 @@ export function StudyLibraryPage() {
             <button
               className="primary"
               onClick={() => navigate("/study")}
-              title="打开旧版 StudyPage (上传 / 粘贴 / 抽人物 / 行为模式 tab)"
+              title="上传或粘贴参考书；上传后会自动拆章并排队深度拆解"
             >
-              📤 上传 / 粘贴 / 行为模式
+              📤 上传新书
             </button>
           </ShelfToolbar>
 
@@ -389,7 +408,7 @@ export function StudyLibraryPage() {
             <div className="empty-large">
               <div className="empty-large-glyph">📚</div>
               <h3>书架还是空的</h3>
-              <p>点左上方「📤 上传 / 粘贴」打开旧版 StudyPage, 先传一本书 / 粘一段正文, 然后回到这里启动 DeepStudy。</p>
+              <p>点左上方「📤 上传新书」传入参考书；上传完成后系统会自动拆章、排队深度拆解，并在这里刷新进度。</p>
             </div>
           ) : (
             GROUPS.map((g) => (
@@ -428,7 +447,7 @@ export function StudyLibraryPage() {
           title={selected?.title ?? "未选中参考书"}
           subtitle={selected
             ? `${selected.author || "—"} · ${labelOf(selected)} · #${selected.id}${selected.shelf_category ? ` · ${selected.shelf_category}` : ""}`
-            : "点中间书架里的一本参考书查看详情 / 启动 DeepStudy"}
+            : "点中间书架里的一本参考书查看自动拆解进度和知识密度"}
           accentColor={selected ? colorOf(selected) : "gray"}
           stats={selected ? [
             { label: "章节", value: `${selected.processed_chapters} / ${selected.chapter_count}` },
@@ -449,8 +468,8 @@ export function StudyLibraryPage() {
               >
                 🌐 打开知识网络
               </button>
-              <button onClick={() => navigate("/study")} title="旧版 StudyPage (上传 / 分章 / 抽人物 / 行为模式 tab)">
-                📚 旧版详情页
+              <button onClick={() => navigate("/study")} title="进入上传和拆书素材管理">
+                📚 素材管理
               </button>
               {selectedRun && selectedRun.status === "running" && (
                 <button onClick={() => pauseRun(selectedRun.id)}>⏸ 暂停</button>
@@ -468,7 +487,7 @@ export function StudyLibraryPage() {
         >
           {selected ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 12 }}>
-              {/* 启动 DeepStudy 区域 */}
+              {/* 自动 DeepStudy 状态 / 修复区 */}
               <div style={{
                 padding: 10,
                 background: "var(--bg-elevated)",
@@ -476,27 +495,33 @@ export function StudyLibraryPage() {
                 border: "1px solid var(--accent-line-soft)",
               }}>
                 <div style={{ marginBottom: 8, color: "var(--text-muted)", fontSize: 11 }}>
-                  启动 DeepStudy (P0 多 Agent 流水线):
+                  自动拆解流程:
+                </div>
+                <div style={{ marginBottom: 8, fontSize: 11, color: "var(--text-secondary)" }}>
+                  上传后系统会自动拆章、创建 full run 并唤起 Worker。这里主要用于查看状态，只有失败时需要手动修复。
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                   <button
-                    className="primary tiny"
-                    onClick={() => startRun(selected, "full")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                    title="ChapterProfiler + Entity + SceneBeat + Relationship + Foreshadow + Behavior + Technique + Critic 全跑一遍"
-                  >
-                    🚀 启动 full
-                  </button>
-                  <button
                     className="tiny"
                     onClick={() => startRun(selected, "repair_failed")}
-                    disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                    disabled={
+                      (!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued"))
+                      || (selected.study_status !== "failed" && selected.latest_run_status !== "failed")
+                    }
                     title="重跑上一次 run 失败的 stage (其它不动)"
                   >
                     🔧 修复失败
                   </button>
                   {ENABLE_DEEPSTUDY_DEBUG && (
                     <>
+                      <button
+                        className="tiny"
+                        onClick={() => startRun(selected, "full")}
+                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
+                        title="调试补跑：全量重建 DeepStudy 流水线"
+                      >
+                        补跑 full
+                      </button>
                       <button
                         className="tiny"
                         onClick={() => startRun(selected, "entities_only")}
@@ -552,7 +577,7 @@ export function StudyLibraryPage() {
               </div>
             </div>
           ) : (
-            <div className="muted small">点中间书架里的一本参考书, 这里会显示该书的 6 深层 counter + DeepStudy 启动按钮。</div>
+            <div className="muted small">点中间书架里的一本参考书, 这里会显示该书的 6 深层 counter、自动流程状态和知识网络入口。</div>
           )}
         </ShelfDetailPanel>
       }
@@ -701,8 +726,8 @@ export function StudyBookGraphPage() {
         <div className="empty-large">
           <div className="empty-large-glyph">🌐</div>
           <h3>这本书还没产生知识节点</h3>
-          <p>回到 <a href="/study/library">拆书书架</a>, 选这本书 → ShelfDetailPanel → 启动 DeepStudy (mode: full)。<br />
-          跑完后这里的网络会自动填上 Entity / SceneBeat / Foreshadow / Behavior / Technique 节点。</p>
+          <p>这本书上传后会自动进入 full 深度拆解；后台跑完后这里会自动填上 Entity / SceneBeat / Foreshadow / Behavior / Technique 节点。<br />
+          如果状态失败，回到 <a href="/study/library">拆书书架</a> 使用「修复失败」。</p>
         </div>
       ) : (
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", minHeight: 0 }}>

@@ -5,10 +5,9 @@
  */
 import { useState } from "react";
 import type { AgentRoleMatrixItem, ModelProvider } from "../../types";
-import { updateAgentModelBinding } from "../../api";
+import { autoConfigureAgents, type AutoConfigureResponse } from "../../api";
 
 type AgentBindingTask = {
-  agentRoleId: number;
   agentKey: string;
   agentDisplayName: string;
   modelName: string;
@@ -19,8 +18,9 @@ function planBindings(
   matrixItems: AgentRoleMatrixItem[],
   provider: ModelProvider,
 ): AgentBindingTask[] {
-  const primaryModel = provider.default_model || "claude-3.5-sonnet";
-  const cheapModel = "gemini-flash-1.5";
+  const modelList = provider.model_list ?? [];
+  const primaryModel = provider.default_model || modelList[0] || "自动选择";
+  const cheapModel = modelList.find((m) => /mini|flash|lite|small|8b|7b/i.test(m)) ?? primaryModel;
   const tasks: AgentBindingTask[] = [];
 
   for (const item of matrixItems) {
@@ -29,11 +29,10 @@ function planBindings(
 
     if (key.startsWith("reader")) {
       tasks.push({
-        agentRoleId: item.role.id,
         agentKey: item.role.key,
         agentDisplayName: name,
         modelName: cheapModel,
-        reason: "速度快,成本低",
+        reason: "低风险任务优先轻量模型",
       });
     } else if (key === "planner" || key === "drafter" || key === "critic") {
       let reason: string;
@@ -41,11 +40,10 @@ function planBindings(
       else if (key === "drafter") reason = "写作质量高";
       else reason = "评审严格";
       tasks.push({
-        agentRoleId: item.role.id,
         agentKey: item.role.key,
         agentDisplayName: name,
         modelName: primaryModel,
-        reason,
+        reason: `${reason}, 后端会按健康度自动错峰`,
       });
     }
   }
@@ -69,7 +67,7 @@ export function AutoConfigureModal({
   onConfigured,
 }: AutoConfigureModalProps) {
   const [submitting, setSubmitting] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<Record<number, string>>({});
+  const [result, setResult] = useState<AutoConfigureResponse | null>(null);
 
   if (!open || !provider) return null;
 
@@ -77,22 +75,33 @@ export function AutoConfigureModal({
 
   const handleAutoConfigure = async () => {
     setSubmitting(true);
-    const status: Record<number, string> = {};
-    for (const task of bindings) {
-      try {
-        await updateAgentModelBinding(task.agentRoleId, {
-          provider_id: provider.id,
-          model_name: task.modelName,
-          selection_mode: "manual",
-        });
-        status[task.agentRoleId] = "ok";
-      } catch (e: any) {
-        status[task.agentRoleId] = String(e?.message ?? "失败");
+    try {
+      const res = await autoConfigureAgents({
+        scope: "all",
+        strategy: "quality_first",
+        overwrite_manual: true,
+      });
+      setResult(res);
+      if (res.failed === 0) {
+        onConfigured();
       }
-      setAgentStatus({ ...status });
+    } catch (e: any) {
+      setResult({
+        updated: 0,
+        skipped_manual: 0,
+        failed: bindings.length || 1,
+        items: [{
+          agent_role_key: "auto_configure",
+          selection_mode: "auto",
+          provider: null,
+          model: null,
+          score: null,
+          reason: String(e?.message ?? e),
+        }],
+      });
+    } finally {
+      setSubmitting(false);
     }
-    setSubmitting(false);
-    onConfigured();
   };
 
   return (
@@ -136,22 +145,22 @@ export function AutoConfigureModal({
               <th style={{ textAlign: "left", padding: "4px 8px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>Agent</th>
               <th style={{ textAlign: "left", padding: "4px 8px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>模型</th>
               <th style={{ textAlign: "left", padding: "4px 8px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>说明</th>
-              <th style={{ textAlign: "center", padding: "4px 8px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500, width: 48 }}>状态</th>
+              <th style={{ textAlign: "center", padding: "4px 8px", fontSize: 12, color: "var(--text-muted)", fontWeight: 500, width: 64 }}>状态</th>
             </tr>
           </thead>
           <tbody>
             {bindings.map((task) => {
-              const st = agentStatus[task.agentRoleId];
+              const st = result?.items.find((it) => it.agent_role_key === task.agentKey);
               return (
-                <tr key={task.agentRoleId} style={{ borderBottom: "1px solid var(--border-secondary)" }}>
+                <tr key={task.agentKey} style={{ borderBottom: "1px solid var(--border-secondary)" }}>
                   <td style={{ padding: "6px 8px", fontSize: 13, color: "var(--text-primary)" }}>{task.agentDisplayName}</td>
-                  <td style={{ padding: "6px 8px", fontSize: 13, fontFamily: "monospace", color: "var(--text-secondary)" }}>{task.modelName}</td>
+                  <td style={{ padding: "6px 8px", fontSize: 13, fontFamily: "monospace", color: "var(--text-secondary)" }}>{st?.model ?? task.modelName}</td>
                   <td style={{ padding: "6px 8px", fontSize: 12, color: "var(--text-muted)" }}>{task.reason}</td>
                   <td style={{ padding: "6px 8px", textAlign: "center" }}>
-                    {st === "ok" ? (
+                    {st && st.model ? (
                       <span style={{ color: "#5d9c5d", fontSize: 14 }}>&#10003;</span>
                     ) : st ? (
-                      <span style={{ color: "#c45858", fontSize: 11 }} title={st}>失败</span>
+                      <span style={{ color: "#c45858", fontSize: 11 }} title={st.reason ?? "失败"}>失败</span>
                     ) : (
                       <span style={{ color: "var(--text-muted)", fontSize: 11 }}>—</span>
                     )}
@@ -161,6 +170,13 @@ export function AutoConfigureModal({
             })}
           </tbody>
         </table>
+        {result && (
+          <div style={{ marginBottom: 14, fontSize: 12, color: result.failed ? "#c45858" : "var(--text-muted)" }}>
+            已更新 {result.updated} 个 Agent
+            {result.skipped_manual ? `，跳过 ${result.skipped_manual} 个手动锁定` : ""}
+            {result.failed ? `，失败 ${result.failed} 个` : ""}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button

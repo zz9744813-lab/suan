@@ -10,6 +10,7 @@ from app.services.model_selector import (
     latency_score,
     cost_score,
     json_stability_score,
+    is_text_role_model_compatible,
     _clamp,
 )
 
@@ -148,6 +149,13 @@ class TestModelSelectorFallback:
         binding = MagicMock()
         binding.selection_mode = "manual"
         binding.allow_auto_fallback = False
+        binding.auto_strategy = "quality_first"
+
+        role_result = MagicMock()
+        role_result.scalar_one_or_none.return_value = role
+        binding_result = MagicMock()
+        binding_result.scalar_one_or_none.return_value = binding
+        mock_db.execute = AsyncMock(side_effect=[role_result, binding_result])
 
         # force_fallback + manual + no allow → should raise
         with pytest.raises(ValueError, match="不允许 fallback"):
@@ -268,3 +276,32 @@ class TestModelSelectorFallback:
         # open provider 应被跳过, 候选为空
         model_x = [c for c in candidates if c.model_name == "model-x"]
         assert len(model_x) == 0
+
+    def test_text_roles_reject_media_models(self):
+        assert not is_text_role_model_compatible("planner", "seedance-t2v-video")
+        assert not is_text_role_model_compatible("critic", "qwen-vl-max")
+        assert is_text_role_model_compatible("planner", "deepseek-chat")
+
+    @pytest.mark.asyncio
+    async def test_fallback_skips_media_default_model(self):
+        """Last-resort fallback should still avoid image/video/audio models."""
+        svc = ModelSelectorService()
+        mock_db = AsyncMock()
+
+        provider = MagicMock()
+        provider.id = 7
+        provider.name = "api-provider"
+        provider.base_url = "https://api.example.com"
+        provider.api_key = "sk-test"
+        provider.enabled = True
+        provider.circuit_state = "closed"
+        provider.circuit_open_until = None
+        provider.default_model = "seedance-t2v-video"
+        provider.model_list = ["seedance-t2v-video", "deepseek-chat"]
+
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = [provider]
+        mock_db.execute = AsyncMock(return_value=result)
+
+        selected = await svc._fallback_any_enabled(mock_db, "planner", None)
+        assert selected.model_name == "deepseek-chat"

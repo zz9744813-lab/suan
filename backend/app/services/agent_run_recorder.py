@@ -103,6 +103,7 @@ class AgentRunRecorder:
             "total_calls": total,
             "success_calls": success,
             "failed_calls": failed,
+            "fallback_calls": fallback,
             "fallback_count": fallback,
             "failed_count": sum(1 for e in events if e.status == "failed"),
             "timeout_count": sum(1 for e in events if e.failure_type == "timeout"),

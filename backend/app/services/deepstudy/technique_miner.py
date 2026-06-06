@@ -14,6 +14,7 @@ Two-phase operation:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
@@ -26,6 +27,15 @@ from app.models.deepstudy import (
     WritingTechnique,
 )
 from app.models.study import BehaviorPattern
+
+
+@asynccontextmanager
+async def _db_context(existing_db=None):
+    if existing_db is not None:
+        yield existing_db
+    else:
+        async with session_scope() as db:
+            yield db
 
 
 class TechniqueMiner:
@@ -91,7 +101,7 @@ class TechniqueMiner:
                 for tag in (p.situation_tags or []):
                     situation_freq[tag] = situation_freq.get(tag, 0) + 1
 
-    async def finalize_techniques(self, material_id: int) -> None:
+    async def finalize_techniques(self, material_id: int, db=None) -> None:
         """After all techniques generated, finalise.
 
         Operations:
@@ -100,7 +110,7 @@ class TechniqueMiner:
         - Recompute confidence from source evidence density.
         - Update the technique library statistics.
         """
-        async with session_scope() as db:
+        async with _db_context(db) as db:
             techniques = (
                 await db.execute(
                     select(WritingTechnique).where(

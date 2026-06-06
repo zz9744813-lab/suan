@@ -1,6 +1,6 @@
 // Domain-specific API helpers, all returning typed promises.
 
-import { api } from "./client";
+import { api, apiBase } from "./client";
 import type {
   AgentEvent,
   AgentStep,
@@ -65,6 +65,34 @@ export const updateProject = (id: number, body: Partial<Project>) =>
   api.patch<Project>(`/api/projects/${id}`, body);
 export const deleteProject = (id: number) =>
   api.delete<{ deleted: number }>(`/api/projects/${id}`);
+
+export type ProjectExportFormat = "markdown" | "txt" | "json" | "html";
+function filenameFromDisposition(disposition: string | null, fallback: string) {
+  if (!disposition) return fallback;
+  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (utf8) {
+    try { return decodeURIComponent(utf8); } catch { return utf8; }
+  }
+  return disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? fallback;
+}
+export async function exportProjectFile(projectId: number, format: ProjectExportFormat) {
+  const url = `${apiBase}/api/projects/${projectId}/export?format=${encodeURIComponent(format)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let message = `导出失败：HTTP ${res.status}`;
+    try {
+      const json = await res.json();
+      message = json?.error?.message || json?.detail || message;
+    } catch {
+      // non-JSON export error, keep the HTTP summary
+    }
+    throw new Error(message);
+  }
+  return {
+    blob: await res.blob(),
+    filename: filenameFromDisposition(res.headers.get("Content-Disposition"), `project-${projectId}.${format === "markdown" ? "md" : format}`),
+  };
+}
 
 // Round 2: bulk reorder endpoint used by the drag-and-drop ProjectNav.
 // Body matches the backend ``ProjectReorderRequest`` schema.
@@ -522,7 +550,7 @@ export const globalSearch = (q: string, limit = 30) => {
 //   GET    /api/deepstudy/techniques                         全局技巧库
 //
 // P2 范围: 书架入口 (StudyLibraryPage) + 单书网络 (StudyBookGraphPage)
-// 都走这一组 helper; 启动 run 是 ShelfDetailPanel 的 "启动 DeepStudy" 按钮.
+// 都走这一组 helper; full run 由上传/入库流程自动创建，UI 只负责状态和失败修复.
 
 import type {
   LibraryResponse,

@@ -12,13 +12,10 @@ does NOT match the ``study_character`` prompt's expected
 ``characters_added=0`` and the user stared at 2332 empty rows.
 
 Fix: ``LLMRouter.resolve`` now refuses to pick a ``mock://``
-provider from the fallback path. If the user has only mock
-providers enabled, ``resolve`` raises a clean 400 instead of
-returning placeholder content. Explicit role bindings (the
-seed's ``(role, 'stub', ...)`` rows) still go through the
-assignment path and intentionally use the mock — that's the
-demo-without-API-key mode, which the picker handles
-separately.
+provider for text agents. If the user has only mock providers
+enabled, ``resolve`` raises a clean 400 instead of returning
+placeholder content. Legacy bindings that point to mock/local
+providers are skipped in favor of real API text providers.
 """
 import sys
 import os
@@ -145,11 +142,9 @@ def test_router_fallback_errors_when_only_mock_enabled():
     asyncio.run(run())
 
 
-def test_router_explicit_role_binding_still_uses_mock():
-    """An explicit ``(role, 'stub', ...)`` binding MUST still go
-    through to the mock — that's the demo-without-API-key path
-    the seed relies on. We only filter ``mock://`` in the
-    *fallback* (no-binding) branch.
+def test_router_explicit_mock_binding_skips_to_real_api():
+    """An explicit legacy binding to ``mock://`` must not override
+    the real API preference for text agents.
     """
     async def run():
         sm, eng = await _setup_db()
@@ -159,11 +154,11 @@ def test_router_explicit_role_binding_still_uses_mock():
                 stub = await _add_provider(db, name="stub", base_url="mock://local")
                 real = await _add_provider(db, name="whitedream", base_url="https://sub.whitedream.top/v1")
                 # Explicitly bind "Draft" to the stub. The resolve() must
-                # honour the binding, not the fallback rule.
+                # still prefer a real API text provider.
                 await _bind(sess=db, role="Draft", provider_id=stub.id, model="stub-fast")
                 resolved = await router.resolve(db, "Draft")
-                assert resolved.provider.id == stub.id
-                assert resolved.provider.base_url == "mock://local"
+                assert resolved.provider.id == real.id
+                assert resolved.provider.base_url != "mock://local"
         finally:
             await eng.dispose()
 

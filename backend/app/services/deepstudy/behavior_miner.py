@@ -11,6 +11,7 @@ end for whole-book patterns.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
@@ -23,6 +24,15 @@ from app.models.deepstudy import (
     SceneBeat,
 )
 from app.models.study import BehaviorPattern, StudyChapter
+
+
+@asynccontextmanager
+async def _db_context(existing_db=None):
+    if existing_db is not None:
+        yield existing_db
+    else:
+        async with session_scope() as db:
+            yield db
 
 
 class BehaviorPatternMiner:
@@ -99,7 +109,7 @@ class BehaviorPatternMiner:
         # 4. Create BehaviorPatternEvidence rows linking back to
         #    the source scene/entity/quote
 
-    async def finalize_book_patterns(self, material_id: int) -> None:
+    async def finalize_book_patterns(self, material_id: int, db=None) -> None:
         """After all chapters mined, consolidate patterns.
 
         Operations:
@@ -109,7 +119,7 @@ class BehaviorPatternMiner:
         - Remove low-confidence patterns.
         - Generate global pattern statistics.
         """
-        async with session_scope() as db:
+        async with _db_context(db) as db:
             # Load all patterns for this material
             patterns = (
                 await db.execute(

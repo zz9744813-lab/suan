@@ -106,6 +106,12 @@ class BaseAgent(ABC):
                 temperature=self.extra_temperature,
                 max_tokens=self.extra_max_tokens,
                 response_format={"type": "json_object"} if self.uses_json_output else None,
+                project_id=ctx.project_id,
+                task_id=ctx.task.id,
+                chapter_id=ctx.chapter_id,
+                step_key=self.step_name,
+                agent_step_id=step.id,
+                stream=False,
             )
         except Exception as exc:
             step.status = "failed"

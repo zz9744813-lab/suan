@@ -24,6 +24,7 @@
  *     with the status bar so we drop them.
  */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useProjectStore } from "../stores/projectStore";
 import { listTasks, multiWorkerStatus } from "../api";
 import type { AgentTask, MultiWorkerStatus } from "../types";
@@ -69,17 +70,36 @@ export function Dashboard() {
     () => tasks.find((t) => t.status === "failed" || t.status === "cancelled") ?? null,
     [tasks],
   );
+  const taskStats = useMemo(() => {
+    return {
+      pending: tasks.filter((t) => t.status === "pending").length,
+      running: tasks.filter((t) => t.status === "running").length,
+      failed: tasks.filter((t) => t.status === "failed" || t.status === "cancelled").length,
+      deepstudy: tasks.filter((t) => t.domain === "deepstudy").length,
+      cost: tasks.reduce((sum, t) => sum + (t.cost_usd ?? 0), 0),
+    };
+  }, [tasks]);
 
   return (
     <div className="dashboard">
       <div className="dashboard-body">
-        <DashboardKpiCards projectId={currentProjectId} />
-        <AgentPipelineVisualization />
-        <MemoryLayerCard />
         <DashboardStatusBar noProject={noProject} />
 
         {/* B3: per-domain worker horizontal scaling status */}
         {multiStatus && <DomainWorkersCompact ms={multiStatus} />}
+
+        <WorkbenchCommandStrip
+          projectName={currentProject?.name ?? null}
+          projectId={currentProjectId}
+          stats={taskStats}
+        />
+
+        <DashboardKpiCards projectId={currentProjectId} />
+
+        <div className="dashboard-row">
+          <AgentPipelineVisualization />
+          <MemoryLayerCard />
+        </div>
 
         <div className="dashboard-row">
           <CurrentPipelinePanel />
@@ -123,6 +143,53 @@ export function Dashboard() {
   );
 }
 
+function WorkbenchCommandStrip({
+  projectName,
+  projectId,
+  stats,
+}: {
+  projectName: string | null;
+  projectId: number | null;
+  stats: { pending: number; running: number; failed: number; deepstudy: number; cost: number };
+}) {
+  return (
+    <section className="workbench-command">
+      <div className="workbench-command-main">
+        <div className="workbench-command-kicker">当前工作台</div>
+        <div className="workbench-command-title">{projectName ?? "未选择项目"}</div>
+        <div className="workbench-command-sub">
+          {projectId ? "生产线、拆书、模型和记忆状态集中在这里。" : "先选择一个项目，系统才知道要把产能投到哪里。"}
+        </div>
+      </div>
+      <div className="workbench-command-metrics">
+        <Metric label="排队" value={stats.pending} />
+        <Metric label="运行" value={stats.running} />
+        <Metric label="失败" value={stats.failed} tone={stats.failed > 0 ? "warn" : "ok"} />
+        <Metric label="拆书" value={stats.deepstudy} />
+        <Metric label="成本" value={`$${stats.cost.toFixed(3)}`} />
+      </div>
+      <div className="workbench-command-actions">
+        {projectId ? (
+          <Link to={`/projects/${projectId}`} className="button primary">打开项目</Link>
+        ) : (
+          <Link to="/projects" className="button primary">选择项目</Link>
+        )}
+        <Link to="/study/library" className="button">拆书书架</Link>
+        <Link to="/models" className="button">模型配置</Link>
+      </div>
+    </section>
+  );
+}
+
+function Metric({ label, value, tone }: { label: string; value: number | string; tone?: "ok" | "warn" }) {
+  return (
+    <div className={`workbench-metric ${tone ? `workbench-metric-${tone}` : ""}`}>
+      <span>{label}</span>
+      <b>{value}</b>
+    </div>
+  );
+}
+
 /** B3: compact per-domain worker status bar.
  *
  * Renders a single-row strip showing each domain partition's
@@ -131,36 +198,18 @@ export function Dashboard() {
 function DomainWorkersCompact({ ms }: { ms: MultiWorkerStatus }) {
   const entries: { key: string; label: string; running: boolean }[] = [
     { key: "writing_worker",  label: "写作",  running: ms.writing_worker.status === "running" },
-    { key: "deepstudy_worker", label: "研读",  running: ms.deepstudy_worker.status === "running" },
+    { key: "deepstudy_worker", label: "拆书",  running: ms.deepstudy_worker.status === "running" },
     { key: "discussion_worker", label: "讨论", running: ms.discussion_worker.status === "running" },
     { key: "memory_worker",  label: "记忆",  running: ms.memory_worker.status === "running" },
     { key: "model_router",   label: "模型",  running: ms.model_router.status === "healthy" },
   ];
 
   return (
-    <div style={{
-      display: "flex",
-      gap: "1rem",
-      alignItems: "center",
-      padding: "6px 12px",
-      fontSize: "13px",
-      fontFamily: "monospace",
-      color: "var(--color-text-secondary, #888)",
-      borderBottom: "1px solid var(--color-border, #333)",
-    }}>
+    <div className="domain-workers">
       {entries.map((e) => (
-        <span key={e.key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span style={{
-            display: "inline-block",
-            width: 10,
-            height: 10,
-            borderRadius: "50%",
-            background: e.running ? "#4caf50" : "#555",
-            boxShadow: e.running ? "0 0 4px #4caf50" : "none",
-          }} />
-          <span style={{ color: e.running ? "var(--color-text, #ddd)" : "var(--color-text-secondary, #666)" }}>
-            {e.label}
-          </span>
+        <span key={e.key} className={`domain-worker ${e.running ? "running" : ""}`}>
+          <span className="domain-worker-dot" />
+          <span>{e.label}</span>
         </span>
       ))}
     </div>

@@ -13,7 +13,7 @@ from app.services.prompt_auto_binder import (
 def _make_template(**overrides):
     t = MagicMock()
     t.id = 1
-    t.key = "planner.default"
+    t.template_key = "planner.default"
     t.name = "Planner Default"
     t.description = "Default planner template"
     for k, v in overrides.items():
@@ -105,8 +105,8 @@ class TestPromptAutoBinder:
         binder = PromptAutoBinder()
 
         # 模拟有 toxic 相关模板
-        toxic_tpl = _make_template(id=10, key="critic.toxic", description="toxic review template")
-        critic_tpl = _make_template(id=11, key="critic.default", description="default critic")
+        toxic_tpl = _make_template(id=10, template_key="critic.toxic", description="toxic review template")
+        critic_tpl = _make_template(id=11, template_key="critic.default", description="default critic")
 
         mock_db = AsyncMock()
 
@@ -144,7 +144,7 @@ class TestPromptAutoBinder:
         """自动填充应设置 batch_id."""
         binder = PromptAutoBinder()
 
-        tpl = _make_template(id=1, key="planner.default")
+        tpl = _make_template(id=1, template_key="planner.default")
 
         mock_db = AsyncMock()
         call_count = 0
@@ -179,7 +179,7 @@ class TestPromptAutoBinder:
         """dry_run 模式不应写入数据库."""
         binder = PromptAutoBinder()
 
-        tpl = _make_template(id=1, key="planner.default")
+        tpl = _make_template(id=1, template_key="planner.default")
 
         mock_db = AsyncMock()
         call_count = 0
@@ -213,8 +213,8 @@ class TestPromptAutoBinder:
         """应为每个推荐计算置信度."""
         binder = PromptAutoBinder()
 
-        tpl_xuan = _make_template(id=1, key="planner.xuanhuan", description="玄幻专用")
-        tpl_default = _make_template(id=2, key="planner.default", description="通用")
+        tpl_xuan = _make_template(id=1, template_key="planner.xuanhuan", description="玄幻专用")
+        tpl_default = _make_template(id=2, template_key="planner.default", description="通用")
 
         mock_db = AsyncMock()
         call_count = 0
@@ -247,7 +247,7 @@ class TestPromptAutoBinder:
         """auto_fill_all 应批量处理多个 agent+genre 组合."""
         binder = PromptAutoBinder()
 
-        tpl = _make_template(id=1, key="planner.default")
+        tpl = _make_template(id=1, template_key="planner.default")
 
         mock_db = AsyncMock()
 

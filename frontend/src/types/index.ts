@@ -452,6 +452,13 @@ export type StudyMaterial = {
   error: string | null;
   chapter_count: number;
   character_count: number;
+  study_status?: DeepStudyStatus | string;
+  deepstudy_version?: string | null;
+  shelf_category?: string | null;
+  cover_theme?: Record<string, any> | null;
+  study_progress?: Record<string, any> | null;
+  knowledge_score?: number | null;
+  last_deepstudied_at?: string | null;
   // Only populated on the detail view (and only if ``?include_text=1``
   // was sent). The list endpoint sends 0 to keep payloads small.
   raw_text_length: number;
@@ -779,6 +786,12 @@ export type LibraryItem = {
   knowledge_score: number | null;   // StudyCritic 给分
   last_deepstudied_at: string | null;
   cost_usd: number;
+  latest_run_id: number | null;
+  latest_run_status: StudyRunRead["status"] | null;
+  latest_run_mode: StudyRunRead["mode"] | null;
+  latest_run_stage: string | null;
+  latest_run_progress: Record<string, any> | null;
+  latest_run_error: string | null;
   project_id: number | null;
   created_at: string;
   updated_at: string;

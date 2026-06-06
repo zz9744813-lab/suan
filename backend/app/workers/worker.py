@@ -18,6 +18,7 @@ P4 改造: 不再只跑 chapter_pipeline, 改成多任务 dispatcher (P6 spec §
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -30,6 +31,8 @@ from app.core.events import Event, event_bus
 from app.models.project import Chapter
 from app.models.task import AgentTask, WorkerPolicy, WorkerStatus
 from app.workers.pipeline import ChapterPipeline
+
+logger = logging.getLogger(__name__)
 
 # ================================================================
 # B3: Worker horizontal scaling — domain partitioning

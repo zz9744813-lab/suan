@@ -10,6 +10,7 @@ After DeepStudy completes, the syncer:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
@@ -23,6 +24,15 @@ from app.models.deepstudy import (
 from app.models.study import BehaviorPattern, StudyMaterial
 
 
+@asynccontextmanager
+async def _db_context(existing_db=None):
+    if existing_db is not None:
+        yield existing_db
+    else:
+        async with session_scope() as db:
+            yield db
+
+
 class WritingContextSync:
     """Syncs DeepStudy analysis outputs to the active writing project.
 
@@ -30,7 +40,7 @@ class WritingContextSync:
     can leverage the extracted knowledge.
     """
 
-    async def sync_material(self, material_id: int) -> None:
+    async def sync_material(self, material_id: int, db=None) -> None:
         """After DeepStudy completes, sync products to writing context.
 
         Operations:
@@ -39,7 +49,7 @@ class WritingContextSync:
         3. Cross-reference entities with project characters.
         4. Update the material's knowledge_score and deepstudy_version.
         """
-        async with session_scope() as db:
+        async with _db_context(db) as db:
             material = await db.get(StudyMaterial, material_id)
             if material is None:
                 return

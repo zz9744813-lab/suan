@@ -194,6 +194,42 @@ export function ProviderAccordion({
               <span className="last-fail">最近失败 ({provider.last_failure_type}): {provider.last_failure_message.slice(0, 100)}</span>
             )}
           </div>
+          {provider.last_health_full?.results?.length ? (
+            <div className="provider-accordion-details">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <b style={{ fontSize: 12 }}>健康检查明细</b>
+                <span className="muted small">
+                  {provider.last_health_model || provider.default_model} · {provider.last_health_full.score} 分
+                </span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
+                {provider.last_health_full.results.map((it) => (
+                  <div
+                    key={it.name}
+                    style={{
+                      border: "1px solid var(--border-secondary)",
+                      borderRadius: 4,
+                      padding: "6px 8px",
+                      background: it.status === "failed"
+                        ? "rgba(196,88,88,0.10)"
+                        : it.status === "warning"
+                          ? "rgba(227,183,95,0.10)"
+                          : "rgba(93,156,93,0.08)",
+                    }}
+                    title={it.raw_preview || it.message}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
+                      <span className="mono tiny">{it.name}</span>
+                      <span className={`pill tiny ${it.status === "passed" ? "ok" : it.status === "failed" ? "error" : "warn"}`}>
+                        {it.status}
+                      </span>
+                    </div>
+                    <div className="muted small" style={{ whiteSpace: "normal" }}>{it.message}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {provider.last_test_message && (
             <div className="provider-accordion-hint">{provider.last_test_message}</div>
           )}

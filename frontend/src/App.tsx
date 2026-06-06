@@ -109,7 +109,7 @@ export default function App() {
         <Route path="/models/providers/:providerId" element={<ModelProviderDetailPage />} />
         <Route path="/model-observability" element={<ModelObservabilityPanel projectId={undefined} />} />
         {/* P0 (01 §6) 路由基础规范: /study/library 是 P2 拆书书架
-         * (主入口, 查书/启动 DeepStudy/看知识网络).
+         * (主入口, 查书/看自动拆解进度/看知识网络).
          * 旧 /study 重新挂上旧版 StudyPage, 给书架上的"📤 上传 /
          * 粘贴 / 行为模式"按钮当落地页. P2 commit 漏了这一步,
          * 旧路径被注释承诺"仍能直接打开", 实际把 /study 硬重定向
