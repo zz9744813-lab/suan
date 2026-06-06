@@ -14,7 +14,15 @@ class BaseStage(ABC):
         ...
 
     async def execute_stage(self, db, run, stage_result_store):
-        """Execute the full stage across all chapters. Updates run progress."""
+        """Execute the full stage across all chapters. Updates run progress.
+
+        Commits after every chapter so that:
+        1. Progress is visible to the UI immediately.
+        2. The write lock is released, avoiding ``database is locked``
+           when other connections (e.g. the worker heartbeat or the
+           backend API) need to write.
+        3. A crash mid-stage does not lose already-processed chapters.
+        """
         from app.models.study import StudyChapter
         from sqlalchemy import select
 
@@ -61,6 +69,11 @@ class BaseStage(ABC):
                 )
                 db.add(sr)
                 # Continue to next chapter, don't fail the whole run
+
+            # Commit per-chapter to release the write lock and make
+            # progress visible.  This is critical for long books (800+
+            # chapters) where a single transaction could last hours.
+            await db.commit()
 
         # Mark stage as completed in run progress
         progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
