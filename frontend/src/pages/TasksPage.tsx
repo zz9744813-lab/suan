@@ -37,11 +37,31 @@ const STAGE_LABELS: Record<string, string> = {
   discussion:"讨论", rewrite:"返工", continuity:"连续", learning:"学习", memory_update:"记忆更新",
 };
 
+// P0 修复: 硬过滤历史脏任务, 即便后端 visibility 不规范也不会刷屏
+const HIDDEN_TASK_KINDS = new Set([
+  "comment_cleanup", "heartbeat", "cleanup", "audit_cleanup",
+  "study_character", "study_event", "study_relationship", "study_behavior",
+  "study_bulk_character", "study_bulk_event", "study_bulk_relationship",
+  "study_bulk_behavior", "study_bulk_foreshadow", "study_bulk_technique",
+  "study_technique", "study_foreshadow", "study_behavior_pattern",
+  "deepstudy_stage", "deepstudy_run_internal",
+]);
+const HIDDEN_TASK_TYPES = new Set([
+  "comment_cleanup", "study_character", "study_event",
+  "study_relationship", "study_behavior", "study_bulk_*",
+  "heartbeat", "cleanup", "audit_cleanup",
+]);
+
 function isDeepStudyTask(task: AgentTask) {
   const domain = task.domain || "";
-  const kind = task.task_kind || task.task_type || "";
-  return domain === "deepstudy"
-    || kind.startsWith("deepstudy")
+  const kind = (task.task_kind || task.task_type || "").toLowerCase();
+  // 后端 domain 已经是 deepstudy
+  if (domain === "deepstudy") return true;
+  if (HIDDEN_TASK_KINDS.has(task.task_kind || "")) return true;
+  if (HIDDEN_TASK_TYPES.has(task.task_type || "")) return true;
+  // 兜底: kind 前缀命中
+  return kind.startsWith("deepstudy")
+    || kind.startsWith("study_")
     || kind === "study"
     || kind === "study_bulk"
     || kind === "chapterize"

@@ -37,8 +37,30 @@ import {
   ShelfSidePanel, ShelfDetailPanel,
   type ShelfColorType,
 } from "../components/shelf";
+import {
+  CreateProjectDialog,
+  type CreateProjectPayload,
+} from "../components/projects/CreateProjectDialog";
 
 const GENRES = ["玄幻", "都市", "历史", "科幻", "悬疑", "言情", "武侠", "仙侠", "奇幻", "军事", "游戏", "体育"];
+
+// ----- 系统项目识别 (P0 修复) -----------------------------------------
+// 拆书 / DeepStudy / 系统占位项目不应出现在项目书架。
+// 后端有 GET /api/projects?include_system=true 时应同时过滤掉这些。
+const SYSTEM_NAMES = new Set(["拆书·公共", "__NF2_SYSTEM_DEEPSTUDY__"]);
+const SYSTEM_CATEGORIES = new Set(["study", "deepstudy", "__system_deepstudy"]);
+const SYSTEM_GENRES = new Set(["system", "study", "deepstudy"]);
+
+function isSystemProject(p: Project): boolean {
+  const name = (p.name || "").trim();
+  const category = (p.category || "").trim().toLowerCase();
+  const genre = (p.genre || "").trim().toLowerCase();
+  return (
+    SYSTEM_NAMES.has(name) ||
+    SYSTEM_CATEGORIES.has(category) ||
+    SYSTEM_GENRES.has(genre)
+  );
+}
 
 // ----- 状态 -> 颜色 + 标签 (P1 §5) -------------------------------------
 // spec 写的是规划,目前 backend Project.status 是 String(20) 无 enum 校验,
@@ -187,15 +209,10 @@ export function ProjectsPage() {
   const [genreFilter, setGenreFilter] = useState<string | "all">("all");
   // 今日任务 + 今日成本 (给左侧总览用)
   const [todayTasks, setTodayTasks] = useState<AgentTask[]>([]);
-  // 新建项目 modal
+  // 新建项目弹窗
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [genre, setGenre] = useState("玄幻");
-  const [targetWords, setTargetWords] = useState(3_000_000);
-  const [targetChapters, setTargetChapters] = useState(2000);
-  const [description, setDescription] = useState("");
-  const [pinnedOnCreate, setPinnedOnCreate] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // mount: 拉项目 + worker 状态
   useEffect(() => { refresh(); }, [refresh]);
@@ -221,9 +238,15 @@ export function ProjectsPage() {
     return () => { cancelled = true; window.clearInterval(h); };
   }, []);
 
+  // P0 修复: 过滤系统项目, 后续筛选/统计/默认选中/selected 都基于这个
+  const visibleProjects = useMemo(
+    () => projects.filter((p) => !isSystemProject(p)),
+    [projects],
+  );
+
   // 过滤后项目
   const filteredProjects = useMemo(() => {
-    let rows = projects;
+    let rows = visibleProjects;
     if (genreFilter !== "all") rows = rows.filter((p) => p.genre === genreFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -234,19 +257,25 @@ export function ProjectsPage() {
       );
     }
     return rows;
-  }, [projects, search, genreFilter]);
+  }, [visibleProjects, search, genreFilter]);
 
   // 分桶
   const buckets = useMemo(() => bucketProjects(filteredProjects), [filteredProjects]);
 
-  // 默认选中第一个项目 (mount 后,如果有项目)
+  // 默认选中第一个项目 (mount 后, 如果有项目)
   useEffect(() => {
-    if (selectedId == null && projects.length > 0) setSelectedId(projects[0].id);
-  }, [selectedId, projects]);
+    if (selectedId == null && visibleProjects.length > 0) {
+      setSelectedId(visibleProjects[0].id);
+    }
+    // 如果 selectedId 指向一个系统项目, 重置
+    if (selectedId != null && !visibleProjects.some((p) => p.id === selectedId)) {
+      setSelectedId(visibleProjects[0]?.id ?? null);
+    }
+  }, [selectedId, visibleProjects]);
 
   const selected = useMemo(
-    () => projects.find((p) => p.id === selectedId) ?? null,
-    [projects, selectedId],
+    () => visibleProjects.find((p) => p.id === selectedId) ?? null,
+    [visibleProjects, selectedId],
   );
 
   // 选中项目最近任务
@@ -259,11 +288,11 @@ export function ProjectsPage() {
   // 这里给 0 让用户能看到进度,但不显示虚高假数据
   const selectedAvgScore: number | null = null;
 
-  // 总览统计 (左侧)
-  const totalCount = projects.length;
-  const activeCount = projects.filter((p) => p.status === "active" || p.status === "running").length;
-  const pinnedCount = projects.filter((p) => p.pinned).length;
-  const archivedCount = projects.filter((p) => p.status === "archived" || p.status === "completed" || p.status === "done").length;
+  // 总览统计 (左侧) — 基于 visibleProjects, 不含系统项目
+  const totalCount = visibleProjects.length;
+  const activeCount = visibleProjects.filter((p) => p.status === "active" || p.status === "running").length;
+  const pinnedCount = visibleProjects.filter((p) => p.pinned).length;
+  const archivedCount = visibleProjects.filter((p) => p.status === "archived" || p.status === "completed" || p.status === "done").length;
   const todayCost = todayTasks.reduce((s, t) => s + (t.cost_usd ?? 0), 0);
   const todaySucceeded = todayTasks.filter((t) => t.status === "succeeded").length;
   const todayFailed = todayTasks.filter((t) => t.status === "failed").length;
@@ -277,24 +306,26 @@ export function ProjectsPage() {
     navigate(`/projects/${p.id}`);
   };
 
-  const onCreate = async () => {
-    if (!name.trim()) return;
-    setBusy(true);
+  const onCreate = async (
+    payload: CreateProjectPayload,
+    options: { openAfterCreate: boolean },
+  ) => {
+    setCreateBusy(true);
+    setCreateError(null);
     try {
-      const p = await createProject({
-        name: name.trim(), genre,
-        target_word_count: targetWords, target_chapter_count: targetChapters,
-        description: description.trim() || null,
-        pinned: pinnedOnCreate,
-      });
-      setCreating(false);
-      setName(""); setDescription(""); setPinnedOnCreate(false);
+      const p = await createProject(payload);
       await refresh();
       setSelectedId(p.id);
       select(p.id);
+      setCreating(false);
+      if (options.openAfterCreate) {
+        navigate(`/projects/${p.id}`);
+      }
     } catch (e: any) {
-      alert(e.message ?? String(e));
-    } finally { setBusy(false); }
+      setCreateError(e?.message ?? String(e));
+    } finally {
+      setCreateBusy(false);
+    }
   };
 
   const onDelete = async (p: Project) => {
@@ -322,6 +353,7 @@ export function ProjectsPage() {
 
   // 渲染 ----------------------------------------------------------------
   return (
+    <>
     <ShelfLayout
       left={
         <>
@@ -340,7 +372,7 @@ export function ProjectsPage() {
                 全部 ({totalCount})
               </button>
               {GENRES.map((g) => {
-                const n = projects.filter((p) => p.genre === g).length;
+                const n = visibleProjects.filter((p) => p.genre === g).length;
                 if (n === 0) return null;
                 return (
                   <button
@@ -423,7 +455,7 @@ export function ProjectsPage() {
       }
       center={
         <>
-          {projects.length === 0 ? (
+          {visibleProjects.length === 0 ? (
             <div className="empty-large">
               <div className="empty-large-glyph">书</div>
               <h3>书架还是空的</h3>
@@ -538,6 +570,14 @@ export function ProjectsPage() {
         </ShelfDetailPanel>
       }
     />
+    <CreateProjectDialog
+      open={creating}
+      busy={createBusy}
+      error={createError}
+      onClose={() => { if (!createBusy) setCreating(false); }}
+      onSubmit={onCreate}
+    />
+  </>
   );
 }
 
