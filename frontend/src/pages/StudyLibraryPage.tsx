@@ -26,7 +26,7 @@
  * 自动流程: 上传后后端自动拆章并创建 full run.
  * 前端轮询 GET /api/deepstudy/runs/{run_id} 2.5s 一次看进度.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   listDeepStudyLibrary,
@@ -37,6 +37,9 @@ import {
   cancelDeepStudyRun,
   listDeepStudyPatterns,
   listDeepStudyTechniques,
+  deleteStudyMaterialDeep,
+  batchDeleteStudyMaterials,
+  getDeepStudyDiagnostics,
 } from "../api";
 import type {
   LibraryItem,
@@ -48,6 +51,7 @@ import {
   ShelfSidePanel, ShelfDetailPanel,
   type ShelfColorType,
 } from "../components/shelf";
+import { AddBookModal } from "../components/study/AddBookModal";
 
 // P0-DeepStudy: debug flag — 控制高级模式按钮 (entities_only, relationships_only,
 // behaviors_only, techniques_only) 是否在 UI 中显示.
@@ -83,14 +87,43 @@ function labelOf(it: LibraryItem): string {
   return STATUS_TO_LABEL[it.study_status] ?? it.study_status;
 }
 
-// ----- 分组规则 (P2 §2) -----------------------------------------------
-// 书架上 5 个分层 (按进度从"老"到"新"排):
-//   1. 已完成        study_status = completed
-//   2. 拆解中        study_status = studying
-//   3. 待分章        study_status = uploaded | empty
-//   4. 失败/待修     study_status = failed | review_required
-//   5. 已暂停        study_status = paused
-//   6. 草稿          shelf_category = "草稿" (用户手动分桶, 没有就跳过)
+// ----- 分类规则 (P0-拆书书架) -----------------------------------------
+// 书架左侧分类: 分类优先, 不再按状态铺满一屏
+const SHELF_CATEGORIES = [
+  "全部",
+  "玄幻",
+  "都市",
+  "历史",
+  "科幻",
+  "言情",
+  "武侠",
+  "同人",
+  "古典",
+  "未分组",
+  "测试书",
+  "失败待修",
+];
+
+// 测试书命中规则
+function isTestBook(it: LibraryItem): boolean {
+  const title = it.title.toLowerCase();
+  const cat = (it.shelf_category ?? "").toLowerCase();
+  return (
+    ["short", "clean", "with_bom"].includes(title) ||
+    /^book_\d+/.test(title) ||
+    cat.includes("test") ||
+    cat.includes("测试")
+  );
+}
+
+// 决定一本书属于哪个分类
+function categoryOf(it: LibraryItem): string {
+  if (isTestBook(it)) return "测试书";
+  if (it.study_status === "failed" || it.study_status === "review_required") return "失败待修";
+  return it.shelf_category || "未分组";
+}
+
+// 旧的状态分组 (仍用于分类内的二次排序)
 type Group = {
   key: string;
   title: string;
@@ -123,23 +156,7 @@ const GROUPS: Group[] = [
     hint: "— 没有暂停的拆书 —",
     match: (it) => it.study_status === "paused",
   },
-  {
-    key: "drafts",    title: "草稿 / 测试书",
-    hint: "— shelf_category 含「草稿」的书会落在这里 —",
-    match: (it) => (it.shelf_category ?? "").includes("草稿") || (it.shelf_category ?? "").toLowerCase().includes("test"),
-  },
 ];
-
-function bucketItems(items: LibraryItem[]): Record<string, LibraryItem[]> {
-  const buckets: Record<string, LibraryItem[]> = {};
-  for (const g of GROUPS) buckets[g.key] = [];
-  for (const it of items) {
-    for (const g of GROUPS) {
-      if (g.match(it)) { buckets[g.key].push(it); break; }
-    }
-  }
-  return buckets;
-}
 
 // hover 提示 (P2 §2: 书脊应显示章节数 / 已处理 / 知识节点 / 关系 / 行为 / 技巧 / 知识密度)
 function buildHover(it: LibraryItem): string {
@@ -167,8 +184,29 @@ export function StudyLibraryPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState("全部");
   // 当前在跑的 run (id -> Read), ShelfDetailPanel 启动后轮询用
   const [activeRuns, setActiveRuns] = useState<Record<number, StudyRunRead>>({});
+
+  // P0-拆书书架: 加书弹窗 + 删除 + 批量管理
+  const [showAddBook, setShowAddBook] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<LibraryItem | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedBookIds, setSelectedBookIds] = useState<Set<number>>(new Set());
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchDeleteBusy, setBatchDeleteBusy] = useState(false);
+
+  // reloadLibrary: 可复用的刷新函数
+  const reloadLibrary = useCallback(() => {
+    listDeepStudyLibrary({ page: 1, page_size: 200 })
+      .then((r) => {
+        setData(r);
+        setErrorMsg(null);
+        if (selectedId == null && r.items.length > 0) setSelectedId(r.items[0].id);
+      })
+      .catch((e) => setErrorMsg(String(e?.message ?? e)));
+  }, [selectedId]);
 
   // mount: 拉书架
   useEffect(() => {
@@ -180,7 +218,6 @@ export function StudyLibraryPage() {
           if (cancelled) return;
           setData(r);
           setErrorMsg(null);
-          // 默认选第一本
           if (selectedId == null && r.items.length > 0) setSelectedId(r.items[0].id);
         })
         .catch((e) => {
@@ -190,7 +227,7 @@ export function StudyLibraryPage() {
         .finally(() => { if (!cancelled) setLoading(false); });
     };
     load();
-    const h = window.setInterval(load, 8000); // 8s 轻量轮询, 书架状态变化慢
+    const h = window.setInterval(load, 8000);
     return () => { cancelled = true; window.clearInterval(h); };
   }, [selectedId]);
 
@@ -213,10 +250,14 @@ export function StudyLibraryPage() {
     return () => window.clearInterval(h);
   }, [activeRuns]);
 
-  // 过滤后
+  // 过滤后 (分类 + 搜索 + 状态)
   const filtered = useMemo(() => {
     if (!data) return [];
     let rows = data.items;
+    // 分类过滤
+    if (categoryFilter !== "全部") {
+      rows = rows.filter((it) => categoryOf(it) === categoryFilter);
+    }
     if (statusFilter !== "all") rows = rows.filter((it) => it.study_status === statusFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -227,9 +268,9 @@ export function StudyLibraryPage() {
       );
     }
     return rows;
-  }, [data, search, statusFilter]);
+  }, [data, search, statusFilter, categoryFilter]);
 
-  const buckets = useMemo(() => bucketItems(filtered), [filtered]);
+  // buckets no longer used — category-based grouping replaces status-based grouping
   const selected = useMemo(
     () => data?.items.find((it) => it.id === selectedId) ?? null,
     [data, selectedId],
@@ -307,8 +348,71 @@ export function StudyLibraryPage() {
     } satisfies StudyRunRead;
   }, [activeRuns, selected]);
 
+  // 删除操作 ----------------------------------------------------------
+  const handleDeleteBook = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await deleteStudyMaterialDeep(deleteTarget.id, true);
+      setDeleteTarget(null);
+      setSelectedId(null);
+      reloadLibrary();
+    } catch (e: any) {
+      setErrorMsg(`删除失败: ${e?.message ?? e}`);
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedBookIds.size === 0) return;
+    setBatchDeleteBusy(true);
+    try {
+      await batchDeleteStudyMaterials(Array.from(selectedBookIds), true);
+      setSelectedBookIds(new Set());
+      setBatchDeleteOpen(false);
+      setSelectedId(null);
+      reloadLibrary();
+    } catch (e: any) {
+      setErrorMsg(`批量删除失败: ${e?.message ?? e}`);
+    } finally {
+      setBatchDeleteBusy(false);
+    }
+  };
+
+  const toggleBulkSelect = (id: number) => {
+    setSelectedBookIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // 渲染 ----------------------------------------------------------------
+  // 按分类分组
+  const categoryGroups = useMemo(() => {
+    if (categoryFilter !== "全部") {
+      return [{ key: categoryFilter, title: categoryFilter, items: filtered }];
+    }
+    const groups: Record<string, LibraryItem[]> = {};
+    for (const it of filtered) {
+      const cat = categoryOf(it);
+      (groups[cat] ??= []).push(it);
+    }
+    // 按 SHELF_CATEGORIES 顺序排列
+    const ordered: { key: string; title: string; items: LibraryItem[] }[] = [];
+    for (const cat of SHELF_CATEGORIES) {
+      if (cat === "全部") continue;
+      if (groups[cat] && groups[cat].length > 0) {
+        ordered.push({ key: cat, title: cat, items: groups[cat] });
+      }
+    }
+    return ordered;
+  }, [filtered, categoryFilter]);
+
   return (
+    <>
     <ShelfLayout
       title="拆书书架"
       subtitle="参考书 → 单书知识网络 → 7 类 Agent 深拆, 沉淀行为模式 + 写作技巧。"
@@ -318,38 +422,71 @@ export function StudyLibraryPage() {
           <ShelfToolbar>
             <input
               className="input"
-              placeholder="🔍 搜索书名 / 作者 / 分桶"
+              placeholder="搜索书名 / 作者 / 分类"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            {/* 分类芯片 */}
             <div className="shelf-toolbar-chips">
-              <button
-                className={`shelf-toolbar-chip ${statusFilter === "all" ? "active" : ""}`}
-                onClick={() => setStatusFilter("all")}
-              >
-                全部 ({data?.items.length ?? 0})
-              </button>
-              {Object.entries(STATUS_TO_LABEL).map(([k, label]) => {
-                const n = data?.items.filter((it) => it.study_status === k).length ?? 0;
-                if (n === 0) return null;
+              {SHELF_CATEGORIES.map((cat) => {
+                const n = cat === "全部"
+                  ? (data?.items.length ?? 0)
+                  : (data?.items.filter((it) => categoryOf(it) === cat).length ?? 0);
+                if (cat !== "全部" && n === 0) return null;
                 return (
                   <button
-                    key={k}
-                    className={`shelf-toolbar-chip ${statusFilter === k ? "active" : ""}`}
-                    onClick={() => setStatusFilter(k)}
+                    key={cat}
+                    className={`shelf-toolbar-chip ${categoryFilter === cat ? "active" : ""}`}
+                    onClick={() => setCategoryFilter(cat)}
                   >
-                    {label} ({n})
+                    {cat} ({n})
                   </button>
                 );
               })}
             </div>
-            <button
-              className="primary"
-              onClick={() => navigate("/study")}
-              title="上传或粘贴参考书；上传后会自动拆章并排队深度拆解"
-            >
-              📤 上传新书
-            </button>
+            {/* 操作按钮 */}
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="primary"
+                onClick={() => setShowAddBook(true)}
+                title="上传或粘贴参考书；上传后会自动拆章并排队深度拆解"
+              >
+                + 加书
+              </button>
+              <button
+                className={bulkMode ? "shelf-toolbar-chip active" : "shelf-toolbar-chip"}
+                onClick={() => { setBulkMode(!bulkMode); setSelectedBookIds(new Set()); }}
+              >
+                {bulkMode ? "退出批量" : "批量管理"}
+              </button>
+              {bulkMode && (
+                <>
+                  <button
+                    className="shelf-toolbar-chip"
+                    style={{ color: "var(--accent-red, #c45858)" }}
+                    disabled={selectedBookIds.size === 0}
+                    onClick={() => setBatchDeleteOpen(true)}
+                  >
+                    删除选中 ({selectedBookIds.size})
+                  </button>
+                  <button
+                    className="shelf-toolbar-chip"
+                    style={{ color: "var(--accent-red, #c45858)" }}
+                    onClick={() => {
+                      const testIds = filtered.filter(isTestBook).map((it) => it.id);
+                      if (testIds.length === 0) {
+                        setErrorMsg("没有检测到测试书。");
+                        return;
+                      }
+                      setSelectedBookIds(new Set(testIds));
+                      setBatchDeleteOpen(true);
+                    }}
+                  >
+                    清理测试书
+                  </button>
+                </>
+              )}
+            </div>
           </ShelfToolbar>
 
           {errorMsg && (
@@ -408,33 +545,45 @@ export function StudyLibraryPage() {
             <div className="empty-large">
               <div className="empty-large-glyph">📚</div>
               <h3>书架还是空的</h3>
-              <p>点左上方「📤 上传新书」传入参考书；上传完成后系统会自动拆章、排队深度拆解，并在这里刷新进度。</p>
+              <p>点左上方「+ 加书」传入参考书；上传完成后系统会自动拆章、排队深度拆解，并在这里刷新进度。</p>
             </div>
           ) : (
-            GROUPS.map((g) => (
+            categoryGroups.map((g) => (
               <ShelfRow
                 key={g.key}
                 title={g.title}
-                subtitle={`(${buckets[g.key].length} 本)`}
-                emptyHint={g.hint}
+                subtitle={`(${g.items.length} 本)`}
+                emptyHint={`— ${g.title}分类下没有书 —`}
               >
-                {buckets[g.key].map((it) => {
+                {g.items.map((it) => {
                   const processedPct = it.chapter_count > 0
                     ? Math.min(100, Math.round((it.processed_chapters / it.chapter_count) * 100))
                     : 0;
                   return (
-                    <ShelfBook
-                      key={it.id}
-                      title={it.title}
-                      subtitle={`${it.author || "—"} · ${it.shelf_category ?? "未分桶"}`}
-                      status={labelOf(it)}
-                      progressPct={processedPct}
-                      progressLabel={`${it.processed_chapters}/${it.chapter_count} 章 · 实体 ${it.entity_count}`}
-                      colorType={colorOf(it)}
-                      selected={selectedId === it.id}
-                      onClick={() => setSelectedId(it.id)}
-                      hoverHint={buildHover(it)}
-                    />
+                    <div key={it.id} style={{ position: "relative" }}>
+                      {bulkMode && (
+                        <input
+                          type="checkbox"
+                          checked={selectedBookIds.has(it.id)}
+                          onChange={() => toggleBulkSelect(it.id)}
+                          style={{
+                            position: "absolute", top: 4, left: 4, zIndex: 2,
+                            width: 16, height: 16, cursor: "pointer",
+                          }}
+                        />
+                      )}
+                      <ShelfBook
+                        title={it.title}
+                        subtitle={`${it.author || "—"} · ${it.shelf_category ?? "未分组"}`}
+                        status={labelOf(it)}
+                        progressPct={processedPct}
+                        progressLabel={`${it.processed_chapters}/${it.chapter_count} 章 · 实体 ${it.entity_count}`}
+                        colorType={colorOf(it)}
+                        selected={selectedId === it.id}
+                        onClick={() => setSelectedId(it.id)}
+                        hoverHint={buildHover(it)}
+                      />
+                    </div>
                   );
                 })}
               </ShelfRow>
@@ -466,20 +615,24 @@ export function StudyLibraryPage() {
                 onClick={() => navigate(`/study/books/${selected.id}/graph`)}
                 title="进入单书知识网络"
               >
-                🌐 打开知识网络
+                打开知识网络
               </button>
-              <button onClick={() => navigate("/study")} title="进入上传和拆书素材管理">
-                📚 素材管理
+              <button
+                style={{ color: "var(--accent-red, #c45858)" }}
+                onClick={() => setDeleteTarget(selected)}
+                title="深度删除此书及所有衍生产物"
+              >
+                删除此书
               </button>
               {selectedRun && selectedRun.status === "running" && (
-                <button onClick={() => pauseRun(selectedRun.id)}>⏸ 暂停</button>
+                <button onClick={() => pauseRun(selectedRun.id)}>暂停</button>
               )}
               {selectedRun && selectedRun.status === "paused" && (
-                <button onClick={() => resumeRun(selectedRun.id)}>▶ 继续</button>
+                <button onClick={() => resumeRun(selectedRun.id)}>继续</button>
               )}
               {selectedRun && (selectedRun.status === "running" || selectedRun.status === "paused") && (
                 <button onClick={() => cancelRun(selectedRun.id)} style={{ color: "var(--accent-red, #c45858)" }}>
-                  ✕ 取消
+                  取消
                 </button>
               )}
             </>
@@ -510,7 +663,7 @@ export function StudyLibraryPage() {
                     }
                     title="重跑上一次 run 失败的 stage (其它不动)"
                   >
-                    🔧 修复失败
+                    修复失败
                   </button>
                   {ENABLE_DEEPSTUDY_DEBUG && (
                     <>
@@ -518,42 +671,13 @@ export function StudyLibraryPage() {
                         className="tiny"
                         onClick={() => startRun(selected, "full")}
                         disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                        title="调试补跑：全量重建 DeepStudy 流水线"
                       >
                         补跑 full
                       </button>
-                      <button
-                        className="tiny"
-                        onClick={() => startRun(selected, "entities_only")}
-                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                        title="只跑 ChapterProfiler + Entity + SceneBeat"
-                      >
-                        👤 仅实体
-                      </button>
-                      <button
-                        className="tiny"
-                        onClick={() => startRun(selected, "relationships_only")}
-                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                        title="只跑 ChapterProfiler + Relationship"
-                      >
-                        🔗 仅关系
-                      </button>
-                      <button
-                        className="tiny"
-                        onClick={() => startRun(selected, "behaviors_only")}
-                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                        title="只跑 ChapterProfiler + Behavior"
-                      >
-                        🧩 仅行为
-                      </button>
-                      <button
-                        className="tiny"
-                        onClick={() => startRun(selected, "techniques_only")}
-                        disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}
-                        title="只跑 Behavior + Technique"
-                      >
-                        ✍️ 仅技巧
-                      </button>
+                      <button className="tiny" onClick={() => startRun(selected, "entities_only")} disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}>仅实体</button>
+                      <button className="tiny" onClick={() => startRun(selected, "relationships_only")} disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}>仅关系</button>
+                      <button className="tiny" onClick={() => startRun(selected, "behaviors_only")} disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}>仅行为</button>
+                      <button className="tiny" onClick={() => startRun(selected, "techniques_only")} disabled={!!selectedRun && (selectedRun.status === "running" || selectedRun.status === "queued")}>仅技巧</button>
                     </>
                   )}
                 </div>
@@ -582,6 +706,82 @@ export function StudyLibraryPage() {
         </ShelfDetailPanel>
       }
     />
+
+    {/* 加书弹窗 */}
+    {showAddBook && (
+      <AddBookModal
+        onClose={() => setShowAddBook(false)}
+        onCreated={(bookId) => {
+          setShowAddBook(false);
+          setSelectedId(bookId);
+          reloadLibrary();
+        }}
+      />
+    )}
+
+    {/* 单本删除确认弹窗 */}
+    {deleteTarget && (
+      <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+        <div className="add-book-modal" onClick={(e) => e.stopPropagation()} style={{ width: 400 }}>
+          <div className="modal-header">
+            <h3>删除确认</h3>
+            <button className="modal-close" onClick={() => setDeleteTarget(null)}>✕</button>
+          </div>
+          <div style={{ padding: 16 }}>
+            <p style={{ fontSize: 13, marginBottom: 12 }}>
+              确定要删除 <strong>{deleteTarget.title}</strong> 吗？
+            </p>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              将删除: 章节 {deleteTarget.chapter_count} · 实体 {deleteTarget.entity_count} · 关系 {deleteTarget.relationship_count}
+              {" · "}伏笔 {deleteTarget.foreshadow_count} · 行为 {deleteTarget.behavior_count} · 技巧 {deleteTarget.technique_count}
+              <br /><strong>此操作不可恢复。</strong>
+            </div>
+            <div className="form-actions">
+              <button className="btn secondary" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>取消</button>
+              <button className="btn primary" style={{ background: "#c45858" }} onClick={handleDeleteBook} disabled={deleteBusy}>
+                {deleteBusy ? "删除中…" : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* 批量删除确认弹窗 */}
+    {batchDeleteOpen && (
+      <div className="modal-overlay" onClick={() => setBatchDeleteOpen(false)}>
+        <div className="add-book-modal" onClick={(e) => e.stopPropagation()} style={{ width: 450 }}>
+          <div className="modal-header">
+            <h3>批量删除确认</h3>
+            <button className="modal-close" onClick={() => setBatchDeleteOpen(false)}>✕</button>
+          </div>
+          <div style={{ padding: 16 }}>
+            <p style={{ fontSize: 13, marginBottom: 12 }}>
+              将删除以下 <strong>{selectedBookIds.size}</strong> 本书及所有衍生产物:
+            </p>
+            <div style={{ maxHeight: 200, overflow: "auto", fontSize: 12, marginBottom: 16 }}>
+              {data?.items
+                .filter((it) => selectedBookIds.has(it.id))
+                .map((it) => (
+                  <div key={it.id} style={{ padding: "2px 0" }}>
+                    - {it.title} ({labelOf(it)})
+                  </div>
+                ))}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--accent-red, #c45858)", marginBottom: 16 }}>
+              <strong>此操作不可恢复。</strong>
+            </div>
+            <div className="form-actions">
+              <button className="btn secondary" onClick={() => setBatchDeleteOpen(false)} disabled={batchDeleteBusy}>取消</button>
+              <button className="btn primary" style={{ background: "#c45858" }} onClick={handleBatchDelete} disabled={batchDeleteBusy}>
+                {batchDeleteBusy ? "删除中…" : "确认删除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -658,6 +858,11 @@ export function StudyBookGraphPage() {
   const [nodeDetail, setNodeDetail] = useState<NodeDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{
+    material_id: number; title: string; study_status: string;
+    worker_state: string | null; latest_run: any | null;
+    counts: Record<string, number>; reason: string; message: string; suggested_action: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!numericId) return;
@@ -668,6 +873,14 @@ export function StudyBookGraphPage() {
       .catch((e) => { if (!cancelled) setError(String(e?.message ?? e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  }, [numericId]);
+
+  // P0-4: 拉图谱诊断 (空图时告诉用户原因)
+  useEffect(() => {
+    if (!numericId) return;
+    getDeepStudyDiagnostics(numericId)
+      .then((d) => setDiagnostics(d))
+      .catch(() => {});
   }, [numericId]);
 
   // 点节点拉详情
@@ -722,12 +935,34 @@ export function StudyBookGraphPage() {
         <div className="muted small" style={{ padding: 24 }}>加载知识网络…</div>
       ) : !graph ? (
         <div className="muted small" style={{ padding: 24 }}>未拿到网络数据。</div>
-      ) : graph.nodes.length === 0 ? (
+      ) : graph.nodes.length === 0 || (graph.nodes.length === 1 && graph.nodes[0].id.startsWith("book:")) ? (
         <div className="empty-large">
           <div className="empty-large-glyph">🌐</div>
-          <h3>这本书还没产生知识节点</h3>
-          <p>这本书上传后会自动进入 full 深度拆解；后台跑完后这里会自动填上 Entity / SceneBeat / Foreshadow / Behavior / Technique 节点。<br />
-          如果状态失败，回到 <a href="/study/library">拆书书架</a> 使用「修复失败」。</p>
+          <h3>图谱为空</h3>
+          {diagnostics ? (
+            <div style={{ textAlign: "left", maxWidth: 480, margin: "0 auto", fontSize: 13 }}>
+              <div style={{ marginBottom: 12 }}>
+                <strong>原因:</strong> {diagnostics.message}
+              </div>
+              <div style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+                <div>当前数据:</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 4 }}>
+                  <span>章节: {diagnostics.counts.chapters ?? 0}</span>
+                  <span>Run: {diagnostics.latest_run?.status ?? "无"}</span>
+                  <span>实体: {diagnostics.counts.entities ?? 0}</span>
+                  <span>关系: {diagnostics.counts.relationships ?? 0}</span>
+                  <span>行为: {diagnostics.counts.behaviors ?? 0}</span>
+                  <span>技巧: {diagnostics.counts.techniques ?? 0}</span>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--accent-gold, #d6a64e)" }}>
+                建议: {diagnostics.suggested_action}
+              </div>
+            </div>
+          ) : (
+            <p>这本书上传后会自动进入 full 深度拆解；后台跑完后这里会自动填上 Entity / SceneBeat / Foreshadow / Behavior / Technique 节点。<br />
+            如果状态失败，回到 <a href="/study/library">拆书书架</a> 使用「修复失败」。</p>
+          )}
         </div>
       ) : (
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 320px", minHeight: 0 }}>

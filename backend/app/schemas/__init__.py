@@ -89,6 +89,7 @@ from app.schemas.study import (
     StudyForeshadowSummary,
     StudyMaterialCreate,
     StudyMaterialDetail,
+    StudyMaterialFromTextCreate,
     StudyMaterialOverview,
     StudyMaterialRead,
     StudyMaterialUpdate,

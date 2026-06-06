@@ -31,6 +31,22 @@ class StudyMaterialUpdate(BaseModel):
     author: str | None = None
     project_id: int | None = None
     raw_text: str | None = None
+    # P0-拆书书架: 支持更新分类和标签
+    shelf_category: str | None = None
+    extra: dict[str, Any] | None = None
+
+
+class StudyMaterialFromTextCreate(BaseModel):
+    """P0-拆书书架: 粘贴正文 + 自动分章 + 自动 DeepStudy."""
+    title: str = Field(..., min_length=1, max_length=200)
+    author: str = ""
+    raw_text: str
+    project_id: int | None = None
+    shelf_category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    auto_chapterize: bool = True
+    auto_deepstudy: bool = True
+    min_chapter_chars: int = 200
 
 
 class StudyMaterialRead(BaseModel):

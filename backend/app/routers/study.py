@@ -32,6 +32,7 @@ from app.models.task import AgentTask
 from app.schemas import (
     APIResponse,
     BehaviorPatternRead,
+    StudyMaterialFromTextCreate,
     ChapterizeRequest,
     StudyBehaviorExtractRequest,
     StudyBehaviorExtractResponse,
@@ -346,11 +347,53 @@ async def create_material(
     return {"ok": True, "data": StudyMaterialRead.from_orm_trimmed(row)}
 
 
+@router.post("/materials/from-text", response_model=APIResponse[StudyMaterialRead])
+async def create_material_from_text(
+    body: StudyMaterialFromTextCreate,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[StudyMaterialRead]:
+    """P0-拆书书架: 粘贴正文 + 自动分章 + 自动 DeepStudy.
+
+    一站式接口: 创建材料 → 自动分章 → 自动创建 DeepStudy run → 启动 Worker.
+    """
+    if not body.title.strip():
+        raise bad_request("标题不能为空。")
+    if not body.raw_text.strip():
+        raise bad_request("正文不能为空。")
+
+    row = StudyMaterial(
+        project_id=body.project_id,
+        title=body.title.strip(),
+        author=(body.author or "").strip(),
+        source="paste",
+        raw_text=body.raw_text,
+        status="draft",
+        study_status="uploaded",
+        shelf_category=body.shelf_category or "未分组",
+        extra={"tags": body.tags or []},
+    )
+    db.add(row)
+    await db.flush()
+
+    if body.auto_chapterize:
+        await _chapterize_and_queue_deepstudy(
+            db,
+            row,
+            min_chapter_chars=body.min_chapter_chars,
+            queue_deepstudy=body.auto_deepstudy,
+            auto_start_worker=body.auto_deepstudy,
+        )
+
+    return {"ok": True, "data": StudyMaterialRead.from_orm_trimmed(row)}
+
+
 @router.post("/materials/upload/batch")
 async def upload_materials_batch(
     files: list[UploadFile] = File(...),
     auto_chapterize: bool = Form(default=True),
     min_chapter_chars: int = Form(default=200),
+    shelf_category: str | None = Form(default=None),
+    tags_json: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """R19: accept up to 5 books in a single multipart POST.
@@ -375,6 +418,15 @@ async def upload_materials_batch(
         raise bad_request("至少选择一个文件。")
     if len(files) > 5:
         raise bad_request(f"批量上传最多 5 个文件,收到 {len(files)}。")
+    # Parse tags_json from form
+    parsed_tags: list[str] = []
+    if tags_json:
+        try:
+            parsed_tags = json.loads(tags_json)
+            if not isinstance(parsed_tags, list):
+                parsed_tags = []
+        except (json.JSONDecodeError, TypeError):
+            parsed_tags = []
     results: list[dict[str, Any]] = []
     for f in files:
         try:
@@ -391,6 +443,8 @@ async def upload_materials_batch(
                 source="upload",
                 raw_text=raw,
                 status="draft" if raw else "empty",
+                shelf_category=shelf_category or "未分组",
+                extra={"tags": parsed_tags} if parsed_tags else None,
             )
             db.add(row)
             await db.flush()
@@ -772,13 +826,45 @@ async def update_material(
 
 @router.delete("/materials/{material_id}", response_model=APIResponse[dict])
 async def delete_material(
-    material_id: int, db: AsyncSession = Depends(get_db)
+    material_id: int,
+    force: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
-    row = await db.get(StudyMaterial, material_id)
-    if row is None:
-        raise not_found("StudyMaterial", material_id)
-    await db.delete(row)
-    return {"ok": True, "data": {"deleted": material_id}}
+    """P0-拆书书架: 深度删除材料及其所有衍生产物."""
+    from app.services.study_delete_service import StudyDeleteService
+    result = await StudyDeleteService().delete_material_deep(
+        db, material_id, force=force,
+    )
+    return {"ok": True, "data": result}
+
+
+@router.post("/materials/batch-delete", response_model=APIResponse[dict])
+async def batch_delete_materials(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[dict]:
+    """P0-拆书书架: 批量深度删除材料.
+
+    Request: {"ids": [1, 2, 3], "force": true}
+    """
+    from app.services.study_delete_service import StudyDeleteService
+
+    ids = body.get("ids", [])
+    force = body.get("force", False)
+    if not ids or not isinstance(ids, list):
+        raise bad_request("ids 必须是非空数组。")
+
+    svc = StudyDeleteService()
+    deleted_list: list[dict] = []
+    failed_list: list[dict] = []
+    for mid in ids:
+        try:
+            result = await svc.delete_material_deep(db, int(mid), force=force)
+            deleted_list.append(result)
+        except Exception as exc:
+            failed_list.append({"id": mid, "error": str(exc)})
+
+    return {"ok": True, "data": {"deleted": deleted_list, "failed": failed_list}}
 
 
 @router.post("/materials/{material_id}/chapterize", response_model=APIResponse[StudyMaterialDetail])

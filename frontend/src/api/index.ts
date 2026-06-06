@@ -320,6 +320,46 @@ export const getStudyMaterial = (id: number, includeText = false) =>
   api.get<StudyMaterialDetail>(`/api/study/materials/${id}?include_text=${includeText ? 1 : 0}`);
 export const updateStudyMaterial = (id: number, body: Partial<StudyMaterial>) =>
   api.patch<StudyMaterial>(`/api/study/materials/${id}`, body);
+// P0-拆书书架: 粘贴正文 + 自动分章 + 自动 DeepStudy
+export const createStudyMaterialFromText = (body: {
+  title: string;
+  author?: string;
+  raw_text: string;
+  project_id?: number | null;
+  shelf_category?: string | null;
+  tags?: string[];
+  auto_chapterize?: boolean;
+  auto_deepstudy?: boolean;
+  min_chapter_chars?: number;
+}) => api.post<StudyMaterial>("/api/study/materials/from-text", body);
+
+// P0-拆书书架: 深度删除 (含衍生产物清理)
+export const deleteStudyMaterialDeep = (id: number, force = false) =>
+  api.delete<{ material_id: number; title: string; deleted: Record<string, number> }>(
+    `/api/study/materials/${id}${force ? "?force=true" : ""}`,
+  );
+
+// P0-拆书书架: 批量删除
+export const batchDeleteStudyMaterials = (ids: number[], force = false) =>
+  api.post<{
+    deleted: Array<{ id: number; title?: string; deleted?: Record<string, number> }>;
+    failed: Array<{ id: number; error: string }>;
+  }>("/api/study/materials/batch-delete", { ids, force });
+
+// P0-拆书书架: 图谱诊断
+export const getDeepStudyDiagnostics = (materialId: number) =>
+  api.get<{
+    material_id: number;
+    title: string;
+    study_status: string;
+    worker_state: string | null;
+    latest_run: { id: number; status: string; current_stage: string | null; error: string | null } | null;
+    counts: Record<string, number>;
+    reason: string;
+    message: string;
+    suggested_action: string;
+  }>(`/api/deepstudy/materials/${materialId}/diagnostics`);
+
 export const deleteStudyMaterial = (id: number) =>
   api.delete<{ deleted: number }>(`/api/study/materials/${id}`);
 export const chapterizeStudyMaterial = (id: number, body: { min_chapter_chars?: number; pattern?: "auto" | "chinese" | "english" } = {}) =>

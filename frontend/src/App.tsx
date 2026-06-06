@@ -108,14 +108,11 @@ export default function App() {
         <Route path="/models" element={<ModelConfigPage />} />
         <Route path="/models/providers/:providerId" element={<ModelProviderDetailPage />} />
         <Route path="/model-observability" element={<ModelObservabilityPanel projectId={undefined} />} />
-        {/* P0 (01 §6) 路由基础规范: /study/library 是 P2 拆书书架
-         * (主入口, 查书/看自动拆解进度/看知识网络).
-         * 旧 /study 重新挂上旧版 StudyPage, 给书架上的"📤 上传 /
-         * 粘贴 / 行为模式"按钮当落地页. P2 commit 漏了这一步,
-         * 旧路径被注释承诺"仍能直接打开", 实际把 /study 硬重定向
-         * 到 /study/library 自己, 让按钮 click 看似无响应.
-         * 这里改成渲染旧版 StudyPage, 书架 + 上传页各司其职. */}
-        <Route path="/study" element={<StudyPage />} />
+        {/* P0-拆书书架: /study/library 是唯一主入口 (书架+上传+删除+分类+诊断).
+         * 旧 /study 重定向到 /study/library, 旧 StudyPage 仍可独立访问.
+         * 新增 /study/upload 兼容旧页面的直达链接. */}
+        <Route path="/study" element={<Navigate to="/study/library" replace />} />
+        <Route path="/study/upload" element={<StudyPage />} />
         <Route path="/study/library" element={<StudyLibraryPage />} />
         <Route path="/study/books/:materialId/graph" element={<StudyBookGraphPage />} />
         <Route path="/behavior" element={<BehaviorPage />} />

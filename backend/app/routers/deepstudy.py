@@ -699,6 +699,162 @@ async def get_node_detail(
 
 
 # ============================================================
+# P0-拆书书架: 图谱诊断 — 空图原因分析
+# ============================================================
+
+@router.get("/materials/{material_id}/diagnostics")
+async def get_diagnostics(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """P0-4: 诊断图谱为空的原因, 返回结构化诊断信息.
+
+    帮助用户理解: 为什么拆完了但图谱为空, 以及下一步应该怎么做.
+    """
+    from app.models.deepstudy import (
+        Entity, Relationship, SceneBeat, ForeshadowChain,
+        WritingTechnique, ChapterAnalysis, BehaviorPatternEvidence,
+    )
+    from app.models.study import StudyChapter, BehaviorPattern, GraphNode, GraphEdge
+
+    material = await db.get(StudyMaterial, material_id)
+    if material is None:
+        raise not_found("StudyMaterial", material_id)
+
+    # 计数
+    chapter_count = (await db.execute(
+        select(func.count()).select_from(StudyChapter).where(StudyChapter.material_id == material_id)
+    )).scalar() or 0
+
+    entity_count = (await db.execute(
+        select(func.count()).select_from(Entity).where(Entity.material_id == material_id)
+    )).scalar() or 0
+
+    relationship_count = (await db.execute(
+        select(func.count()).select_from(Relationship).where(Relationship.material_id == material_id)
+    )).scalar() or 0
+
+    scene_beat_count = (await db.execute(
+        select(func.count()).select_from(SceneBeat).where(SceneBeat.material_id == material_id)
+    )).scalar() or 0
+
+    behavior_count = (await db.execute(
+        select(func.count()).select_from(BehaviorPattern).where(BehaviorPattern.source_material_id == material_id)
+    )).scalar() or 0
+
+    technique_count = (await db.execute(
+        select(func.count()).select_from(WritingTechnique).where(WritingTechnique.material_id == material_id)
+    )).scalar() or 0
+
+    chapter_analysis_count = (await db.execute(
+        select(func.count()).select_from(ChapterAnalysis).where(ChapterAnalysis.material_id == material_id)
+    )).scalar() or 0
+
+    graph_node_count = (await db.execute(
+        select(func.count()).select_from(GraphNode).where(GraphNode.source_material_id == material_id)
+    )).scalar() or 0
+
+    graph_edge_count = 0
+    if graph_node_count > 0:
+        graph_node_ids = (await db.execute(
+            select(GraphNode.id).where(GraphNode.source_material_id == material_id)
+        )).scalars().all()
+        if graph_node_ids:
+            graph_edge_count = (await db.execute(
+                select(func.count()).select_from(GraphEdge).where(
+                    (GraphEdge.source_node_id.in_(graph_node_ids))
+                    | (GraphEdge.target_node_id.in_(graph_node_ids))
+                )
+            )).scalar() or 0
+
+    # Worker 状态
+    worker_state = "unknown"
+    try:
+        from app.workers.worker import get_worker
+        w = get_worker()
+        worker_state = "running" if w.is_running else "stopped"
+    except Exception:
+        worker_state = "unavailable"
+
+    # 最新 run
+    latest_run_row = (await db.execute(
+        select(StudyRun)
+        .where(StudyRun.material_id == material_id)
+        .order_by(StudyRun.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    latest_run = None
+    if latest_run_row:
+        latest_run = {
+            "id": latest_run_row.id,
+            "status": latest_run_row.status,
+            "current_stage": latest_run_row.current_stage,
+            "error": latest_run_row.error,
+        }
+
+    # 诊断逻辑
+    reason = "OK"
+    message = "图谱正常。"
+    suggested_action = ""
+
+    if chapter_count == 0:
+        reason = "NO_CHAPTERS"
+        message = "尚未分章。"
+        suggested_action = "上传或粘贴正文后系统会自动分章。"
+    elif latest_run is None:
+        reason = "NO_RUN"
+        message = "尚未创建 DeepStudy run。"
+        suggested_action = "点击「修复失败」启动拆解流程。"
+    elif latest_run["status"] == "queued" and worker_state == "stopped":
+        reason = "WORKER_STOPPED_OR_RUN_NOT_EXECUTED"
+        message = "Worker 当前停止，实体抽取没有执行。"
+        suggested_action = "启动 Worker 或点击「修复失败」。"
+    elif latest_run["status"] == "failed":
+        reason = "RUN_FAILED"
+        message = f"拆解失败: {latest_run['error'] or '未知错误'}"
+        suggested_action = "点击「修复失败」重试。"
+    elif entity_count == 0:
+        reason = "NO_ENTITIES"
+        message = "实体抽取未产出任何实体。"
+        suggested_action = "检查 run 状态，尝试「修复失败」或重新启动 full run。"
+    elif relationship_count == 0 and entity_count > 0:
+        reason = "NO_RELATIONSHIPS"
+        message = "实体已提取，但关系分析未产出。"
+        suggested_action = "尝试「修复失败」或启动 relationships_only 模式。"
+    elif graph_node_count == 0 and entity_count > 0:
+        reason = "NO_GRAPH_NODES"
+        message = "DeepStudy 已产出实体/关系，但尚未物化到图谱。"
+        suggested_action = "在知识网络页面检查，或尝试 materialise 操作。"
+
+    counts = {
+        "chapters": chapter_count,
+        "chapter_analyses": chapter_analysis_count,
+        "entities": entity_count,
+        "relationships": relationship_count,
+        "scene_beats": scene_beat_count,
+        "foreshadows": (await db.execute(
+            select(func.count()).select_from(ForeshadowChain).where(ForeshadowChain.material_id == material_id)
+        )).scalar() or 0,
+        "behaviors": behavior_count,
+        "techniques": technique_count,
+        "graph_nodes": graph_node_count,
+        "graph_edges": graph_edge_count,
+    }
+
+    return {
+        "material_id": material_id,
+        "title": material.title,
+        "study_status": material.study_status,
+        "worker_state": worker_state,
+        "latest_run": latest_run,
+        "counts": counts,
+        "reason": reason,
+        "message": message,
+        "suggested_action": suggested_action,
+    }
+
+
+# ============================================================
 # Library views — sections 6.7 / 6.8
 # ============================================================
 
