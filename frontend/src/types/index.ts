@@ -459,12 +459,51 @@ export type StudyMaterial = {
   study_progress?: Record<string, any> | null;
   knowledge_score?: number | null;
   last_deepstudied_at?: string | null;
+  // === P0 返工 Phase 3.1: 书架二层 + 诊断元数据 ===
+  shelf_id?: number | null;
+  genre?: string | null;
+  tags?: string[];
+  cover_color?: string | null;
+  study_quality_score?: number | null;
+  graph_materialized_at?: string | null;
   // Only populated on the detail view (and only if ``?include_text=1``
   // was sent). The list endpoint sends 0 to keep payloads small.
   raw_text_length: number;
   extra: Record<string, any> | null;
   created_at: string;
   updated_at: string;
+};
+
+// ----- P0 返工 Phase 3.1: 书架二层 (StudyShelf + BookDashboard) -----
+
+export type StudyShelf = {
+  id: number;             // 0 = virtual "未分组" shelf
+  project_id: number | null;
+  name: string;
+  description: string;
+  display_order: number;
+  color: string | null;
+  book_count: number;
+  top_genres: string[];
+  top_tags: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type StudyBookDashboard = {
+  material: StudyMaterial;
+  shelf: StudyShelf | null;
+  latest_run: Record<string, any> | null;
+  chapter_count: number;
+  character_count: number;
+  behavior_count: number;
+  foreshadow_count: number;
+  quality_timeline: Array<{ kind: string; score: number; at: string | null }>;
+  graph_materialized: boolean;
+  graph_node_count: number;
+  graph_edge_count: number;
+  project_id: number | null;
+  project_graph_size: Record<string, number>;
 };
 
 export type StudyMaterialDetail = StudyMaterial & {
@@ -655,6 +694,12 @@ export type MaterialiseSummary = {
   edges_created: number;
 };
 
+// P0 返工 Phase 4.3 附带: GraphBundle 给前端统一读图
+export type GraphBundle = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
 // R24: relationship LLM enrichment. The endpoint
 // ``POST /api/study/materials/{id}/relationships/enrich`` runs
 // one LLM call per co-occurrence pair to classify it into a
@@ -724,6 +769,42 @@ export type GraphNodeKind =
   | "faction"
   | "location"
   | "other";
+
+// P0 返工 Phase 4.3: 图谱诊断
+export type GraphDiagnosticsIssue = {
+  severity: "info" | "warn" | "error";
+  code: string;
+  message: string;
+  fix_hint?: string | null;
+};
+
+export type GraphDiagnosticsRead = {
+  project_id: number;
+  node_count: number;
+  edge_count: number;
+  nodes_by_kind: Record<string, number>;
+  edges_by_relation: Record<string, number>;
+  contributing_materials: Array<{
+    id: number;
+    title: string;
+    author?: string | null;
+    node_count: number;
+    study_status?: string | null;
+    graph_materialized_at?: string | null;
+  }>;
+  last_materialised_at?: string | null;
+  // P0 返工 Phase 5.5: 上次物化错误
+  last_materialise_error?: string | null;
+  is_empty: boolean;
+  issues: GraphDiagnosticsIssue[];
+  recommended_actions: Array<{
+    code: string;
+    label: string;
+    target: string;
+    method?: string;
+    priority: number;
+  }>;
+};
 
 export type GraphNode = {
   id: number;
@@ -1604,4 +1685,97 @@ export type TemplateUsageRead = {
   template_id: number;
   total_snapshots: number;
   chapter_ids: number[];
+};
+
+// ===== P0 返工：Workbench 聚合状态 =====
+export type WorkbenchTopStats = {
+  today_succeeded: number;
+  running: number;
+  blocked: number;
+  today_cost_usd: number;
+  today_words: number;
+  api_healthy: boolean;
+  api_status: string;
+  worker_state: string;
+};
+
+export type WorkbenchDomainState = {
+  label: string;
+  icon: string;
+  status: "running" | "idle" | "failed" | "blocked";
+  current_agent: string;
+  current_action: string;
+  progress: number | null;
+  artifact_summary: string;
+  error: string | null;
+  task_id: number | null;
+  started_at: string | null;
+};
+
+export type WorkbenchMainTask = {
+  id: number;
+  title: string;
+  domain: string;
+  task_type: string;
+  task_kind: string | null;
+  progress_current: number;
+  progress_total: number;
+  started_at: string | null;
+};
+
+export type WorkbenchLiveState = {
+  domains: Record<string, WorkbenchDomainState>;
+  main_task: WorkbenchMainTask | null;
+  as_of: string;
+};
+
+// ===== P0 返工 Phase 2.3+2.4: Prompt 覆盖率 / 追溯 =====
+export type PromptCoverageRow = {
+  role_key: string;
+  role_label: string;
+  category: string;
+};
+
+export type PromptCoverageSummary = {
+  total_cells: number;
+  covered_cells: number;
+  missing_cells: number;
+  coverage_pct: number;
+};
+
+export type PromptCoverage = {
+  rows: PromptCoverageRow[];
+  genres: string[];
+  cells: Record<string, number>;   // "drafter:urban_smooth" -> 1/0
+  summary: PromptCoverageSummary;
+};
+
+export type PromptUsageRun = {
+  id: number;
+  status: string;
+  model_name: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  elapsed_ms: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  task_id: number | null;
+  project_id: number | null;
+};
+
+export type PromptUsageTop = {
+  template_id?: number;
+  runs?: PromptUsageRun[];
+  top_templates?: Array<{
+    template_id: number;
+    usage_count: number;
+    total_tokens: number;
+    total_cost: number;
+    template_key?: string;
+    name?: string;
+    role?: string;
+    category?: string;
+    genre?: string | null;
+  }>;
 };

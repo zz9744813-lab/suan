@@ -70,6 +70,8 @@ from app.schemas.study import (
     BehaviorPatternUpdate,
     ChapterizeRequest,
     GraphBundle,
+    GraphDiagnosticsIssue,
+    GraphDiagnosticsRead,
     GraphEdgeCreate,
     GraphEdgeRead,
     GraphEdgeUpdate,
@@ -98,6 +100,11 @@ from app.schemas.study import (
     StudyRelationshipsResponse,
     StudyRelationshipSuggestion,
     StudyRequest,
+    # P0 返工 Phase 3.1
+    StudyBookDashboard,
+    StudyShelfCreate,
+    StudyShelfRead,
+    StudyShelfUpdate,
 )
 from app.schemas.deepstudy import (
     BehaviorPatternQuery,
@@ -309,6 +316,8 @@ __all__ = [
     "BehaviorPatternUpdate",
     "ChapterizeRequest",
     "GraphBundle",
+    "GraphDiagnosticsIssue",
+    "GraphDiagnosticsRead",
     "GraphEdgeCreate",
     "GraphEdgeRead",
     "GraphEdgeUpdate",

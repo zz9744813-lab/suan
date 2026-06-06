@@ -270,6 +270,22 @@ class ChapterPipeline:
             target_wc = int(chapter.target_word_count or 3000)
             min_wc = max(target_wc - 200, 500)
             max_wc = target_wc + 200
+            # P0 返工 Phase 5.1: 讨论室/Chief 触发的 rewrite 任务的
+            # "rewrite_instruction" 会被 worker 写进 task.payload,
+            # 这里取出来拼到 drafter prompt 的 user_preferences。
+            # (没传就退回原 "暂无" 字样。)
+            rewrite_instruction = ""
+            try:
+                rewrite_instruction = (task.payload or {}).get(
+                    "rewrite_instruction", ""
+                ).strip()
+            except Exception:
+                rewrite_instruction = ""
+            user_preferences_text = (
+                f"【讨论室 / Chief 结论 (rewrite_instruction)】\n{rewrite_instruction}"
+                if rewrite_instruction
+                else "(暂无)"
+            )
             drafter_inputs = {
                 "chapter_no": chapter.chapter_no,
                 "title": chapter.title,
@@ -290,7 +306,7 @@ class ChapterPipeline:
                 "detail_constraints": "\n".join(ctx_data.detail_guard_reminders) or "(无)",
                 "behavior_patterns": behavior_patterns_text,
                 "style_guide": "稿纸感中文，段间留白，对话短而有情绪。",
-                "user_preferences": "(暂无)",
+                "user_preferences": user_preferences_text,
             }
             draft_result = await drafter.run(
                 AgentContext(

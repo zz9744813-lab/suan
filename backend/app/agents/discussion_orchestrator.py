@@ -196,12 +196,21 @@ class DiscussionOrchestrator:
                 rewrite_plan = parsed.get("rewrite_plan", {})
                 if rewrite_plan.get("should_create_task") and thread.final_decision == "modify":
                     from app.models.task import AgentTask as Task
+                    # P0 返工 Phase 5.1 修复: AgentTask 没有 instruction 字段
+                    # (原 instruction=... 那行 ORM 直接把字段丢了), 改存
+                    # payload["rewrite_instruction"], worker 会读出来注入到
+                    # pipeline drafter prompt。
+                    rewrite_instructions = rewrite_plan.get("instructions", "")
                     task = Task(
                         project_id=thread.project_id or 0,
                         chapter_id=thread.chapter_id,
                         task_type="rewrite_from_discussion",
                         status="pending",
-                        instruction=rewrite_plan.get("instructions", ""),
+                        payload={
+                            "rewrite_instruction": rewrite_instructions,
+                            "source": "discussion_orchestrator",
+                            "thread_id": thread_id,
+                        },
                     )
                     db.add(task)
                     await db.flush()

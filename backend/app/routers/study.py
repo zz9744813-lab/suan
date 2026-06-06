@@ -21,7 +21,13 @@ from app.agents.study import (
 from app.core.database import AsyncSessionLocal, get_db
 from app.core.errors import bad_request, not_found
 from app.models.deepstudy import StudyRun
-from app.models.study import BehaviorPattern, StudyChapter, StudyCharacter, StudyMaterial
+from app.models.study import (
+    BehaviorPattern,
+    StudyChapter,
+    StudyCharacter,
+    StudyMaterial,
+    StudyShelf,
+)
 from app.models.task import AgentTask
 from app.schemas import (
     APIResponse,
@@ -29,6 +35,7 @@ from app.schemas import (
     ChapterizeRequest,
     StudyBehaviorExtractRequest,
     StudyBehaviorExtractResponse,
+    StudyBookDashboard,
     StudyBulkRequest,
     StudyBulkStartResponse,
     StudyChapterRead,
@@ -48,6 +55,9 @@ from app.schemas import (
     StudyRelationshipsResponse,
     StudyRelationshipSuggestion,
     StudyRequest,
+    StudyShelfCreate,
+    StudyShelfRead,
+    StudyShelfUpdate,
 )
 from app.services.llm.router import get_llm_router
 from app.services.prompt_engine import get_prompt_engine
@@ -957,12 +967,17 @@ async def study_chapter(
     # Synthesise a lightweight AgentTask so the AgentStep rows the
     # agent writes have a real parent. ``task_type=study_character``
     # keeps it out of the chapter-pipeline queue.
+    # P0 返工 Phase 5.4 (验收): 拆书子任务 (study_*, deepstudy_*) 属于
+    # 内部任务, 不进入用户任务页 (默认 ?visibility=user 过滤掉)。
     study_task = AgentTask(
         project_id=material.project_id,
         chapter_id=None,
         task_type="study_character",
         status="running",
         priority=50,
+        visibility="internal",
+        domain="deepstudy",
+        task_kind="study_character",
         payload={
             "material_id": material_id,
             "chapter_id": chapter.id,
@@ -2498,3 +2513,6 @@ def _stub_study_parse(text: str) -> dict[str, Any]:
             "confidence": min(0.9, 0.4 + c * 0.02),
         })
     return {"characters": out}
+
+
+# ============================================================

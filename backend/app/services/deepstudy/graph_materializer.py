@@ -305,6 +305,157 @@ class GraphMaterializer:
 
             await db.flush()
 
+            # P0 返工 Phase 4.2 + 5.5: DeepStudy 完成后自动把书里的图谱节点
+            # 物化到 project_id 的 graph_nodes/graph_edges (R22 endpoint
+            # 同样的逻辑, 但用 service 内部调, 不走 HTTP)。
+            # Phase 5.5 修复 (验收 A5 + 不静默跳过): material 没绑 project_id
+            # 时, 必须把原因写到 g.last_error, 不能静默跳过 — 前端图谱诊断
+            # 会显示 "material_not_bound_to_project", 用户知道怎么修。
+            from app.models.study import StudyMaterial
+            material = await db.get(StudyMaterial, material_id)
+            if material is not None and material.project_id is not None:
+                try:
+                    await self._auto_materialise_to_project(
+                        db, material.project_id, material_id
+                    )
+                except Exception as exc:
+                    g.last_error = f"auto-materialise failed: {exc!s}"[:400]
+                    await db.flush()
+            elif material is not None and material.project_id is None:
+                g.last_error = (
+                    "material_not_bound_to_project: DeepStudy 完成但这本书 "
+                    "还没绑到任何 project, 没法物化到 project 图谱。 "
+                    "到「拆书」页把书绑到一个项目再重跑。"
+                )[:400]
+                await db.flush()
+            else:
+                g.last_error = "material_missing: DeepStudy 完成时找不到对应的 StudyMaterial 行"
+                await db.flush()
+
+    async def _auto_materialise_to_project(
+        self, db, project_id: int, material_id: int
+    ) -> None:
+        """P0 返工 Phase 4.2: DeepStudy 完成后, 把这本书的
+        人物/伏笔/行为模式自动写入 project 的 graph_nodes,
+        并标记 StudyMaterial.graph_materialized_at。
+        """
+        from datetime import datetime
+
+        from app.models.memory import MemoryForeshadow
+        from app.models.study import (
+            BehaviorPattern,
+            GraphEdge,
+            GraphNode,
+            StudyCharacter,
+        )
+
+        # 只在 material 真有 project 时才物化
+        mat_count = (
+            await db.execute(
+                select(GraphNode.id)
+                .where(
+                    GraphNode.project_id == project_id,
+                    GraphNode.source_material_id == material_id,
+                )
+                .limit(1)
+            )
+        ).first()
+        if mat_count is not None:
+            # 已经物化过 — 跳过 (idempotent)
+            return
+
+        from app.models.study import StudyMaterial
+        mat = await db.get(StudyMaterial, material_id)
+        if mat is None:
+            return
+
+        existing_names: set[str] = {
+            n.name
+            for n in (await db.execute(
+                select(GraphNode).where(GraphNode.project_id == project_id)
+            )).scalars().all()
+        }
+
+        # 1) 人物 (study_character)
+        chars = (
+            await db.execute(
+                select(StudyCharacter).where(StudyCharacter.material_id == material_id)
+            )
+        ).scalars().all()
+        for c in chars:
+            if c.name in existing_names:
+                continue
+            db.add(GraphNode(
+                project_id=project_id,
+                source_material_id=material_id,
+                node_kind="study_character",
+                name=c.name,
+                ref_study_character_id=c.id,
+                extra={
+                    "role": c.role,
+                    "tags": c.tags or [],
+                    "aliases": c.aliases or [],
+                },
+            ))
+            existing_names.add(c.name)
+
+        # 2) 伏笔 (event) — 只在书有 project_id 时才有
+        events = (
+            await db.execute(
+                select(MemoryForeshadow).where(
+                    MemoryForeshadow.source_material_id == material_id,
+                    MemoryForeshadow.project_id == project_id,
+                )
+            )
+        ).scalars().all()
+        for f in events:
+            label = f.name
+            if label in existing_names:
+                continue
+            db.add(GraphNode(
+                project_id=project_id,
+                source_material_id=material_id,
+                node_kind="event",
+                name=label,
+                extra={
+                    "summary": (f.summary or "")[:400],
+                    "planted_chapter": f.planted_chapter,
+                    "importance": f.importance,
+                    "status": f.status,
+                    "ref_foreshadow_id": f.id,
+                },
+            ))
+            existing_names.add(label)
+
+        # 3) 行为模式 (other)
+        patterns = (
+            await db.execute(
+                select(BehaviorPattern).where(
+                    BehaviorPattern.source_material_id == material_id
+                )
+            )
+        ).scalars().all()
+        for p in patterns:
+            if p.name in existing_names:
+                continue
+            db.add(GraphNode(
+                project_id=project_id,
+                source_material_id=material_id,
+                node_kind="other",
+                name=p.name,
+                extra={
+                    "kind": "behavior_pattern",
+                    "character_tags": p.character_tags or [],
+                    "situation_tags": p.situation_tags or [],
+                    "ref_behavior_id": p.id,
+                },
+            ))
+            existing_names.add(p.name)
+
+        # 标记物化时间
+        mat.graph_materialized_at = datetime.utcnow()
+        await db.flush()
+
     async def build_graph_payload(
         self, material_id: int
     ) -> dict[str, list[dict[str, Any]]]:

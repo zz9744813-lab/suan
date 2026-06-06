@@ -22,6 +22,8 @@ from app.models.study import GraphEdge, GraphNode
 from app.schemas import (
     APIResponse,
     GraphBundle,
+    GraphDiagnosticsIssue,
+    GraphDiagnosticsRead,
     GraphEdgeCreate,
     GraphEdgeRead,
     GraphEdgeUpdate,
@@ -530,3 +532,206 @@ async def materialise_from_study(
         },
     }
     return payload
+
+
+# -------------------- P0 返工 Phase 4.3: 图谱诊断 --------------------
+
+@router.get(
+    "/{project_id}/diagnostics",
+    response_model=APIResponse[GraphDiagnosticsRead],
+)
+async def graph_diagnostics(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[GraphDiagnosticsRead]:
+    """图谱诊断 — 告诉前端"图为什么是空的"，并给出修复建议。
+
+    用于 GraphPage 空状态：直接渲染 issues + recommended_actions，
+    不用前端自己猜。统计字段（node_count / 边按 relation 拆 /
+    贡献过的书）也一次返回，省前端多次 fetch。
+    """
+    from datetime import datetime as _dt
+    from app.models.deepstudy import StudyRun
+    from app.models.study import StudyMaterial
+    from app.models.project import Project
+
+    # ── 1. 项目是否存在 ───────────────────────────────────────────
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise not_found("Project", project_id)
+
+    # ── 2. 节点/边统计 ────────────────────────────────────────────
+    nodes = (
+        await db.execute(
+            select(GraphNode).where(GraphNode.project_id == project_id)
+        )
+    ).scalars().all()
+    edges = (
+        await db.execute(
+            select(GraphEdge).where(GraphEdge.project_id == project_id)
+        )
+    ).scalars().all()
+
+    nodes_by_kind: dict[str, int] = {}
+    for n in nodes:
+        nodes_by_kind[n.node_kind] = nodes_by_kind.get(n.node_kind, 0) + 1
+
+    edges_by_relation: dict[str, int] = {}
+    for e in edges:
+        edges_by_relation[e.relation] = edges_by_relation.get(e.relation, 0) + 1
+    # top 10 by count
+    edges_top = dict(
+        sorted(edges_by_relation.items(), key=lambda x: -x[1])[:10]
+    )
+
+    last_materialised_at: _dt | None = None
+    if nodes:
+        last_materialised_at = max(n.updated_at for n in nodes if n.updated_at)
+
+    # ── 3. 贡献过图谱的书 (前置: last_materialise_error 也要用) ──────
+    material_ids = sorted({n.source_material_id for n in nodes if n.source_material_id})
+    contributing_materials: list[dict[str, Any]] = []
+    if material_ids:
+        mats = (
+            await db.execute(
+                select(StudyMaterial).where(StudyMaterial.id.in_(material_ids))
+            )
+        ).scalars().all()
+        # 按 book 给的 node 数排序
+        node_count_by_mat: dict[int, int] = {}
+        for n in nodes:
+            if n.source_material_id:
+                node_count_by_mat[n.source_material_id] = node_count_by_mat.get(n.source_material_id, 0) + 1
+        for m in mats:
+            contributing_materials.append({
+                "id": m.id,
+                "title": m.title,
+                "author": m.author,
+                "node_count": node_count_by_mat.get(m.id, 0),
+                "study_status": m.study_status,
+                "graph_materialized_at": m.graph_materialized_at.isoformat() if m.graph_materialized_at else None,
+            })
+        contributing_materials.sort(key=lambda x: -x["node_count"])
+
+    # ── P0 返工 Phase 5.5: 拉每本贡献过的书的 DeepStudyGraph.last_error
+    # (一个 material 一条, 取第一条非空) — 在 material_ids 之后
+    last_materialise_error: str | None = None
+    if material_ids:
+        from app.models.deepstudy_graph import DeepStudyGraph
+        for mid in material_ids:
+            ds = (
+                await db.execute(
+                    select(DeepStudyGraph).where(DeepStudyGraph.material_id == mid)
+                )
+            ).scalars().first()
+            if ds and ds.last_error and not last_materialise_error:
+                last_materialise_error = ds.last_error
+
+    # ── 4. Issues + 修复建议 ──────────────────────────────────────
+    issues: list[GraphDiagnosticsIssue] = []
+    actions: list[dict[str, Any]] = []
+
+    bound_mats = (
+        await db.execute(
+            select(func.count(StudyMaterial.id)).where(
+                StudyMaterial.project_id == project_id
+            )
+        )
+    ).scalar_one() or 0
+
+    if bound_mats == 0:
+        issues.append(GraphDiagnosticsIssue(
+            severity="error",
+            code="no_materials",
+            message="这个项目还没绑任何参考书。",
+            fix_hint="到「拆书」页加一本参考书，再绑到本项目。",
+        ))
+        actions.append({
+            "code": "go_study",
+            "label": "去拆书页加书",
+            "target": "/study",
+            "priority": 1,
+        })
+    else:
+        # 有书了 — 看有没有 deepstudy run
+        runs = (
+            await db.execute(
+                select(StudyRun)
+                .where(StudyRun.project_id == project_id)
+                .order_by(StudyRun.id.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if runs is None:
+            issues.append(GraphDiagnosticsIssue(
+                severity="warn",
+                code="no_deepstudy_run",
+                message=f"项目有 {bound_mats} 本书，但还没跑过 DeepStudy。",
+                fix_hint="在「拆书」页对其中一本书点「🚀 启动 DeepStudy」。",
+            ))
+            actions.append({
+                "code": "run_deepstudy",
+                "label": "去拆书页启动 DeepStudy",
+                "target": "/study",
+                "priority": 2,
+            })
+        elif runs.status != "succeeded":
+            issues.append(GraphDiagnosticsIssue(
+                severity="warn",
+                code="deepstudy_in_progress",
+                message=f"DeepStudy #{runs.id} 当前状态: {runs.status}。等它跑完。",
+            ))
+            actions.append({
+                "code": "view_run",
+                "label": "看 DeepStudy 进度",
+                "target": f"/study",
+                "priority": 3,
+            })
+
+    # 图是空的 — 即使有书 + 有 run, 也要提示怎么物化
+    if len(nodes) == 0 and bound_mats > 0:
+        issues.append(GraphDiagnosticsIssue(
+            severity="info",
+            code="not_materialised",
+            message="有书但还没贡献到图谱。点下方「一键物化」从书里抽人物/事件/行为模式。",
+        ))
+        actions.append({
+            "code": "materialise",
+            "label": "一键物化参考书到图谱",
+            "target": f"/graphs/{project_id}/materialise",
+            "method": "POST",
+            "priority": 1,
+        })
+
+    # 节点有但边很稀疏 — 建议开启 R24 enrich
+    if len(nodes) > 0 and len(edges) < max(3, len(nodes) // 2):
+        issues.append(GraphDiagnosticsIssue(
+            severity="info",
+            code="sparse_edges",
+            message=f"节点 {len(nodes)} 个，但边只有 {len(edges)} 条。可以跑一次关系强化（enrich）。",
+        ))
+
+    # 全部都是同一种 kind — 提示可能漏了其他类型
+    if len(nodes) > 0 and len(nodes_by_kind) == 1 and "study_character" in nodes_by_kind:
+        issues.append(GraphDiagnosticsIssue(
+            severity="info",
+            code="only_characters",
+            message="图谱里只有「拆书人物」。跑 DeepStudy 后会自动加事件/伏笔/行为模式节点。",
+        ))
+
+    is_empty = len(nodes) == 0
+
+    diag = GraphDiagnosticsRead(
+        project_id=project_id,
+        node_count=len(nodes),
+        edge_count=len(edges),
+        nodes_by_kind=nodes_by_kind,
+        edges_by_relation=edges_top,
+        contributing_materials=contributing_materials,
+        last_materialised_at=last_materialised_at,
+        last_materialise_error=last_materialise_error,
+        is_empty=is_empty,
+        issues=issues,
+        recommended_actions=actions,
+    )
+    return {"ok": True, "data": diag}

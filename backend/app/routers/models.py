@@ -79,6 +79,84 @@ async def get_provider(provider_id: int, db: AsyncSession = Depends(get_db)) -> 
     return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
 
+# P0 返工 Phase 5.2: Provider 详情页要能看到真实调用记录 (验收 A9)。
+# recorder 写到 model_call_events 表, provider detail 只回 model_providers
+# 行; 详情页之前查不到调用事件, 现在补一个端点把最近 N 条
+# 调用事件以"从该 provider 出去的调用"形式返回。
+# 用 provider_id 过滤 (provider_id = 那个数字) + provider_name 兜底
+# (历史事件可能 provider_id=NULL 但 provider_name 还能对上)。
+@router.get("/providers/{provider_id}/recent-calls")
+async def get_provider_recent_calls(
+    provider_id: int,
+    limit: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """P0 返工 Phase 5.2: 该 Provider 最近 N 次真实调用记录。
+
+    数据源: ``model_call_events`` 表 — recorder 在每次模型调用前/后写入。
+    字段: 时间, agent_role_key, chapter, status, latency, tokens, cost,
+    failure_type, event_type, summary。
+    验收 A9: Provider 详情能看到真实调用记录 (不再是空表/无数据)。
+    """
+    from app.models.model_call_event import ModelCallEvent
+    from app.models.model_provider import ModelProvider
+
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None:
+        raise not_found("ModelProvider", provider_id)
+
+    provider_name = provider.name
+    # 优先按 provider_id 匹配, 兜底按 provider_name
+    rows = (
+        await db.execute(
+            select(ModelCallEvent)
+            .where(
+                (ModelCallEvent.provider_id == provider_id)
+                | (ModelCallEvent.provider_name == provider_name)
+            )
+            .order_by(ModelCallEvent.id.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    items = [
+        {
+            "id": r.id,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "agent_role_key": r.agent_role_key,
+            "model_name": r.model_name,
+            "chapter_id": r.chapter_id,
+            "task_id": r.task_id,
+            "agent_step_id": r.agent_step_id,
+            "status": r.status,
+            "event_type": r.event_type,
+            "event_category": r.event_category,
+            "level": r.level,
+            "failure_type": r.failure_type,
+            "failure_message": r.failure_message,
+            "latency_ms": r.latency_ms,
+            "input_tokens": r.input_tokens,
+            "output_tokens": r.output_tokens,
+            "cost_usd": r.cost_usd,
+            "selection_mode": r.selection_mode,
+            "selection_score": r.selection_score,
+            "summary": r.summary,
+            "request_id": r.request_id,
+            "cache_hit": r.cache_hit,
+        }
+        for r in rows
+    ]
+    return {
+        "ok": True,
+        "data": {
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+            "count": len(items),
+            "items": items,
+        },
+    }
+
+
 @router.put("/providers/{provider_id}", response_model=APIResponse[ModelProviderRead])
 async def update_provider(
     provider_id: int, body: ModelProviderUpdate, db: AsyncSession = Depends(get_db)

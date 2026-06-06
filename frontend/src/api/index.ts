@@ -5,14 +5,19 @@ import type {
   AgentEvent,
   AgentStep,
   AgentTask,
+  APIResponse,
   BehaviorPattern,
   Bible,
+  StudyBookDashboard,
+  StudyShelf,
   Chapter,
   ChapterVersion,
   ChiefAgentMessage,
   ChiefAgentSession,
   DiscussionParticipantKey,
   DiscussionSession,
+  GraphBundle,
+  GraphDiagnosticsRead,
   GraphEdge,
   GraphNode,
   MaterialiseSummary,
@@ -54,6 +59,10 @@ import type {
   GenrePromptMatrixResponse,
   PromptSnapshotDetail,
   TemplateUsageRead,
+  WorkbenchTopStats,
+  WorkbenchLiveState,
+  PromptCoverage,
+  PromptUsageTop,
 } from "../types";
 
 // ----- projects -----
@@ -190,6 +199,17 @@ export const taskEvents = (id: number) =>
 export const getTaskDiagnosis = (id: number) =>
   api.get<TaskDiagnosis>(`/api/tasks/${id}/diagnosis`);
 
+// ===== P0 返工：Workbench 聚合 =====
+export const getTopStats = () => api.get<WorkbenchTopStats>("/api/workbench/top-stats");
+export const getLiveState = () => api.get<WorkbenchLiveState>("/api/workbench/live-state");
+
+// ===== P0 返工 Phase 2.3+2.4: Prompt 覆盖率 / 使用追溯 =====
+export const getPromptCoverage = () => api.get<PromptCoverage>("/api/prompts/coverage");
+export const getPromptUsage = (templateId?: number, limit = 20) => {
+  const params = templateId != null ? `?template_id=${templateId}&limit=${limit}` : `?limit=${limit}`;
+  return api.get<PromptUsageTop>(`/api/prompts/usage${params}`);
+};
+
 export const workerStatus = () => api.get<WorkerStatus>("/api/worker/status");
 export const multiWorkerStatus = () => api.get<MultiWorkerStatus>("/api/worker/multi-status");
 export const workerStart = () => api.post<any>("/api/worker/start");
@@ -293,6 +313,8 @@ export const createStudyMaterial = (body: {
   source?: "paste" | "upload" | "url";
   project_id?: number;
   raw_text?: string;
+  // P0 返工 Phase 3.1: 加 shelf_id (null=未分组)
+  shelf_id?: number | null;
 }) => api.post<StudyMaterial>("/api/study/materials", body);
 export const getStudyMaterial = (id: number, includeText = false) =>
   api.get<StudyMaterialDetail>(`/api/study/materials/${id}?include_text=${includeText ? 1 : 0}`);
@@ -399,6 +421,53 @@ export const enrichStudyRelationships = (materialId: number, body: StudyRelation
 export const getStudyMaterialOverview = (materialId: number) =>
   api.get<StudyMaterialOverview>(`/api/study/materials/${materialId}/overview`);
 
+// ----- P0 返工 Phase 3.2: 书架二层 API -----
+// 列出所有书架 (含虚拟的 "未分组" 书架)
+export const listStudyShelves = (projectId?: number) => {
+  const params = new URLSearchParams();
+  if (projectId != null) params.set("project_id", String(projectId));
+  const q = params.toString();
+  return api.get<APIResponse<StudyShelf[]>>(`/api/study/shelves${q ? `?${q}` : ""}`);
+};
+
+// 创建新书架
+export const createStudyShelf = (body: {
+  name: string;
+  description?: string;
+  project_id?: number;
+  display_order?: number;
+  color?: string;
+}) => api.post<APIResponse<StudyShelf>>("/api/study/shelves", body);
+
+// 改/删书架
+export const updateStudyShelf = (id: number, body: Partial<{
+  name: string;
+  description: string;
+  display_order: number;
+  color: string | null;
+}>) => api.patch<StudyShelf>(`/api/study/shelves/${id}`, body);
+
+export const deleteStudyShelf = (id: number) =>
+  api.delete<{ ok: boolean; data: { deleted: number } }>(`/api/study/shelves/${id}`);
+
+// 第二层 — 列出某个书架上的书 (shelf_id=0 等于"未分组")
+export const listStudyBooks = (shelfId?: number, projectId?: number) => {
+  const params = new URLSearchParams();
+  if (shelfId != null) params.set("shelf_id", String(shelfIdOrZero(shelfId)));
+  if (projectId != null) params.set("project_id", String(projectId));
+  const q = params.toString();
+  return api.get<APIResponse<StudyMaterial[]>>(`/api/study/books${q ? `?${q}` : ""}`);
+};
+
+function shelfIdOrZero(id: number): number {
+  // 0 = virtual "未分组" shelf, otherwise normal id
+  return id;
+}
+
+// 单书 dashboard
+export const getBookDashboard = (materialId: number) =>
+  api.get<APIResponse<StudyBookDashboard>>(`/api/study/books/${materialId}/dashboard`);
+
 // ----- Round 5: behavior patterns (B1 unified → behavior_cards) -----
 export const listBehaviorPatterns = (q: {
   character?: string[];
@@ -441,6 +510,9 @@ export const deleteBehaviorPattern = (id: number) =>
 // ----- Round E: Graph (人物关系图谱) -----
 export const getGraph = (projectId: number) =>
   api.get<{ nodes: GraphNode[]; edges: GraphEdge[] }>(`/api/graph/${projectId}`);
+// P0 返工 Phase 4.3: 图谱诊断 — 后端告诉你"图为什么是空的"
+export const getGraphDiagnostics = (projectId: number) =>
+  api.get<GraphDiagnosticsRead>(`/api/graph/${projectId}/diagnostics`);
 export const createGraphNode = (projectId: number, body: {
   name: string;
   node_kind?: "study_character" | "project_character" | "faction" | "location" | "other";

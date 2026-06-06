@@ -52,6 +52,13 @@ class StudyMaterialRead(BaseModel):
     study_progress: dict[str, Any] | None = None
     knowledge_score: float | None = None
     last_deepstudied_at: datetime | None = None
+    # === P0 返工 Phase 3.1: 书架二层 + 诊断元数据 ===
+    shelf_id: int | None = None
+    genre: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    cover_color: str | None = None
+    study_quality_score: float | None = None
+    graph_materialized_at: datetime | None = None
     # Don't serialise the full raw_text on the list endpoint — a 5 MB
     # novel bloats every list response. The detail endpoint can opt in
     # via ``?include_text=1``.
@@ -79,6 +86,13 @@ class StudyMaterialRead(BaseModel):
             study_progress=obj.study_progress,
             knowledge_score=obj.knowledge_score,
             last_deepstudied_at=obj.last_deepstudied_at,
+            # P0 返工 Phase 3.1 字段（from_orm 也支持，但显式列保证顺序稳定）
+            shelf_id=getattr(obj, "shelf_id", None),
+            genre=getattr(obj, "genre", None),
+            tags=list(getattr(obj, "tags", None) or []),
+            cover_color=getattr(obj, "cover_color", None),
+            study_quality_score=getattr(obj, "study_quality_score", None),
+            graph_materialized_at=getattr(obj, "graph_materialized_at", None),
             raw_text_length=len(obj.raw_text or "") if not include_text else 0,
             extra=obj.extra,
             created_at=obj.created_at,
@@ -450,6 +464,86 @@ class BehaviorPatternUpdate(BaseModel):
 # Round E (P1-1) — 人物关系图谱 GraphNode / GraphEdge
 # ============================================================
 
+
+# ============================================================
+# P0 返工 Phase 3.1 — 拆书书架二层 (StudyShelf + book dashboard)
+# ============================================================
+
+class StudyShelfCreate(BaseModel):
+    """Create a user-defined shelf that groups StudyMaterial rows."""
+    name: str = Field(..., min_length=1, max_length=120)
+    description: str = ""
+    project_id: int | None = None
+    display_order: int = 0
+    color: str | None = None
+
+
+class StudyShelfUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    project_id: int | None = None
+    display_order: int | None = None
+    color: str | None = None
+
+
+class StudyShelfRead(BaseModel):
+    """One shelf as the /study page first level.
+
+    ``book_count`` is the number of materials assigned to the shelf
+    (computed at read time). Books themselves are loaded separately
+    via /api/study/books?shelf_id=... — keeps the shelf list cheap
+    even when a shelf has hundreds of books.
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int | None
+    name: str
+    description: str
+    display_order: int
+    color: str | None
+    book_count: int = 0
+    # Aggregated tags/genres across the shelf's books, for shelf
+    # filter chips. Capped at 8 each to keep the payload small.
+    top_genres: list[str] = Field(default_factory=list)
+    top_tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class StudyBookDashboard(BaseModel):
+    """R23 / Phase 3.1: one-shot dashboard of a single book.
+
+    Aggregates everything the book-detail page needs so the second
+    level can render in one round-trip:
+      - shelf context (which shelf is this book on)
+      - DeepStudy pipeline status + last run
+      - study statistics (chapters / characters / behaviors / foreshadows)
+      - graph materialization status
+      - quality score timeline
+    """
+    material: "StudyMaterialRead"
+    shelf: "StudyShelfRead | None" = None
+    # DeepStudy pipeline snapshot (same shape as /deepstudy/runs/{id})
+    latest_run: dict[str, Any] | None = None
+    # 4-stat row for the book header
+    chapter_count: int = 0
+    character_count: int = 0
+    behavior_count: int = 0
+    foreshadow_count: int = 0
+    # 5 most recent StudyCritic / DeepStudy composite quality scores
+    quality_timeline: list[dict[str, Any]] = Field(default_factory=list)
+    # "Is this book contributing to the project graph?" boolean
+    # plus the timestamp; the /graph page consumes both.
+    graph_materialized: bool = False
+    graph_node_count: int = 0
+    graph_edge_count: int = 0
+    # Project context — if the book is linked to a project, what
+    # does the user already have in memory (characters / foreshadows)?
+    project_id: int | None = None
+    project_graph_size: dict[str, int] = Field(default_factory=dict)
+
+
 class GraphNodeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -523,6 +617,37 @@ class GraphBundle(BaseModel):
     """One project's full graph (nodes + edges) for the canvas."""
     nodes: list[GraphNodeRead] = Field(default_factory=list)
     edges: list[GraphEdgeRead] = Field(default_factory=list)
+
+
+# P0 返工 Phase 4.3: 图谱诊断 — 告诉前端"图为什么是空的"
+class GraphDiagnosticsIssue(BaseModel):
+    """图谱诊断中的一条具体问题 / 建议。"""
+    severity: str  # info | warn | error
+    code: str      # e.g. "no_materials", "no_deepstudy_run", "no_characters"
+    message: str
+    fix_hint: str | None = None  # 前端可以渲染成可点击的"如何修复"链接
+
+
+class GraphDiagnosticsRead(BaseModel):
+    """图谱诊断 — 一次 GET 拿到统计 + 问题清单 + 修复建议。"""
+    project_id: int
+    node_count: int
+    edge_count: int
+    # 节点按 kind 拆
+    nodes_by_kind: dict[str, int] = Field(default_factory=dict)
+    # 边按 relation 拆 (top 10)
+    edges_by_relation: dict[str, int] = Field(default_factory=dict)
+    # 贡献过图谱的书 (source_material)
+    contributing_materials: list[dict[str, Any]] = Field(default_factory=list)
+    # 最近一次物化时间
+    last_materialised_at: datetime | None = None
+    # P0 返工 Phase 5.5: 上次物化错误 (前端可显示"为什么 graph 没物化")
+    last_materialise_error: str | None = None
+    # 当前是否有空状态 / 严重问题
+    is_empty: bool
+    issues: list[GraphDiagnosticsIssue] = Field(default_factory=list)
+    # 推荐的"下一步动作" (按优先级排序)
+    recommended_actions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # Resolve the forward references in StudyMaterialDetail.

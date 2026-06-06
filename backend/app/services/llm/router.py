@@ -253,6 +253,10 @@ class LLMRouter:
             )
 
             # ── 尝试 fallback ──
+            # P0 返工 Phase 5.3 (验收 A8): Agent 锁死模型 = selection_mode="manual"
+            # 必须后端硬锁 — 不允许 fallback。即使主模型 401/timeout 也不
+            # 自动换模型, 直接失败抛回给上游。下面的 `!= "manual"` 是
+            # 唯一的 gate, 改了这里就改了 spec, 改完记得跑 test_provider_lock。
             agent_key = LEGACY_ROLE_TO_AGENT_KEY.get(role)
             if agent_key and resolved.selection_mode != "manual":
                 fallback_result = await self._try_fallback(

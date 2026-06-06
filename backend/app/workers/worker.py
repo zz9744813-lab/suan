@@ -759,6 +759,13 @@ class WorkerController:
                 # Inject discussion instruction into task if present
                 payload = task_row.payload or {}
                 instruction = payload.get("rewrite_instruction", "")
+                # P0 返工 Phase 5.1 修复: 原版只取 instruction 但没传给
+                # pipeline.run (签名不接受), 改写指令直接丢失。这里把
+                # instruction 写回 task.payload["rewrite_instruction"] 让
+                # pipeline 内部读取拼到 drafter prompt。
+                if instruction and not payload.get("rewrite_instruction"):
+                    payload["rewrite_instruction"] = instruction
+                    task.payload = payload
                 result = await asyncio.wait_for(
                     pipeline.run(db, task=task, chapter=chapter, policy=policy),
                     timeout=1800,
