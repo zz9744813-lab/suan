@@ -239,6 +239,11 @@ class ReviewQueueService:
             task_type="comment_cleanup",
             status="pending",
             priority=10,  # 最低优, 空闲时跑
+            # P0 修复: comment_cleanup 是评论系统内部任务, 不应在用户任务页
+            # 出现刷屏。 用户能看但前端默认隐藏 / 后端默认不返。
+            visibility="internal",
+            domain="review",
+            task_kind="comment_cleanup",
             payload={
                 "retention_days": retention_days,
                 "enqueue_source": source,
