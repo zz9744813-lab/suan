@@ -169,6 +169,7 @@ class EventExtractorStage(BaseStage):
 
     async def _get_existing_foreshadows(self, db, material_id: int) -> str:
         """Get a summary of already-extracted foreshadows for dedup."""
+        from app.models.deepstudy import ForeshadowChain
         chains = (
             await db.execute(
                 select(ForeshadowChain).where(
@@ -190,6 +191,7 @@ class EventExtractorStage(BaseStage):
         self, db, material_id: int, names: list[str]
     ) -> list[int]:
         """Resolve character names to entity IDs."""
+        from app.models.deepstudy import Entity
         ids = []
         for name in names:
             name = name.strip()

@@ -45,9 +45,7 @@ def _get_router() -> LLMRouter:
     if _router is None:
         from app.services.llm.router import LLMRouter as R
         from app.services.llm.client import LLMClient
-        from app.core.config import get_settings
-        settings = get_settings()
-        client = LLMClient(settings=settings)
+        client = LLMClient()
         _router = R(client)
     return _router
 

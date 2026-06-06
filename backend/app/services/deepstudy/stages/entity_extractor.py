@@ -132,6 +132,7 @@ class EntityExtractorStage(BaseStage):
 
     async def _get_existing_characters(self, db, material_id: int) -> str:
         """Get a summary of already-extracted characters for the prompt."""
+        from app.models.deepstudy import Entity
         entities = (
             await db.execute(
                 select(Entity).where(
@@ -160,6 +161,8 @@ class EntityExtractorStage(BaseStage):
         self, db, material_id: int, name: str, char_data: dict, chapter_index: int
     ) -> Entity | None:
         """Create or merge an entity for the given character."""
+        from app.models.deepstudy import Entity
+
         # Check for existing entity with same name
         existing = (
             await db.execute(

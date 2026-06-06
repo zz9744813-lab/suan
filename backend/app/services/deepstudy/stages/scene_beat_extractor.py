@@ -140,6 +140,7 @@ class SceneBeatExtractorStage(BaseStage):
 
     async def _get_character_names(self, db, material_id: int) -> str:
         """Get known character names for the prompt."""
+        from app.models.deepstudy import Entity
         entities = (
             await db.execute(
                 select(Entity).where(
@@ -157,6 +158,7 @@ class SceneBeatExtractorStage(BaseStage):
         self, db, material_id: int, names: list[str]
     ) -> list[int]:
         """Resolve character names to entity IDs."""
+        from app.models.deepstudy import Entity
         ids = []
         for name in names:
             name = name.strip()

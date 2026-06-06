@@ -2,7 +2,7 @@
 
 ## 项目概况
 - 长篇小说 AI 协同写作工作台，Python/FastAPI 后端 + React/TypeScript 前端
-- 版本 0.1.0，P0-P10 + P0 Failover返工 + NF2自动工厂 + P0可观测性重构 + P0拆书书架修复 全部完成
+- 版本 0.1.0，P0-P10 + P0 Failover返工 + NF2自动工厂 + P0可观测性重构 + P0拆书书架修复 + DeepStudy LLM Rebuild 全部完成
 
 ## 关键架构
 - 后端：FastAPI + SQLAlchemy async + SQLite，`backend/app/` 下 models/routers/services/agents/workers/prompts
@@ -25,6 +25,21 @@
 - 分类: 书架从状态分组改为分类优先 (SHELF_CATEGORIES)，`isTestBook()` 自动识别
 - 诊断: `GET /deepstudy/materials/{id}/diagnostics` 8种空图原因分析
 - `StudyMaterialUpdate` 已支持 `shelf_category` + `extra`
+
+## DeepStudy LLM Rebuild (2026-06-06)
+- 核心变更: 7 个 DeepStudy stage 全部从正则/关键词/空壳→LLM 驱动
+- LLM 调用: `stages/llm_helper.py` 封装 `call_llm(db, role, prompt_key, inputs)` → PromptEngine + LLMRouter
+- Stage 清单:
+  - chapter_profile: LLM 章节画像 (study_chapter_profile prompt)
+  - entity_extract: LLM 人物识别 (study_character) + 非人物实体 (study_entity_extract)
+  - event_extract: LLM 事件/伏笔提取 (study_event)
+  - scene_beat_extract: LLM 场景节拍 (study_scene_beat)
+  - relationship_analyze: 共现人物对→LLM 语义关系 (study_relationship), 书级stage
+  - behavior_pattern_mine: LLM 行为模式归纳 (study_behavior_pattern), 书级stage
+  - technique_mine: LLM 写作技巧提炼 (study_technique_mine), 书级stage
+- 书级stage(relationship/behavior/technique)覆盖 `execute_stage()`，需提供空 `execute_chapter()`
+- Coordinator: 7 个 handler 全部注册
+- 新增4个prompt: study_chapter_profile, study_scene_beat, study_entity_extract, study_technique_mine
 
 ## 用户偏好
 - 文件不要保存到 C 盘
