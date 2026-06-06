@@ -208,3 +208,75 @@ class TaskRetryRequest(BaseModel):
     mode: Literal["full", "from_failed_step", "critic_only", "continue_with_fallback"] = "full"
     from_step: str | None = None  # required when mode == "from_failed_step"
     reuse_previous_outputs: bool = True
+
+
+# ----- P0 任务中控台 (command-center) -----
+
+TASK_DOMAINS = ("writing", "deepstudy", "discussion", "memory", "model", "export")
+TASK_DOMAIN_LABELS = {
+    "writing": "写作生产",
+    "deepstudy": "拆书研读",
+    "discussion": "评论讨论",
+    "memory": "记忆整理",
+    "model": "模型健康",
+    "export": "导出打包",
+}
+
+
+class TaskDisplayItem(BaseModel):
+    """任务中控台单条任务卡片 (P0)."""
+    id: int
+    domain: str | None = None
+    task_kind: str | None = None
+    task_type: str | None = None
+    title: str
+    status: str
+    project_id: int | None = None
+    chapter_id: int | None = None
+    material_id: int | None = None
+    run_id: int | None = None
+    progress_current: int = 0
+    progress_total: int = 0
+    cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str
+    error: str | None = None
+    summary_json: dict[str, Any] | None = None
+
+
+class TaskDomainSummary(BaseModel):
+    """任务中控台单个 domain 汇总 (P0)."""
+    domain: str
+    label: str
+    status: Literal["idle", "running", "blocked", "failed", "succeeded"] = "idle"
+    running: int = 0
+    pending: int = 0
+    failed: int = 0
+    succeeded_today: int = 0
+    cost_today: float = 0.0
+    tokens_today: int = 0
+    current_task_id: int | None = None
+    current_title: str | None = None
+    progress_current: int = 0
+    progress_total: int = 0
+    last_event: str | None = None
+
+
+class TaskCommandCenterResponse(BaseModel):
+    """P0 任务中控台 — 一次拿到所有需要展示的数据。
+
+    字段:
+    - generated_at: 后端生成时间
+    - domains: 按 domain 汇总的卡片
+    - active: 当前活跃任务 (最多 5 条)
+    - needs_attention: 失败/需人工处理的任务
+    - recent_completed: 最近 24h 完成的任务
+    """
+    generated_at: str
+    domains: list[TaskDomainSummary]
+    active: list[TaskDisplayItem]
+    needs_attention: list[TaskDisplayItem]
+    recent_completed: list[TaskDisplayItem]

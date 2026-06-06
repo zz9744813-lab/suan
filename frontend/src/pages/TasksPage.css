@@ -167,6 +167,14 @@ button.link:disabled { opacity: 0.5; cursor: wait; }
 }
 
 /* ---- P0 task center: card list ---- */
+/* P0 任务中控台 (command-center) */
+.cc-panel {
+  padding: 0 24px;
+  margin-top: 8px;
+}
+.cc-domain-card:hover {
+  border-color: var(--accent, #1f80ff);
+}
 .tasks-card-list {
   padding: 0 24px 24px;
   display: flex;

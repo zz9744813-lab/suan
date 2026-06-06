@@ -40,7 +40,7 @@ from .technique_miner import TechniqueMiner
 from .writing_context_sync import WritingContextSync
 
 
-_SCRATCH_PROJECT_NAME = "拆书·公共"
+_SCRATCH_PROJECT_NAME = "__NF2_SYSTEM_DEEPSTUDY__"
 
 
 class DeepStudyCoordinatorAgent:
@@ -164,10 +164,14 @@ class DeepStudyCoordinatorAgent:
             select(Project).where(Project.name == _SCRATCH_PROJECT_NAME)
         )).scalar_one_or_none()
         if row is None:
+            # P0 修复: 显式打系统标记, 让 GET /api/projects 默认隐藏。
+            # 旧版 name="拆书·公共" 会被小说项目页看到, 用户困扰。
             row = Project(
                 name=_SCRATCH_PROJECT_NAME,
-                category="study",
-                description="公共拆书任务项目，用于承载未绑定正式项目的自动研读任务。",
+                genre="system",
+                category="__system_deepstudy",
+                status="system",
+                description="系统内部项目：承载未绑定正式项目的 DeepStudy 任务，不在项目书架展示。",
             )
             db.add(row)
             await db.flush()

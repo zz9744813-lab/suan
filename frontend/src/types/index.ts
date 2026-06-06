@@ -108,6 +108,55 @@ export type AgentTask = {
   summary_json?: Record<string, any> | null;
 };
 
+// ---- P0 任务中控台 (command-center) ----
+export type TaskDisplayItem = {
+  id: number;
+  domain: string | null;
+  task_kind: string | null;
+  task_type: string | null;
+  title: string;
+  status: string;
+  project_id: number | null;
+  chapter_id: number | null;
+  material_id: number | null;
+  run_id: number | null;
+  progress_current: number;
+  progress_total: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  error: string | null;
+  summary_json: Record<string, any> | null;
+};
+
+export type TaskDomainSummary = {
+  domain: string;
+  label: string;
+  status: "idle" | "running" | "blocked" | "failed" | "succeeded";
+  running: number;
+  pending: number;
+  failed: number;
+  succeeded_today: number;
+  cost_today: number;
+  tokens_today: number;
+  current_task_id: number | null;
+  current_title: string | null;
+  progress_current: number;
+  progress_total: number;
+  last_event: string | null;
+};
+
+export type TaskCommandCenter = {
+  generated_at: string;
+  domains: TaskDomainSummary[];
+  active: TaskDisplayItem[];
+  needs_attention: TaskDisplayItem[];
+  recent_completed: TaskDisplayItem[];
+};
+
 export type AgentStep = {
   id: number;
   task_id: number;

@@ -13,6 +13,7 @@ import {
   listTasks, retryTask, cancelTask, taskSteps,
 } from "../api";
 import type { AgentTask, AgentStep } from "../types";
+import { CommandCenterPanel } from "../components/tasks/CommandCenterPanel";
 import "./TasksPage.css";
 
 type DomainTab = "all" | "writing" | "model" | "discussion" | "memory" | "export" | "failed";
@@ -196,6 +197,20 @@ export function TasksPage() {
         <div className={`tasks-flash tasks-flash-${flash.type}`}>{flash.text}</div>
       )}
 
+      {/* P0 任务中控台 — 顶部固定, 8s 轮询 */}
+      <CommandCenterPanel
+        pollIntervalMs={8000}
+        onTaskClick={(id) => {
+          // 点中控台任务 → 选中该任务并展开详情
+          setExpandedId(id);
+          // 滚动到该任务卡
+          setTimeout(() => {
+            const el = document.getElementById(`task-card-${id}`);
+            if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 100);
+        }}
+      />
+
       {/* Task card list */}
       <div className="tasks-card-list">
         {visibleTasks.length === 0 ? (
@@ -214,7 +229,7 @@ export function TasksPage() {
             const summary = (t as any).summary_json || {};
 
             return (
-              <div key={t.id} className={`card task-card ${expanded ? "expanded" : ""}`}>
+              <div key={t.id} id={`task-card-${t.id}`} className={`card task-card ${expanded ? "expanded" : ""}`}>
                 {/* Card header */}
                 <div className="task-card-head" onClick={() => setExpandedId(expanded ? null : t.id)} style={{ cursor: "pointer" }}>
                   <div className="task-card-title-row">

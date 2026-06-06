@@ -54,6 +54,8 @@ import type {
   WorkerStatus,
   // B3
   MultiWorkerStatus,
+  // P0 任务中控台
+  TaskCommandCenter,
   // P7
   GenrePromptMapping,
   GenrePromptMatrixResponse,
@@ -177,6 +179,10 @@ export const listTasks = (params: {
   const s = q.toString();
   return api.get<AgentTask[]>(`/api/tasks${s ? `?${s}` : ""}`);
 };
+
+// P0 任务中控台 — 一次拿到所有需要展示的数据
+export const getCommandCenter = () =>
+  api.get<TaskCommandCenter>(`/api/tasks/command-center`);
 export const createTask = (body: Partial<AgentTask>) =>
   api.post<AgentTask>("/api/tasks", body);
 export const getTask = (id: number) => api.get<AgentTask>(`/api/tasks/${id}`);

@@ -18,12 +18,20 @@ from app.schemas import (
     AgentStepRead,
     AgentTaskCreate,
     AgentTaskRead,
+    TaskCommandCenterResponse,
     TaskDiagnosisRead,
     TaskDiagnosisStep,
     TaskDiagnosisSuggestion,
+    TaskDisplayItem,
+    TaskDomainSummary,
     TaskRetryRequest,
 )
-from app.schemas.task import PIPELINE_STEP_ORDER, STEP_LABELS
+from app.schemas.task import (
+    PIPELINE_STEP_ORDER,
+    STEP_LABELS,
+    TASK_DOMAINS,
+    TASK_DOMAIN_LABELS,
+)
 
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -79,6 +87,202 @@ async def create_task(
     db.add(row)
     await db.flush()
     return {"ok": True, "data": AgentTaskRead.model_validate(row)}
+
+
+# ----- P0 任务中控台 -----
+
+# 历史脏数据兜底过滤: 即便 visibility 字段不规范, 也不在 command-center
+# 出现刷屏。 与前端 TasksPage 用的 HIDDEN_TASK_KINDS 对齐。
+_COMMAND_CENTER_HIDDEN_KINDS = {
+    "comment_cleanup", "heartbeat", "cleanup", "audit_cleanup",
+    "study_character", "study_event", "study_relationship", "study_behavior",
+    "study_bulk_character", "study_bulk_event", "study_bulk_relationship",
+    "study_bulk_behavior", "study_bulk_foreshadow", "study_bulk_technique",
+    "study_technique", "study_foreshadow", "study_behavior_pattern",
+    "deepstudy_stage", "deepstudy_run_internal",
+}
+_COMMAND_CENTER_HIDDEN_TYPES = {
+    "comment_cleanup", "study_character", "study_event",
+    "study_relationship", "study_behavior", "heartbeat", "cleanup", "audit_cleanup",
+}
+
+
+def _to_display_item(r: AgentTask) -> TaskDisplayItem:
+    """AgentTask row -> TaskDisplayItem (P0 中控台)."""
+    title = (
+        r.display_title
+        or r.task_kind
+        or r.task_type
+        or f"任务 #{r.id}"
+    )
+    summary_json = None
+    if isinstance(r.summary_json, dict):
+        summary_json = r.summary_json
+    elif isinstance(r.payload, dict) and isinstance(r.payload.get("summary"), dict):
+        summary_json = r.payload["summary"]
+    return TaskDisplayItem(
+        id=r.id,
+        domain=r.domain,
+        task_kind=r.task_kind,
+        task_type=r.task_type,
+        title=title,
+        status=r.status,
+        project_id=r.project_id,
+        chapter_id=r.chapter_id,
+        material_id=r.material_id,
+        run_id=r.run_id,
+        progress_current=int(r.progress_current or 0),
+        progress_total=int(r.progress_total or 0),
+        cost_usd=float(r.cost_usd or 0.0),
+        input_tokens=int(r.input_tokens or 0),
+        output_tokens=int(r.output_tokens or 0),
+        started_at=r.started_at.isoformat() if r.started_at else None,
+        finished_at=r.finished_at.isoformat() if r.finished_at else None,
+        created_at=r.created_at.isoformat() if r.created_at else "",
+        error=r.error,
+        summary_json=summary_json,
+    )
+
+
+@router.get("/command-center", response_model=APIResponse[TaskCommandCenterResponse])
+async def get_command_center(
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[TaskCommandCenterResponse]:
+    """P0 任务中控台 — 一次拿到中控台需要的所有数据。
+
+    数据分四块:
+    - domains: 6 个 domain 的汇总 (writing / deepstudy / discussion / memory / model / export)
+    - active: 正在跑 / 等待 / 阻塞的任务, 最多 5 条
+    - needs_attention: 失败/需处理任务
+    - recent_completed: 最近 24h 完成的任务
+
+    过滤: visibility='user' + 硬过滤历史脏任务 (kind/type 黑名单)。
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import or_
+
+    now = datetime.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_ago = now - timedelta(hours=24)
+
+    # ----- 1. 拉所有 user-visible 任务 -----
+    base_stmt = (
+        select(AgentTask)
+        .where(AgentTask.visibility == "user")
+        .order_by(AgentTask.id.desc())
+    )
+    # 硬过滤脏数据 (前端 HIDDEN_TASK_KINDS 对齐)
+    base_stmt = base_stmt.where(
+        or_(AgentTask.task_kind.is_(None), ~AgentTask.task_kind.in_(_COMMAND_CENTER_HIDDEN_KINDS)),
+        or_(AgentTask.task_type.is_(None), ~AgentTask.task_type.in_(_COMMAND_CENTER_HIDDEN_TYPES)),
+    )
+    all_rows = (await db.execute(base_stmt)).scalars().all()
+
+    # ----- 2. 按 domain 汇总 -----
+    domain_stats: dict[str, dict[str, Any]] = {
+        d: {
+            "running": 0, "pending": 0, "failed": 0,
+            "succeeded_today": 0, "cost_today": 0.0, "tokens_today": 0,
+            "current_task_id": None, "current_title": None,
+            "progress_current": 0, "progress_total": 0,
+        }
+        for d in TASK_DOMAINS
+    }
+    # 未在 TASK_DOMAINS 里的 domain 兜底 (writing/... 一律视为空)
+    for r in all_rows:
+        d = r.domain or ""
+        if d not in domain_stats:
+            # 未知 domain 也按字符串聚合 — 但前端不展示, 留个哨兵
+            domain_stats.setdefault(d, {
+                "running": 0, "pending": 0, "failed": 0,
+                "succeeded_today": 0, "cost_today": 0.0, "tokens_today": 0,
+                "current_task_id": None, "current_title": None,
+                "progress_current": 0, "progress_total": 0,
+            })
+        s = domain_stats[d]
+        if r.status == "running":
+            s["running"] += 1
+            if s["current_task_id"] is None:
+                s["current_task_id"] = r.id
+                s["current_title"] = (
+                    r.display_title or r.task_kind or r.task_type or f"#{r.id}"
+                )
+                s["progress_current"] = int(r.progress_current or 0)
+                s["progress_total"] = int(r.progress_total or 0)
+        elif r.status in ("pending", "queued"):
+            s["pending"] += 1
+        elif r.status == "failed":
+            s["failed"] += 1
+        # 今日成功 / 成本 / token
+        if r.status == "succeeded" and r.finished_at and r.finished_at >= today_start:
+            s["succeeded_today"] += 1
+            s["cost_today"] += float(r.cost_usd or 0.0)
+            s["tokens_today"] += int(r.input_tokens or 0) + int(r.output_tokens or 0)
+
+    # 转成 schema, 算 status
+    domain_summaries: list[TaskDomainSummary] = []
+    for d in TASK_DOMAINS:
+        s = domain_stats[d]
+        if s["failed"] > 0:
+            status = "failed"
+        elif s["running"] > 0:
+            status = "running"
+        elif s["pending"] > 0:
+            status = "blocked"
+        elif s["succeeded_today"] > 0:
+            status = "succeeded"
+        else:
+            status = "idle"
+        domain_summaries.append(TaskDomainSummary(
+            domain=d, label=TASK_DOMAIN_LABELS[d], status=status,
+            running=s["running"], pending=s["pending"], failed=s["failed"],
+            succeeded_today=s["succeeded_today"],
+            cost_today=round(s["cost_today"], 6),
+            tokens_today=s["tokens_today"],
+            current_task_id=s["current_task_id"],
+            current_title=s["current_title"],
+            progress_current=s["progress_current"],
+            progress_total=s["progress_total"],
+            last_event=None,
+        ))
+
+    # ----- 3. active: 正在跑/等待, 最多 5 条 -----
+    active = [
+        _to_display_item(r) for r in all_rows
+        if r.status in ("running", "pending", "queued")
+    ][:5]
+
+    # ----- 4. needs_attention: 失败 + 阻塞超过 30 分钟 -----
+    thirty_min_ago = now - timedelta(minutes=30)
+    needs_attention = []
+    for r in all_rows:
+        if r.status == "failed":
+            needs_attention.append(r)
+        elif r.status in ("pending", "queued") and r.created_at and r.created_at < thirty_min_ago:
+            needs_attention.append(r)
+    # 按 created_at 降序, 最多 10
+    needs_attention.sort(key=lambda x: x.created_at or now, reverse=True)
+    needs_attention = [_to_display_item(r) for r in needs_attention[:10]]
+
+    # ----- 5. recent_completed: 最近 24h succeeded -----
+    recent = [
+        r for r in all_rows
+        if r.status == "succeeded"
+        and r.finished_at and r.finished_at >= day_ago
+    ]
+    recent = sorted(recent, key=lambda x: x.finished_at or now, reverse=True)[:10]
+    recent = [_to_display_item(r) for r in recent]
+
+    return {
+        "ok": True,
+        "data": TaskCommandCenterResponse(
+            generated_at=now.isoformat(),
+            domains=domain_summaries,
+            active=active,
+            needs_attention=needs_attention,
+            recent_completed=recent,
+        ),
+    }
 
 
 @router.get("/{task_id}", response_model=APIResponse[AgentTaskRead])

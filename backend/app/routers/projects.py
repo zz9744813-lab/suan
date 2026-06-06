@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.errors import not_found
+from app.core.errors import bad_request, not_found
 from app.models.memory import MemoryCharacter
 from app.models.project import Bible, Chapter, ChapterVersion, Outline, Project
 from app.models.task import AgentTask, WorkerPolicy
@@ -193,13 +193,35 @@ async def _project_to_read(db: AsyncSession, p: Project) -> ProjectRead:
 
 
 @router.get("", response_model=APIResponse[list[ProjectRead]])
-async def list_projects(db: AsyncSession = Depends(get_db)) -> APIResponse[list[ProjectRead]]:
+async def list_projects(
+    include_system: bool = Query(False, description="包含拆书/系统/DeepStudy 内部项目, 默认 False"),
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[list[ProjectRead]]:
     # Round 2: order by pinned DESC, then sort_order ASC, then id ASC.
     # Pinned projects float to the top regardless of bucket; within a
     # bucket, sort_order controls the user's preferred order; id
     # breaks ties for projects that haven't been touched yet.
+    #
+    # P0 修复: 默认隐藏拆书·公共 / category in (study, deepstudy, __system_deepstudy) /
+    # genre in (system, study, deepstudy) / name="__NF2_SYSTEM_DEEPSTUDY__"
+    # 这些是 DeepStudy 自动建的系统占位项目, 不应在小说项目书架出现。
+    # 审计 / 调试页加 include_system=true 拿到全部。
+    stmt = select(Project)
+    if not include_system:
+        from sqlalchemy import or_  # SQLite NULL NOT IN 踩坑防护
+        stmt = stmt.where(
+            Project.name.notin_(["拆书·公共", "__NF2_SYSTEM_DEEPSTUDY__"]),
+            or_(
+                Project.category.is_(None),
+                ~Project.category.in_(["study", "deepstudy", "__system_deepstudy"]),
+            ),
+            or_(
+                Project.genre.is_(None),
+                ~Project.genre.in_(["system", "study", "deepstudy"]),
+            ),
+        )
     rows = (await db.execute(
-        select(Project).order_by(
+        stmt.order_by(
             Project.pinned.desc(),
             Project.sort_order.asc(),
             Project.id.asc(),
@@ -215,14 +237,23 @@ async def create_project(
     # Round 2: if the form didn't supply a category, fall back to
     # the genre so the new project lands in the right bucket by
     # default.
-    category = body.category or body.genre
+    #
+    # P0 修复: 字段 trim + name 必填保护 (前端虽然校验了, 后端兜底)。
+    name = (body.name or "").strip()
+    if not name:
+        raise bad_request("项目名称不能为空。")
+    if len(name) > 200:
+        raise bad_request("项目名称不能超过 200 字。")
+    genre = (body.genre or "玄幻").strip() or "玄幻"
+    category_src = (body.category or body.genre or "").strip() or genre
+    description = (body.description or "").strip() or None
     p = Project(
-        name=body.name, genre=body.genre,
-        category=category,
+        name=name, genre=genre,
+        category=category_src,
         pinned=body.pinned,
         target_word_count=body.target_word_count,
         target_chapter_count=body.target_chapter_count,
-        description=body.description,
+        description=description,
     )
     db.add(p)
     await db.flush()
