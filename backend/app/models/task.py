@@ -42,6 +42,10 @@ class AgentTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
     # 延迟重试: 若该字段非 None 且 > now(), Worker 不拾取该任务
     not_before_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(120), default=None, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(default=None, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(120), default=None, index=True)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
 
