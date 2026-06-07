@@ -40,6 +40,7 @@ from app.models.study import (
 from app.models.deepstudy import (
     BehaviorPatternEvidence,
     ChapterAnalysis,
+    DeepStudyStageResult,
     Entity,
     EntityMention,
     ForeshadowChain,
@@ -98,6 +99,7 @@ from app.models.agent_memory import (
 )
 from app.models.model_runtime import ModelRuntimeStat
 from app.models.model_call_event import ModelCallEvent
+from app.models.llm_cache import LLMCacheEntry
 from app.models.project_study_link import ProjectStudyMaterialLink
 from app.models.prompt_auto_fill import (
     PromptAutoFillBatch,
@@ -144,6 +146,7 @@ __all__ = [
     "ForeshadowChain",
     "BehaviorPatternEvidence",
     "WritingTechnique",
+    "DeepStudyStageResult",
     # DeepStudy knowledge graph (two-layer)
     "DeepStudyGraph",
     "DeepStudyGraphNode",
@@ -193,6 +196,7 @@ __all__ = [
     # P0-Model-Failover: model runtime stats + call events
     "ModelRuntimeStat",
     "ModelCallEvent",
+    "LLMCacheEntry",
     # NF2: Prompt auto-fill audit models
     "PromptAutoFillBatch",
     "PromptRecommendationLog",

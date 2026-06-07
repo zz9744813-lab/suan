@@ -67,6 +67,11 @@ async def call_llm(
     temperature: float | None = None,
     max_tokens: int | None = None,
     response_format: dict[str, str] | None = None,
+    project_id: int | None = None,
+    task_id: int | None = None,
+    chapter_id: int | None = None,
+    step_key: str | None = None,
+    task_type: str = "deepstudy",
 ) -> tuple[Any, Any]:
     """Call the LLM with a rendered prompt and return (resolved, result).
 
@@ -94,6 +99,11 @@ async def call_llm(
         temperature=temperature,
         max_tokens=max_tokens,
         response_format=response_format,
+        project_id=project_id,
+        task_id=task_id,
+        chapter_id=chapter_id,
+        step_key=step_key or prompt_key,
+        task_type=task_type,
         stream=False,
     )
 

@@ -13,6 +13,9 @@ from app.schemas.project import (
     ProjectReorderItem,
     ProjectReorderRequest,
     ProjectUpdate,
+    ProjectWorkspaceChapter,
+    ProjectWorkspaceResponse,
+    ProjectWorkspaceTocItem,
 )
 from app.schemas.task import (
     AgentEventRead,

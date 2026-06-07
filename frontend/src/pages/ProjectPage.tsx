@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  getBible, updateBible, listOutlines, createOutline, bulkCreateOutlines,
+  getBible, getProjectWorkspace, updateBible, listOutlines, createOutline, bulkCreateOutlines,
   listChapters, createChapter, getProject, getPolicy, updatePolicy,
   createTask, workerStart, listTasks, deleteProject, updateProject,
   exportProjectFile, type ProjectExportFormat,
 } from "../api";
-import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask } from "../types";
+import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask, ProjectWorkspace } from "../types";
 import { useProjectStore } from "../stores/projectStore";
 import { ShelfBreadcrumb } from "../components/shelf";
 import { LaunchProjectDialog } from "../components/projects/LaunchProjectDialog";
 
 const TABS = [
+  { key: "workspace", label: "书内" },
   { key: "overview", label: "概览" },
   { key: "bible", label: "主设定" },
   { key: "outlines", label: "大纲" },
@@ -25,7 +26,8 @@ export function ProjectPage() {
   const projectId = Number(pid);
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
-  const [tab, setTab] = useState<TabKey>("overview");
+  const [tab, setTab] = useState<TabKey>("workspace");
+  const [workspace, setWorkspace] = useState<ProjectWorkspace | null>(null);
   const [bible, setBible] = useState<Bible | null>(null);
   const [outlines, setOutlines] = useState<Outline[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -36,15 +38,37 @@ export function ProjectPage() {
   const [showLaunch, setShowLaunch] = useState(false);
   const selectProject = useProjectStore((s) => s.selectProject);
 
+  const refreshWorkspace = async (params: { chapter_id?: number; chapter_no?: number } = {}) => {
+    const data = await getProjectWorkspace(projectId, params);
+    setWorkspace(data);
+    setProject(data.project);
+    setBible(data.bible);
+    setTasks(data.latest_tasks as any);
+  };
+
   useEffect(() => {
     selectProject(projectId);
-    getProject(projectId).then(setProject).catch((e) => setErr(e.message));
-    getBible(projectId).then(setBible).catch(() => {});
-    listOutlines(projectId).then(setOutlines).catch(() => {});
-    listChapters(projectId).then(setChapters).catch(() => {});
-    getPolicy(projectId).then(setPolicy).catch(() => {});
-    listTasks({ project_id: projectId, limit: 10 }).then(setTasks).catch(() => {});
+    setErr(null);
+    refreshWorkspace().catch((e) => setErr(e.message));
   }, [projectId, selectProject]);
+
+  useEffect(() => {
+    if (tab === "outlines" && outlines.length === 0) {
+      listOutlines(projectId).then(setOutlines).catch(() => {});
+    }
+    if ((tab === "chapters" || tab === "overview") && chapters.length === 0) {
+      listChapters(projectId).then(setChapters).catch(() => {});
+    }
+    if (tab === "bible" && bible === null) {
+      getBible(projectId).then(setBible).catch(() => {});
+    }
+    if (tab === "policy" && policy === null) {
+      getPolicy(projectId).then(setPolicy).catch(() => {});
+    }
+    if (tab === "overview" && tasks.length === 0) {
+      listTasks({ project_id: projectId, limit: 10 }).then(setTasks).catch(() => {});
+    }
+  }, [tab, projectId, outlines.length, chapters.length, bible, policy, tasks.length]);
 
   const onStartPipeline = async (chapterId: number) => {
     setBusy(true);
@@ -69,6 +93,8 @@ export function ProjectPage() {
     } catch (e: any) { alert(e.message ?? String(e)); }
   };
 
+  const hasWorkspaceChapters = workspace?.toc.some((item) => item.chapter_id != null) ?? chapters.length > 0;
+
   if (err) return <div className="page-empty"><div className="big">无法加载</div>{err}</div>;
   if (!project) return <div className="page-empty"><span className="spinner" /> 加载项目…</div>;
 
@@ -91,7 +117,7 @@ export function ProjectPage() {
           {" "}{project.total_words.toLocaleString()} / {project.target_word_count.toLocaleString()} 字
         </span>
         <div className="actions">
-          {chapters.length === 0 && (
+          {!hasWorkspaceChapters && (
             <button
               className="primary"
               onClick={() => setShowLaunch(true)}
@@ -114,6 +140,7 @@ export function ProjectPage() {
         projectName={project.name}
         onClose={() => setShowLaunch(false)}
         onLaunched={() => {
+          refreshWorkspace().catch(() => {});
           listTasks({ project_id: projectId, limit: 10 }).then(setTasks).catch(() => {});
           listChapters(projectId).then(setChapters).catch(() => {});
           listOutlines(projectId).then(setOutlines).catch(() => {});
@@ -135,6 +162,20 @@ export function ProjectPage() {
         </div>
 
         <div style={{ padding: "0 24px 24px" }}>
+          {tab === "workspace" && (
+            <BookWorkspaceTab
+              workspace={workspace}
+              onEditBible={() => setTab("bible")}
+              onSelectChapter={(item) => {
+                if (item.chapter_id) {
+                  refreshWorkspace({ chapter_id: item.chapter_id }).catch((e) => setErr(e.message));
+                } else {
+                  refreshWorkspace({ chapter_no: item.chapter_no }).catch((e) => setErr(e.message));
+                }
+              }}
+              onLaunch={() => setShowLaunch(true)}
+            />
+          )}
           {tab === "overview" && (
             <OverviewTab
               project={project}
@@ -187,6 +228,218 @@ export function ProjectPage() {
       </div>
     </div>
   );
+}
+
+function BookWorkspaceTab({
+  workspace,
+  onEditBible,
+  onSelectChapter,
+  onLaunch,
+}: {
+  workspace: ProjectWorkspace | null;
+  onEditBible: () => void;
+  onSelectChapter: (item: ProjectWorkspace["toc"][number]) => void;
+  onLaunch: () => void;
+}) {
+  if (!workspace) {
+    return <div className="page-empty"><span className="spinner" /> 正在打开作品...</div>;
+  }
+  const selected = workspace.selected_chapter;
+  const bibleContent = workspace.bible?.content ?? {};
+  const worldItems = [
+    ["世界观", bibleContent.world],
+    ["主线", bibleContent.main_plot ?? bibleContent.plot],
+    ["规则", bibleContent.rules ?? bibleContent.world_rules],
+    ["主角", bibleContent.protagonist],
+  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const hasAnyChapter = workspace.toc.some((item) => item.chapter_id != null);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "280px minmax(0, 1fr) 340px",
+        gap: 16,
+        alignItems: "start",
+      }}
+    >
+      <aside className="card" style={{ position: "sticky", top: 12, maxHeight: "calc(100vh - 170px)", overflow: "auto" }}>
+        <div className="card-header">
+          <h3>目录</h3>
+          <span className="muted small">{workspace.toc.length} 章</span>
+        </div>
+        {workspace.toc.length === 0 ? (
+          <div>
+            <div className="muted">这本书还没有目录。</div>
+            <button className="primary" style={{ marginTop: 12, width: "100%" }} onClick={onLaunch}>
+              启动创作
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {workspace.toc.map((item) => (
+              <button
+                key={`${item.chapter_no}-${item.chapter_id ?? "outline"}`}
+                className={`ghost ${item.selected ? "active" : ""}`}
+                onClick={() => onSelectChapter(item)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  border: item.selected ? "1px solid var(--accent-gold)" : "1px solid var(--border)",
+                  background: item.selected ? "var(--surface-2)" : "transparent",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong>第 {item.chapter_no} 章</strong>
+                  <span className={`pill ${item.has_content ? "succeeded" : "pending"}`}>
+                    {item.has_content ? "有正文" : item.chapter_id ? "待生成" : "大纲"}
+                  </span>
+                </div>
+                <div className="small" style={{ marginTop: 4 }}>{item.title}</div>
+                <div className="muted tiny" style={{ marginTop: 4 }}>
+                  {item.actual_word_count || 0} / {item.target_word_count || 0} 字
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </aside>
+
+      <main className="card" style={{ minHeight: "calc(100vh - 170px)" }}>
+        <div className="card-header">
+          <div>
+            <h3>{selected ? `第 ${selected.chapter_no} 章：${selected.title}` : workspace.project.name}</h3>
+            {selected && (
+              <div className="muted small">
+                {selected.version_kind ? `${selected.version_kind} v${selected.version_no ?? "-"}` : "暂无正文版本"}
+                {" · "}
+                {selected.actual_word_count} / {selected.target_word_count} 字
+                {selected.current_score != null ? ` · ${selected.current_score} 分` : ""}
+              </div>
+            )}
+          </div>
+          {selected?.id && <Link className="button" to={`/projects/${workspace.project.id}/chapters/${selected.id}`}>打开章节</Link>}
+        </div>
+
+        {!hasAnyChapter ? (
+          <div className="page-empty" style={{ minHeight: 360 }}>
+            <div className="big">这本书还没有章节</div>
+            <div className="muted">可以先录入大纲，也可以让系统自动生成大纲、角色和世界观。</div>
+            <button className="primary" style={{ marginTop: 16 }} onClick={onLaunch}>启动创作</button>
+          </div>
+        ) : selected?.content?.trim() ? (
+          <article
+            style={{
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.9,
+              fontSize: 16,
+              maxWidth: 820,
+              margin: "8px auto 0",
+            }}
+          >
+            {selected.content}
+          </article>
+        ) : (
+          <div className="page-empty" style={{ minHeight: 360 }}>
+            <div className="big">这一章还没有正文</div>
+            {selected?.outline_summary && <div className="muted" style={{ maxWidth: 680 }}>{selected.outline_summary}</div>}
+            {selected?.id && (
+              <Link className="button primary" style={{ marginTop: 16 }} to={`/projects/${workspace.project.id}/chapters/${selected.id}`}>
+                去生成正文
+              </Link>
+            )}
+          </div>
+        )}
+      </main>
+
+      <aside style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <section className="card">
+          <div className="card-header">
+            <h3>世界观</h3>
+            <button className="ghost" type="button" onClick={onEditBible}>编辑</button>
+          </div>
+          {worldItems.length === 0 ? (
+            <div className="muted">还没有主设定。</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {worldItems.map(([label, value]) => (
+                <div key={label}>
+                  <div className="muted tiny">{label}</div>
+                  <div className="small" style={{ whiteSpace: "pre-wrap" }}>{formatBibleValue(value)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <h3>角色</h3>
+            <Link className="ghost" to={`/memory-shelf/${workspace.project.id}`}>{workspace.characters.length}</Link>
+          </div>
+          {workspace.characters.length === 0 ? (
+            <div className="muted">还没有角色设定。</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {workspace.characters.slice(0, 8).map((character) => (
+                <div key={character.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <strong>{character.name}</strong>
+                    <span className="pill">{roleLabel(character.role)}</span>
+                  </div>
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {character.latest_state?.current_goal || character.latest_state?.emotion_state || profileSummary(character.base_profile)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <h3>最近任务</h3>
+            <Link className="ghost" to="/tasks">全部</Link>
+          </div>
+          {workspace.latest_tasks.length === 0 ? (
+            <div className="muted">暂无任务。</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {workspace.latest_tasks.slice(0, 5).map((task) => (
+                <div key={task.id} className="small" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span>{task.display_title || task.task_kind || task.task_type}</span>
+                  <span className={`pill ${task.status}`}>{task.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function formatBibleValue(value: any): string {
+  if (Array.isArray(value)) return value.join("\n");
+  if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
+  return String(value ?? "");
+}
+
+function profileSummary(profile: Record<string, any>): string {
+  return profile.description || profile.summary || profile.goal || "暂无动态";
+}
+
+function roleLabel(role: string): string {
+  const map: Record<string, string> = {
+    protagonist: "主角",
+    antagonist: "反派",
+    villain: "反派",
+    heroine: "女主",
+    support: "配角",
+    supporting: "配角",
+  };
+  return map[role] ?? role;
 }
 
 function OverviewTab({ project, chapters, tasks, onLaunch, onSaveMeta }: {

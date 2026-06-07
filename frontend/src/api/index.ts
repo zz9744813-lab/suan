@@ -32,6 +32,7 @@ import type {
   ProviderDeletePreview,
   Outline,
   Project,
+  ProjectWorkspace,
   PromptTemplate,
   PromptVersion,
   SearchResult,
@@ -74,6 +75,16 @@ export const listProjects = (params: { include_system?: boolean } = {}) => {
   return api.get<Project[]>(`/api/projects${q}`);
 };
 export const getProject = (id: number) => api.get<Project>(`/api/projects/${id}`);
+export const getProjectWorkspace = (
+  id: number,
+  params: { chapter_id?: number; chapter_no?: number } = {}
+) => {
+  const q = new URLSearchParams();
+  if (params.chapter_id) q.set("chapter_id", String(params.chapter_id));
+  if (params.chapter_no) q.set("chapter_no", String(params.chapter_no));
+  const s = q.toString();
+  return api.get<ProjectWorkspace>(`/api/projects/${id}/workspace${s ? `?${s}` : ""}`);
+};
 export const createProject = (body: Partial<Project>) =>
   api.post<Project>("/api/projects", body);
 export const updateProject = (id: number, body: Partial<Project>) =>

@@ -7,7 +7,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,9 +28,13 @@ from app.schemas import (
     ProjectRead,
     ProjectReorderRequest,
     ProjectUpdate,
+    ProjectWorkspaceChapter,
+    ProjectWorkspaceResponse,
+    ProjectWorkspaceTocItem,
     WorkerPolicyRead,
     WorkerPolicyUpdate,
 )
+from app.schemas.memory import MemoryCharacterRead, MemoryCharacterStateRead
 from app.schemas.project import ProjectLaunchRequest
 from app.services.project_launch import ProjectLaunchService
 
@@ -284,6 +288,178 @@ async def get_project(
     p.last_opened_at = datetime.utcnow()
     await db.flush()
     return {"ok": True, "data": await _project_to_read(db, p)}
+
+
+@router.get("/{project_id}/workspace", response_model=APIResponse[ProjectWorkspaceResponse])
+async def get_project_workspace(
+    project_id: int,
+    chapter_id: int | None = Query(default=None),
+    chapter_no: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[ProjectWorkspaceResponse]:
+    """Return the book-internal second layer for one project.
+
+    A project is the book. This endpoint gathers the pieces the UI needs
+    when the user opens that book from the shelf: table of contents,
+    selected chapter text, world/bible, characters, and recent user tasks.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise not_found("Project", project_id)
+    project.last_opened_at = datetime.utcnow()
+
+    bible = (await db.execute(
+        select(Bible).where(Bible.project_id == project_id, Bible.is_active.is_(True))
+    )).scalar_one_or_none()
+
+    outlines = (await db.execute(
+        select(Outline)
+        .where(Outline.project_id == project_id)
+        .order_by(Outline.chapter_no.asc(), Outline.id.asc())
+    )).scalars().all()
+
+    chapters = (await db.execute(
+        select(Chapter)
+        .where(Chapter.project_id == project_id)
+        .order_by(Chapter.chapter_no.asc(), Chapter.id.asc())
+    )).scalars().all()
+    chapter_ids = [chapter.id for chapter in chapters]
+
+    versions_by_chapter: dict[int, list[ChapterVersion]] = {cid: [] for cid in chapter_ids}
+    if chapter_ids:
+        versions = (await db.execute(
+            select(ChapterVersion)
+            .where(ChapterVersion.chapter_id.in_(chapter_ids))
+            .order_by(
+                ChapterVersion.chapter_id.asc(),
+                ChapterVersion.version_kind.asc(),
+                ChapterVersion.version_no.asc(),
+                ChapterVersion.id.asc(),
+            )
+        )).scalars().all()
+        for version in versions:
+            versions_by_chapter.setdefault(version.chapter_id, []).append(version)
+
+    outline_by_no = {outline.chapter_no: outline for outline in outlines}
+    chapter_by_no = {chapter.chapter_no: chapter for chapter in chapters}
+    selected: Chapter | None = None
+    if chapter_id is not None:
+        selected = next((chapter for chapter in chapters if chapter.id == chapter_id), None)
+    if selected is None and chapter_no is not None:
+        selected = chapter_by_no.get(chapter_no)
+    if selected is None and chapters:
+        selected = chapters[0]
+
+    selected_version = _pick_export_version(versions_by_chapter.get(selected.id, [])) if selected else None
+    selected_no = selected.chapter_no if selected else chapter_no
+
+    toc: list[ProjectWorkspaceTocItem] = []
+    for no in sorted(set(outline_by_no) | set(chapter_by_no)):
+        outline = outline_by_no.get(no)
+        chapter = chapter_by_no.get(no)
+        picked = _pick_export_version(versions_by_chapter.get(chapter.id, [])) if chapter else None
+        toc.append(ProjectWorkspaceTocItem(
+            chapter_no=no,
+            title=(chapter.title if chapter else outline.title if outline else f"Chapter {no}"),
+            outline_id=outline.id if outline else None,
+            chapter_id=chapter.id if chapter else None,
+            outline_summary=outline.summary if outline else None,
+            target_word_count=(
+                chapter.target_word_count if chapter
+                else outline.target_word_count if outline else 0
+            ),
+            actual_word_count=chapter.actual_word_count if chapter else 0,
+            status=chapter.status if chapter else outline.status if outline else "outline",
+            has_content=bool(picked and (picked.content or "").strip()),
+            selected=(selected_no == no),
+        ))
+
+    selected_payload: ProjectWorkspaceChapter | None = None
+    if selected is not None:
+        outline = outline_by_no.get(selected.chapter_no)
+        selected_payload = ProjectWorkspaceChapter(
+            id=selected.id,
+            chapter_no=selected.chapter_no,
+            title=selected.title,
+            status=selected.status,
+            target_word_count=selected.target_word_count,
+            actual_word_count=selected.actual_word_count,
+            current_score=selected.current_score,
+            outline_id=selected.outline_id,
+            outline_summary=outline.summary if outline else None,
+            version_id=selected_version.id if selected_version else None,
+            version_kind=selected_version.version_kind if selected_version else None,
+            version_no=selected_version.version_no if selected_version else None,
+            version_score=selected_version.score if selected_version else None,
+            summary=selected_version.summary if selected_version else None,
+            content=selected_version.content if selected_version else "",
+            updated_at=selected.updated_at,
+        )
+
+    character_rows = (await db.execute(
+        select(MemoryCharacter)
+        .options(selectinload(MemoryCharacter.states))
+        .where(MemoryCharacter.project_id == project_id)
+        .order_by(MemoryCharacter.id.asc())
+    )).scalars().all()
+    characters = [
+        MemoryCharacterRead(
+            id=character.id,
+            project_id=character.project_id,
+            name=character.name,
+            aliases=character.aliases,
+            role=character.role,
+            tags=character.tags,
+            base_profile=character.base_profile,
+            latest_state=(
+                MemoryCharacterStateRead.model_validate(character.states[0])
+                if character.states else None
+            ),
+        )
+        for character in character_rows
+    ]
+
+    latest_tasks = (await db.execute(
+        select(AgentTask)
+        .where(
+            AgentTask.project_id == project_id,
+            or_(AgentTask.visibility.is_(None), AgentTask.visibility != "internal"),
+        )
+        .order_by(AgentTask.created_at.desc(), AgentTask.id.desc())
+        .limit(10)
+    )).scalars().all()
+    task_items = [
+        {
+            "id": task.id,
+            "project_id": task.project_id,
+            "chapter_id": task.chapter_id,
+            "task_type": task.task_type,
+            "task_kind": task.task_kind,
+            "display_title": task.display_title,
+            "status": task.status,
+            "error": task.error,
+            "progress_current": task.progress_current,
+            "progress_total": task.progress_total,
+            "cost_usd": task.cost_usd,
+            "input_tokens": task.input_tokens,
+            "output_tokens": task.output_tokens,
+            "created_at": task.created_at,
+            "started_at": task.started_at,
+            "finished_at": task.finished_at,
+        }
+        for task in latest_tasks
+    ]
+
+    payload = ProjectWorkspaceResponse(
+        project=await _project_to_read(db, project),
+        bible=BibleRead.model_validate(bible) if bible else None,
+        characters=characters,
+        toc=toc,
+        selected_chapter=selected_payload,
+        latest_tasks=task_items,
+    )
+    await db.flush()
+    return {"ok": True, "data": payload}
 
 
 @router.patch("/{project_id}", response_model=APIResponse[ProjectRead])

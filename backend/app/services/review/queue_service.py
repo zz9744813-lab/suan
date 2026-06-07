@@ -60,7 +60,7 @@ class ReviewQueueService:
         q = select(AgentTask).where(
             AgentTask.task_type == task_type,
             AgentTask.project_id == project_id,
-            AgentTask.status == "pending",
+            AgentTask.status.in_(["pending", "running"]),
         )
         if chapter_id is not None:
             q = q.where(AgentTask.chapter_id == chapter_id)
@@ -214,6 +214,21 @@ class ReviewQueueService:
         retention_days: int = 7,
         source: str = ENQUEUE_SOURCE_WORKER_START,
     ) -> EnqueueResult:
+        existing_cleanup = (
+            await db.execute(
+                select(AgentTask)
+                .where(
+                    AgentTask.task_type == "comment_cleanup",
+                    AgentTask.status.in_(["pending", "running"]),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_cleanup is not None:
+            return EnqueueResult(
+                task_id=None, skipped=True,
+                skip_reason="comment_cleanup already pending/running",
+            )
         # 清理任务不绑 project (跨项目), 用 project_id=0 表示"系统级"
         # 但 AgentTask.project_id 是 NOT NULL FK, 用第一个 project 兜底
         if await self._has_pending(db, task_type="comment_cleanup", project_id=0):
