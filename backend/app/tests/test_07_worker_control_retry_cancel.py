@@ -91,6 +91,7 @@ class TestWorkerControl:
             "writing_worker",
             "deepstudy_worker",
             "discussion_worker",
+            "review_worker",
             "memory_worker",
             "model_router",
         }

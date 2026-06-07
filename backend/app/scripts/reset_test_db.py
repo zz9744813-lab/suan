@@ -29,15 +29,16 @@ logging.disable(logging.CRITICAL)
 KEEP = {"alembic_version", "sqlite_sequence"}
 
 
-async def main() -> None:
+async def main(*, verbose: bool = True) -> None:
     async with session_scope() as db:
         rows = (await db.execute(text(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ))).all()
         tables = [r[0] for r in rows if r[0] not in KEEP]
-        print(f"  准备 TRUNCATE {len(tables)} 表:")
-        for t in tables:
-            print(f"    - {t}")
+        if verbose:
+            print(f"  准备 TRUNCATE {len(tables)} 表:")
+            for t in tables:
+                print(f"    - {t}")
 
         # 关外键, 否则顺序不对会卡
         await db.execute(text("PRAGMA foreign_keys = OFF"))
@@ -53,7 +54,8 @@ async def main() -> None:
         if seq_exists:
             await db.execute(text("DELETE FROM sqlite_sequence"))
 
-        print(f"  ✓ {len(tables)} 表已清空 (保留 alembic_version)")
+        if verbose:
+            print(f"  ✓ {len(tables)} 表已清空 (保留 alembic_version)")
 
 
 if __name__ == "__main__":

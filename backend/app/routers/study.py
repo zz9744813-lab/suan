@@ -489,6 +489,8 @@ async def create_material_from_text(
 async def upload_materials_batch(
     files: list[UploadFile] = File(...),
     auto_chapterize: bool = Form(default=True),
+    auto_deepstudy: bool = Form(default=True),
+    auto_start_worker: bool = Form(default=True),
     min_chapter_chars: int = Form(default=200),
     shelf_category: str | None = Form(default=None),
     tags_json: str | None = Form(default=None),
@@ -526,6 +528,7 @@ async def upload_materials_batch(
         except (json.JSONDecodeError, TypeError):
             parsed_tags = []
     results: list[dict[str, Any]] = []
+    queued_run_ids: list[int] = []
     for f in files:
         try:
             content = await f.read()
@@ -569,8 +572,11 @@ async def upload_materials_batch(
                     db,
                     row,
                     min_chapter_chars=min_chapter_chars,
-                    auto_start_worker=True,
+                    queue_deepstudy=auto_deepstudy,
+                    auto_start_worker=False,
                 )
+                if run_id is not None:
+                    queued_run_ids.append(run_id)
                 entry["data"]["deepstudy_run_id"] = run_id
                 entry["data"]["automation"] = {
                     "auto_chapterized": created > 0,
@@ -590,6 +596,19 @@ async def upload_materials_batch(
                 "filename": f.filename,
                 "error": f"{exc.__class__.__name__}: {exc}".strip(),
             })
+    if auto_start_worker and queued_run_ids:
+        async def _start_worker_after_response() -> None:
+            await asyncio.sleep(0.5)
+            try:
+                from app.workers.worker import get_worker
+
+                await get_worker().start()
+            except Exception:
+                # The upload already succeeded; worker status APIs will
+                # expose any later startup failure.
+                return
+
+        asyncio.create_task(_start_worker_after_response())
     return {"ok": True, "data": results}
 
 
