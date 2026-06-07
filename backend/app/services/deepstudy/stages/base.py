@@ -1,6 +1,7 @@
 """Base class for DeepStudy stage executors."""
+import asyncio
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime
 
 
 class BaseStage(ABC):
@@ -14,17 +15,16 @@ class BaseStage(ABC):
         ...
 
     async def execute_stage(self, db, run, stage_result_store):
-        """Execute the full stage across all chapters. Updates run progress.
+        """Execute the full stage across all chapters with checkpointing.
 
-        Commits after every chapter so that:
-        1. Progress is visible to the UI immediately.
-        2. The write lock is released, avoiding ``database is locked``
-           when other connections (e.g. the worker heartbeat or the
-           backend API) need to write.
-        3. A crash mid-stage does not lose already-processed chapters.
+        Each chapter runs in its own session so LLM waits do not hold a
+        long write transaction. Existing successful chapter results are
+        skipped, which makes a crashed 800+ chapter run resumable.
         """
+        from sqlalchemy import func, select
+        from app.core.database import session_scope
+        from app.models.deepstudy import DeepStudyStageResult, StudyRun
         from app.models.study import StudyChapter
-        from sqlalchemy import select
 
         chapters_result = await db.execute(
             select(StudyChapter).where(
@@ -33,55 +33,161 @@ class BaseStage(ABC):
         )
         chapters = chapters_result.scalars().all()
 
-        run.processed_chapters = 0
         run.total_chapters = len(chapters)
+        succeeded_indexes = set((await db.execute(
+            select(DeepStudyStageResult.chapter_index).where(
+                DeepStudyStageResult.run_id == run.id,
+                DeepStudyStageResult.stage_key == self.stage_key,
+                DeepStudyStageResult.status == "succeeded",
+            )
+        )).scalars().all())
+        run.processed_chapters = len(succeeded_indexes)
+        progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
+        progress["current_stage"] = self.stage_key
+        progress.setdefault("stage_totals", {})[self.stage_key] = {
+            "total": len(chapters),
+            "succeeded": len(succeeded_indexes),
+            "pending": max(0, len(chapters) - len(succeeded_indexes)),
+            "failed": 0,
+        }
+        run.progress = progress
+        await db.commit()
 
-        for ch in chapters:
-            try:
-                result = await self.execute_chapter(db, run, ch.chapter_index, ch.content or "")
-                # Save stage result
-                from app.models.deepstudy import DeepStudyStageResult
-                sr = DeepStudyStageResult(
-                    run_id=run.id,
-                    material_id=run.material_id,
-                    chapter_id=ch.id,
-                    chapter_index=ch.chapter_index,
-                    stage_key=self.stage_key,
-                    status="succeeded",
-                    output_json=result,
-                    input_tokens=result.get("_input_tokens", 0),
-                    output_tokens=result.get("_output_tokens", 0),
-                    cost_usd=result.get("_cost_usd", 0),
-                    duration_ms=result.get("_duration_ms", 0),
-                )
-                db.add(sr)
-                run.processed_chapters = (run.processed_chapters or 0) + 1
-            except Exception as e:
-                from app.models.deepstudy import DeepStudyStageResult
-                sr = DeepStudyStageResult(
-                    run_id=run.id,
-                    material_id=run.material_id,
-                    chapter_id=ch.id,
-                    chapter_index=ch.chapter_index,
-                    stage_key=self.stage_key,
-                    status="failed",
-                    error_message=str(e),
-                )
-                db.add(sr)
-                # Continue to next chapter, don't fail the whole run
+        pending = [ch for ch in chapters if ch.chapter_index not in succeeded_indexes]
+        plan = run.agent_plan if isinstance(run.agent_plan, dict) else {}
+        concurrency = int(plan.get("chapter_concurrency") or plan.get("concurrency") or 5)
+        concurrency = max(1, min(concurrency, 8))
+        sem = asyncio.Semaphore(concurrency)
 
-            # Commit per-chapter to release the write lock and make
-            # progress visible.  This is critical for long books (800+
-            # chapters) where a single transaction could last hours.
-            await db.commit()
+        async def process_chapter(chapter_id: int, chapter_index: int, chapter_text: str) -> None:
+            async with sem:
+                async with session_scope() as local_db:
+                    local_run = await local_db.get(StudyRun, run.id)
+                    if local_run is None:
+                        return
+                    existing = (await local_db.execute(
+                        select(DeepStudyStageResult)
+                        .where(
+                            DeepStudyStageResult.run_id == run.id,
+                            DeepStudyStageResult.stage_key == self.stage_key,
+                            DeepStudyStageResult.chapter_index == chapter_index,
+                        )
+                        .order_by(DeepStudyStageResult.id.desc())
+                    )).scalars().first()
+                    if existing is not None and existing.status == "succeeded":
+                        return
+                    if existing is None:
+                        existing = DeepStudyStageResult(
+                            run_id=run.id,
+                            material_id=run.material_id,
+                            chapter_id=chapter_id,
+                            chapter_index=chapter_index,
+                            stage_key=self.stage_key,
+                            status="running",
+                            input_snapshot={
+                                "chapter_index": chapter_index,
+                                "content_chars": len(chapter_text or ""),
+                            },
+                        )
+                        local_db.add(existing)
+                    else:
+                        existing.status = "running"
+                        existing.error_message = None
+                        existing.retry_count = (existing.retry_count or 0) + 1
+                        existing.input_snapshot = {
+                            "chapter_index": chapter_index,
+                            "content_chars": len(chapter_text or ""),
+                        }
+                    existing.updated_at = datetime.utcnow()
+                    await local_db.flush()
 
-        # Mark stage as completed in run progress
+                    try:
+                        result = await self.execute_chapter(
+                            local_db, local_run, chapter_index, chapter_text or ""
+                        )
+                        existing.status = "succeeded"
+                        existing.output_json = result
+                        existing.raw_output = None
+                        existing.error_message = None
+                        existing.input_tokens = int(result.get("_input_tokens", 0) or 0)
+                        existing.output_tokens = int(result.get("_output_tokens", 0) or 0)
+                        existing.cost_usd = float(result.get("_cost_usd", 0) or 0)
+                        existing.duration_ms = int(result.get("_duration_ms", 0) or 0)
+                    except Exception as exc:
+                        existing.status = "failed"
+                        existing.error_message = str(exc)[:4000]
+                    existing.updated_at = datetime.utcnow()
+
+                    succeeded_count = (await local_db.execute(
+                        select(func.count()).select_from(DeepStudyStageResult).where(
+                            DeepStudyStageResult.run_id == run.id,
+                            DeepStudyStageResult.stage_key == self.stage_key,
+                            DeepStudyStageResult.status == "succeeded",
+                        )
+                    )).scalar_one()
+                    failed_count = (await local_db.execute(
+                        select(func.count()).select_from(DeepStudyStageResult).where(
+                            DeepStudyStageResult.run_id == run.id,
+                            DeepStudyStageResult.stage_key == self.stage_key,
+                            DeepStudyStageResult.status == "failed",
+                        )
+                    )).scalar_one()
+                    local_run.processed_chapters = int(succeeded_count or 0)
+                    local_progress = dict(local_run.progress or {}) if isinstance(local_run.progress, dict) else {}
+                    local_progress["current_stage"] = self.stage_key
+                    local_progress.setdefault("stage_totals", {})[self.stage_key] = {
+                        "total": len(chapters),
+                        "succeeded": int(succeeded_count or 0),
+                        "pending": max(0, len(chapters) - int(succeeded_count or 0) - int(failed_count or 0)),
+                        "failed": int(failed_count or 0),
+                    }
+                    local_run.progress = local_progress
+
+        if pending:
+            await asyncio.gather(*[
+                process_chapter(ch.id, ch.chapter_index, ch.content or "")
+                for ch in pending
+            ])
+
+        await db.refresh(run)
+        succeeded_count = (await db.execute(
+            select(func.count()).select_from(DeepStudyStageResult).where(
+                DeepStudyStageResult.run_id == run.id,
+                DeepStudyStageResult.stage_key == self.stage_key,
+                DeepStudyStageResult.status == "succeeded",
+            )
+        )).scalar_one()
+        failed_count = (await db.execute(
+            select(func.count()).select_from(DeepStudyStageResult).where(
+                DeepStudyStageResult.run_id == run.id,
+                DeepStudyStageResult.stage_key == self.stage_key,
+                DeepStudyStageResult.status == "failed",
+            )
+        )).scalar_one()
+        sums = (await db.execute(
+            select(
+                func.coalesce(func.sum(DeepStudyStageResult.input_tokens), 0),
+                func.coalesce(func.sum(DeepStudyStageResult.output_tokens), 0),
+                func.coalesce(func.sum(DeepStudyStageResult.cost_usd), 0.0),
+            ).where(DeepStudyStageResult.run_id == run.id)
+        )).one()
+        run.input_tokens = int(sums[0] or 0)
+        run.output_tokens = int(sums[1] or 0)
+        run.cost_usd = round(float(sums[2] or 0.0), 6)
+        run.processed_chapters = int(succeeded_count or 0)
+
         progress = dict(run.progress or {}) if isinstance(run.progress, dict) else {}
         completed = list(progress.get("completed_stages", []) or [])
         if self.stage_key not in completed:
             completed.append(self.stage_key)
         progress["completed_stages"] = completed
         progress["current_stage"] = self.stage_key
+        progress.setdefault("stage_totals", {})[self.stage_key] = {
+            "total": len(chapters),
+            "succeeded": int(succeeded_count or 0),
+            "pending": max(0, len(chapters) - int(succeeded_count or 0) - int(failed_count or 0)),
+            "failed": int(failed_count or 0),
+        }
         run.progress = progress
 
         await db.commit()
