@@ -5,8 +5,14 @@ P2-Model-Failover: resolve() 优先走新 AgentModelBinding + ModelSelector,
 """
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict, deque
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
+import time
 from typing import Any
 
 from sqlalchemy import select
@@ -35,6 +41,76 @@ logger = logging.getLogger(__name__)
 
 # 单次 Agent 调用内最多 fallback 次数
 MAX_FALLBACK_ATTEMPTS = 2
+DEFAULT_TASK_RPM = 5
+
+
+class _LLMRateLimiter:
+    """Small in-process RPM limiter keyed by task/provider.
+
+    It is deliberately conservative and process-local. It prevents the
+    local worker from flooding one provider when DeepStudy runs chapter
+    work concurrently. Cache hits bypass this limiter because no upstream
+    request is made.
+    """
+
+    def __init__(self, rpm: int = DEFAULT_TASK_RPM) -> None:
+        self.rpm = max(1, rpm)
+        self.window_seconds = 60.0
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._timestamps: dict[str, deque[float]] = defaultdict(deque)
+
+    async def wait(self, key: str) -> None:
+        lock = self._locks[key]
+        async with lock:
+            while True:
+                now = time.monotonic()
+                timestamps = self._timestamps[key]
+                while timestamps and now - timestamps[0] >= self.window_seconds:
+                    timestamps.popleft()
+                if len(timestamps) < self.rpm:
+                    timestamps.append(now)
+                    return
+                sleep_for = self.window_seconds - (now - timestamps[0])
+                await asyncio.sleep(max(0.05, sleep_for))
+
+
+_rate_limiter = _LLMRateLimiter()
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _semantic_request_payload(
+    *,
+    provider_id: int | None,
+    provider_name: str | None,
+    model_name: str,
+    agent_role_key: str | None,
+    role: str,
+    request: LLMRequest,
+) -> dict[str, Any]:
+    return {
+        "schema": 1,
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "model_name": model_name,
+        "agent_role_key": agent_role_key,
+        "role": role,
+        "messages": [{"role": m.role, "content": m.content} for m in request.messages],
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+        "response_format": request.response_format,
+        "extra": request.extra,
+    }
+
+
+def _request_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(_stable_json(payload).encode("utf-8")).hexdigest()
+
+
+def _request_id(hash_value: str) -> str:
+    return f"llm_{hash_value[:48]}"
 
 
 def _is_real_api_text_model(provider: ModelProvider, model_name: str | None) -> bool:
@@ -66,6 +142,121 @@ class ResolvedCall:
 class LLMRouter:
     def __init__(self, client: LLMClient) -> None:
         self.client = client
+
+    def _build_cache_identity(
+        self,
+        *,
+        resolved: ResolvedCall,
+        role: str,
+        request: LLMRequest,
+    ) -> tuple[str, str, dict[str, Any], str | None]:
+        agent_key = LEGACY_ROLE_TO_AGENT_KEY.get(role) or role
+        payload = _semantic_request_payload(
+            provider_id=getattr(resolved.provider, "id", None),
+            provider_name=getattr(resolved.provider, "name", None),
+            model_name=resolved.model,
+            agent_role_key=agent_key,
+            role=role,
+            request=request,
+        )
+        hash_value = _request_hash(payload)
+        return _request_id(hash_value), hash_value, payload, agent_key
+
+    async def _lookup_cache(self, db: AsyncSession, request_id: str):
+        if not isinstance(db, AsyncSession):
+            return None
+        try:
+            from app.models.llm_cache import LLMCacheEntry
+
+            result = await db.execute(
+                select(LLMCacheEntry).where(LLMCacheEntry.request_id == request_id)
+            )
+            entry = result.scalar_one_or_none()
+            if isinstance(entry, LLMCacheEntry):
+                return entry
+        except Exception as exc:
+            logger.debug("LLM cache lookup skipped: %s", exc)
+        return None
+
+    async def _store_cache_entry(
+        self,
+        db: AsyncSession,
+        *,
+        request_id: str,
+        request_hash: str,
+        request_payload: dict[str, Any],
+        resolved: ResolvedCall,
+        agent_role_key: str | None,
+        step_key: str | None,
+        result: LLMCallResult,
+    ) -> None:
+        if not isinstance(db, AsyncSession):
+            return
+        try:
+            from app.models.llm_cache import LLMCacheEntry
+
+            existing = await self._lookup_cache(db, request_id)
+            if existing is not None:
+                return
+            entry = LLMCacheEntry(
+                request_id=request_id,
+                request_hash=request_hash,
+                provider_id=getattr(resolved.provider, "id", None),
+                provider_name=getattr(resolved.provider, "name", None),
+                model_name=resolved.model,
+                agent_role_key=agent_role_key,
+                step_key=step_key,
+                request_json=request_payload,
+                response_content=result.content,
+                response_raw=result.raw,
+                response_model=result.model,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_usd=result.cost_usd,
+                duration_ms=result.duration_ms,
+            )
+            async with db.begin_nested():
+                db.add(entry)
+                await db.flush()
+        except Exception as exc:
+            logger.debug("LLM cache store skipped: %s", exc)
+
+    def _result_from_cache(self, entry) -> LLMCallResult:
+        raw = dict(entry.response_raw or {})
+        raw["_cache_hit"] = True
+        raw["_cached_request_id"] = entry.request_id
+        return LLMCallResult(
+            content=entry.response_content or "",
+            model=entry.response_model or entry.model_name or "",
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=0.0,
+            duration_ms=0,
+            raw=raw,
+        )
+
+    async def _touch_cache_hit(self, db: AsyncSession, entry) -> None:
+        if not isinstance(db, AsyncSession):
+            return
+        try:
+            entry.hit_count = (entry.hit_count or 0) + 1
+            entry.last_hit_at = datetime.utcnow()
+            entry.updated_at = datetime.utcnow()
+            await db.flush()
+        except Exception as exc:
+            logger.debug("LLM cache hit touch skipped: %s", exc)
+
+    async def _wait_for_rate_limit(
+        self,
+        *,
+        resolved: ResolvedCall,
+        task_type: str | None,
+        step_key: str | None,
+        agent_role_key: str | None,
+    ) -> None:
+        provider_id = getattr(resolved.provider, "id", None) or getattr(resolved.provider, "name", "unknown")
+        bucket = task_type or step_key or agent_role_key or "llm"
+        await _rate_limiter.wait(f"{bucket}:{provider_id}")
 
     async def resolve(self, db: AsyncSession, role: str) -> ResolvedCall:
         """解析角色 → 模型. 优先走 ModelSelector, 兼容旧 ModelRoleAssignment."""
@@ -187,6 +378,7 @@ class LLMRouter:
         step_key: str | None = None,
         agent_step_id: int | None = None,
         project_id: int | None = None,
+        task_type: str | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult]:
         """调用 LLM, 支持 fallback 链.
 
@@ -202,14 +394,58 @@ class LLMRouter:
             extra=extra or {},
             stream=stream,
         )
+        request_id, request_hash, request_payload, agent_key = self._build_cache_identity(
+            resolved=resolved,
+            role=role,
+            request=request,
+        )
+        cache_enabled = not bool((extra or {}).get("disable_cache"))
+        recorder = ModelCallRecorder()
+        if cache_enabled:
+            cache_entry = await self._lookup_cache(db, request_id)
+            if cache_entry is not None:
+                event = await recorder.record_selection(
+                    db,
+                    provider_id=resolved.provider.id,
+                    model_name=resolved.model,
+                    agent_role_key=agent_key,
+                    selection_mode=resolved.selection_mode,
+                    selection_score=resolved.selection_score,
+                    selection_reason=resolved.selection_reason,
+                    project_id=project_id,
+                    task_id=task_id,
+                    chapter_id=chapter_id,
+                    agent_step_id=agent_step_id,
+                    step_key=step_key,
+                    provider_name=resolved.provider.name,
+                    request_id=request_id,
+                    cache_hit=True,
+                    event_type="cache_hit",
+                    event_category="cache",
+                    level="success",
+                )
+                await recorder.record_cache_hit(
+                    db,
+                    event,
+                    input_tokens=cache_entry.input_tokens or 0,
+                    output_tokens=cache_entry.output_tokens or 0,
+                )
+                await self._touch_cache_hit(db, cache_entry)
+                return resolved, self._result_from_cache(cache_entry)
+
+        await self._wait_for_rate_limit(
+            resolved=resolved,
+            task_type=task_type,
+            step_key=step_key,
+            agent_role_key=agent_key,
+        )
 
         # ── 记录选择事件 ──
-        recorder = ModelCallRecorder()
         event = await recorder.record_selection(
             db,
             provider_id=resolved.provider.id,
             model_name=resolved.model,
-            agent_role_key=LEGACY_ROLE_TO_AGENT_KEY.get(role),
+            agent_role_key=agent_key,
             selection_mode=resolved.selection_mode,
             selection_score=resolved.selection_score,
             selection_reason=resolved.selection_reason,
@@ -219,6 +455,8 @@ class LLMRouter:
             agent_step_id=agent_step_id,
             step_key=step_key,
             provider_name=resolved.provider.name,
+            request_id=request_id,
+            cache_hit=False,
         )
 
         # ── 主模型调用 ──
@@ -236,6 +474,17 @@ class LLMRouter:
                 output_tokens=result.output_tokens,
                 cost_usd=result.cost_usd,
             )
+            if cache_enabled:
+                await self._store_cache_entry(
+                    db,
+                    request_id=request_id,
+                    request_hash=request_hash,
+                    request_payload=request_payload,
+                    resolved=resolved,
+                    agent_role_key=agent_key,
+                    step_key=step_key,
+                    result=result,
+                )
             return resolved, result
 
         except (LLMAuthError, LLMConnectionError, LLMResponseError,
@@ -272,6 +521,7 @@ class LLMRouter:
                     chapter_id=chapter_id,
                     step_key=step_key,
                     agent_step_id=agent_step_id,
+                    task_type=task_type,
                 )
                 if fallback_result is not None:
                     return fallback_result
@@ -316,6 +566,7 @@ class LLMRouter:
         chapter_id: int | None = None,
         step_key: str | None = None,
         agent_step_id: int | None = None,
+        task_type: str | None = None,
     ) -> tuple[ResolvedCall, LLMCallResult] | None:
         """尝试 fallback 到候选列表中的下一个可用模型.
 
@@ -392,6 +643,53 @@ class LLMRouter:
                 extra=extra or {},
                 stream=stream,
             )
+            request_id, request_hash, request_payload, fallback_agent_key = self._build_cache_identity(
+                resolved=fallback_resolved,
+                role=role,
+                request=request,
+            )
+            cache_enabled = not bool((extra or {}).get("disable_cache"))
+            if cache_enabled:
+                cache_entry = await self._lookup_cache(db, request_id)
+                if cache_entry is not None:
+                    event = None
+                    if recorder:
+                        event = await recorder.record_selection(
+                            db,
+                            provider_id=fallback_resolved.provider.id,
+                            model_name=fallback_resolved.model,
+                            agent_role_key=agent_key or fallback_agent_key,
+                            selection_mode="manual_with_fallback",
+                            selection_score=fallback_resolved.selection_score,
+                            selection_reason=f"fallback#{attempt_no}: cache hit",
+                            project_id=project_id,
+                            task_id=task_id,
+                            chapter_id=chapter_id,
+                            step_key=step_key,
+                            agent_step_id=agent_step_id,
+                            provider_name=fallback_resolved.provider.name,
+                            request_id=request_id,
+                            cache_hit=True,
+                            event_type="cache_hit",
+                            event_category="cache",
+                            level="success",
+                        )
+                    if recorder and event:
+                        await recorder.record_cache_hit(
+                            db,
+                            event,
+                            input_tokens=cache_entry.input_tokens or 0,
+                            output_tokens=cache_entry.output_tokens or 0,
+                        )
+                    await self._touch_cache_hit(db, cache_entry)
+                    return fallback_resolved, self._result_from_cache(cache_entry)
+
+            await self._wait_for_rate_limit(
+                resolved=fallback_resolved,
+                task_type=task_type,
+                step_key=step_key,
+                agent_role_key=agent_key or fallback_agent_key,
+            )
 
             # 记录 fallback 选择
             event = None
@@ -410,6 +708,8 @@ class LLMRouter:
                     step_key=step_key,
                     agent_step_id=agent_step_id,
                     provider_name=fallback_resolved.provider.name,
+                    request_id=request_id,
+                    cache_hit=False,
                     event_type="fallback_triggered",
                     event_category="routing",
                     level="warning",
@@ -433,6 +733,17 @@ class LLMRouter:
                         fallback_from_model=primary_model_name,
                         fallback_to_provider=fallback_resolved.provider.name,
                         fallback_to_model=fallback_resolved.model,
+                    )
+                if cache_enabled:
+                    await self._store_cache_entry(
+                        db,
+                        request_id=request_id,
+                        request_hash=request_hash,
+                        request_payload=request_payload,
+                        resolved=fallback_resolved,
+                        agent_role_key=agent_key or fallback_agent_key,
+                        step_key=step_key,
+                        result=result,
                     )
                 logger.info(
                     "fallback#%d 成功: %s/%s",

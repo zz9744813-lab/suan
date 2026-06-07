@@ -49,6 +49,8 @@ class ModelCallRecorder:
         chapter_id: int | None = None,
         step_key: str | None = None,
         provider_name: str | None = None,
+        request_id: str | None = None,
+        cache_hit: bool | None = None,
         event_type: str = "request_started",
         event_category: str = "request",
         level: str = "info",
@@ -74,6 +76,8 @@ class ModelCallRecorder:
             chapter_id=chapter_id,
             step_key=step_key,
             provider_name=provider_name,
+            request_id=request_id,
+            cache_hit=cache_hit,
             selection_mode=selection_mode,
             selection_score=selection_score,
             selection_reason=selection_reason,
@@ -143,6 +147,37 @@ class ModelCallRecorder:
                         provider.avg_latency_ms = int(
                             provider.avg_latency_ms * 0.7 + latency_ms * 0.3
                         )
+
+    async def record_cache_hit(
+        self,
+        db: AsyncSession,
+        event: ModelCallEvent,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
+        """Mark an event as served from exact cache.
+
+        Cache hits are intentionally excluded from provider runtime
+        success/cost stats because no upstream model call happened.
+        """
+        event.status = "success"
+        event.cache_hit = True
+        event.latency_ms = 0
+        event.input_tokens = 0
+        event.output_tokens = 0
+        event.cost_usd = 0.0
+        event.event_type = "cache_hit"
+        event.event_category = "cache"
+        event.level = "success"
+        token_hint = ""
+        if input_tokens or output_tokens:
+            token_hint = f" | cached_tokens={input_tokens + output_tokens}"
+        event.summary = (
+            f"{event.agent_role_key or '?'} -> "
+            f"{event.provider_name or '?'}/{event.model_name or '?'} | cache hit"
+            f"{token_hint}"
+        )
 
     async def record_failure(
         self,
