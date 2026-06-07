@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # B3: Worker horizontal scaling — domain partitioning
 # ================================================================
 
-WorkerDomain = Literal["writing", "deepstudy", "discussion", "memory", "model", "all"]
+WorkerDomain = Literal["writing", "deepstudy", "discussion", "review", "memory", "model", "all"]
 
 
 class DomainWorkerStatus:
@@ -82,6 +82,7 @@ worker_domain_status: dict[str, dict[str, Any]] = {
     "writing_worker": {"status": "idle", "current_task": None, "tasks_processed": 0},
     "deepstudy_worker": {"status": "idle", "current_run": None, "tasks_processed": 0},
     "discussion_worker": {"status": "idle", "current_thread": None, "tasks_processed": 0},
+    "review_worker": {"status": "idle", "current_task": None, "tasks_processed": 0},
     "memory_worker": {"status": "idle", "current_job": None, "tasks_processed": 0},
     "model_router": {"status": "healthy", "providers_up": 0, "providers_total": 0, "tasks_processed": 0},
 }
@@ -129,6 +130,7 @@ class WorkerController:
             "writing": DomainWorkerStatus("writing"),
             "deepstudy": DomainWorkerStatus("deepstudy"),
             "discussion": DomainWorkerStatus("discussion"),
+            "review": DomainWorkerStatus("review"),
             "memory": DomainWorkerStatus("memory"),
             "model": DomainWorkerStatus("model"),
             "all": DomainWorkerStatus("all"),
@@ -139,6 +141,7 @@ class WorkerController:
             "writing": 2,      # Allow 2 concurrent writing tasks
             "deepstudy": 1,    # 1 deepstudy at a time (heavy)
             "discussion": 3,   # Discussions are lightweight
+            "review": 2,       # Reader/comment tasks are isolated from writing
             "memory": 1,       # 1 consolidation at a time
             "model": 2,        # 2 health checks concurrently
         }
@@ -156,6 +159,28 @@ class WorkerController:
         except asyncio.CancelledError:
             return
         asyncio.create_task(self._mark_loop_crashed(exc))
+
+    def _spawn_background_loop(self, coro: Any, domain: WorkerDomain, name: str) -> asyncio.Task:
+        task = asyncio.create_task(coro, name=name)
+        task.add_done_callback(lambda done: self._on_background_loop_done(done, domain, name))
+        return task
+
+    def _on_background_loop_done(self, task: asyncio.Task, domain: WorkerDomain, name: str) -> None:
+        if self._stop.is_set():
+            return
+        exc: BaseException | None = None
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is None:
+            return
+        self.domain_statuses[domain].errors_count += 1
+        logger.exception("Background worker loop %s crashed: %s", name, exc)
+        asyncio.create_task(event_bus.publish(Event(
+            event_type="worker.background_loop_crashed",
+            payload={"worker_id": self.worker_id, "domain": domain, "loop": name, "error": str(exc)},
+        )))
 
     async def _mark_loop_crashed(self, exc: BaseException | None) -> None:
         self.crash_count += 1
@@ -189,6 +214,7 @@ class WorkerController:
                     AgentTask.status == "running",
                     AgentTask.task_type.in_(SUPPORTED_TASKS),
                     or_(
+                        AgentTask.lease_owner != self.worker_id,
                         AgentTask.lease_expires_at < now,
                         AgentTask.lease_expires_at.is_(None),
                         AgentTask.last_heartbeat_at < cutoff,
@@ -303,6 +329,8 @@ class WorkerController:
         await event_bus.publish(Event(event_type="worker.resumed", payload={}))
 
     async def stop(self) -> None:
+        import logging as _logging, traceback as _tb
+        _logging.getLogger(__name__).warning("Worker stop() called\n%s", ''.join(_tb.format_stack()))
         self._stop.set()
         self._pause_event.set()  # unblock
         if self._task:
@@ -324,6 +352,7 @@ class WorkerController:
                     AgentTask.status == "running",
                     AgentTask.task_type.in_(SUPPORTED_TASKS),
                     or_(
+                        AgentTask.lease_owner != self.worker_id,
                         AgentTask.lease_expires_at < now,
                         AgentTask.lease_expires_at.is_(None),
                         AgentTask.last_heartbeat_at < cutoff,
@@ -351,45 +380,72 @@ class WorkerController:
             }
 
     async def _run_forever(self) -> None:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
         try:
             await self._set_state("running")
             # P9: 启动讨论 worker 和回收 worker 作为后台任务
-            self._discussion_task = asyncio.create_task(
-                self._discussion_worker_loop(), name="novelforge-discussion-worker"
+            self._discussion_task = self._spawn_background_loop(
+                self._discussion_worker_loop(), "discussion", "novelforge-discussion-worker"
             )
-            self._recycle_task = asyncio.create_task(
-                self._recycle_worker_loop(), name="novelforge-recycle-worker"
+            self._recycle_task = self._spawn_background_loop(
+                self._recycle_worker_loop(), "discussion", "novelforge-recycle-worker"
             )
             # P10: 启动记忆整理 worker 作为后台任务
-            self._memory_consolidation_task = asyncio.create_task(
-                self._memory_consolidation_worker_loop(), name="novelforge-memory-consolidation"
+            self._memory_consolidation_task = self._spawn_background_loop(
+                self._memory_consolidation_worker_loop(), "memory", "novelforge-memory-consolidation"
             )
             # P3-Model-Failover: 启动 Provider 健康检查 worker
-            self._provider_health_task = asyncio.create_task(
-                self._provider_health_worker_loop(), name="novelforge-provider-health"
+            self._provider_health_task = self._spawn_background_loop(
+                self._provider_health_worker_loop(), "model", "novelforge-provider-health"
             )
             # P0-DeepStudy: 启动 DeepStudy worker
-            self._deepstudy_task = asyncio.create_task(
-                self._deepstudy_worker_loop(), name="novelforge-deepstudy"
+            self._deepstudy_task = self._spawn_background_loop(
+                self._deepstudy_worker_loop(), "deepstudy", "novelforge-deepstudy"
             )
             while not self._stop.is_set():
                 await self._pause_event.wait()
                 if self._stop.is_set():
+                    _log.warning("Worker _run_forever: _stop set after pause_event.wait()")
                     break
                 did_work = await self._tick()
+                self._ensure_background_loops_alive()
                 if not did_work:
                     # idle: short sleep
                     try:
                         await asyncio.wait_for(self._stop.wait(), timeout=1.0)
                     except asyncio.TimeoutError:
                         pass
+            _log.warning("Worker _run_forever: loop exited normally (stop=%s)", self._stop.is_set())
         except Exception as exc:  # pragma: no cover
+            import logging
+            logging.getLogger(__name__).exception("Worker _run_forever crashed: %s", exc)
             await self._set_state("error", error=str(exc))
+            # 关键修复: 崩溃时回滚当前 running 任务, 防止永久卡在 running
+            try:
+                await self.recover_stale_tasks(reason="worker_crash")
+            except Exception as recover_exc:
+                logging.getLogger(__name__).warning("Failed to recover stale tasks after crash: %s", recover_exc)
         finally:
             # cancel background tasks
             for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None), getattr(self, '_deepstudy_task', None), getattr(self, '_memory_consolidation_task', None)]:
                 if t and not t.done():
                     t.cancel()
+
+    def _ensure_background_loops_alive(self) -> None:
+        if self._stop.is_set():
+            return
+        specs = [
+            ("_discussion_task", "discussion", "novelforge-discussion-worker", self._discussion_worker_loop),
+            ("_recycle_task", "discussion", "novelforge-recycle-worker", self._recycle_worker_loop),
+            ("_memory_consolidation_task", "memory", "novelforge-memory-consolidation", self._memory_consolidation_worker_loop),
+            ("_provider_health_task", "model", "novelforge-provider-health", self._provider_health_worker_loop),
+            ("_deepstudy_task", "deepstudy", "novelforge-deepstudy", self._deepstudy_worker_loop),
+        ]
+        for attr, domain, name, factory in specs:
+            current = getattr(self, attr, None)
+            if current is None or current.done():
+                setattr(self, attr, self._spawn_background_loop(factory(), domain, name))
 
     async def _discussion_worker_loop(self) -> None:
         """P9: 每 20 秒轮询 pending_discussion 线程。"""
@@ -544,9 +600,9 @@ class WorkerController:
                 )
             ).scalars().all()
 
-            domain_counts: dict[str, int] = {"writing": 0, "deepstudy": 0, "discussion": 0, "memory": 0, "model": 0}
+            domain_counts: dict[str, int] = {"writing": 0, "deepstudy": 0, "discussion": 0, "review": 0, "memory": 0, "model": 0}
             for t in running_tasks:
-                d = t.domain if hasattr(t, 'domain') and t.domain else "writing"
+                d = self._domain_from_task(t)
                 domain_counts[d] = domain_counts.get(d, 0) + 1
 
             # P1-2 fix: pick the next task FIRST, then load its
@@ -575,8 +631,8 @@ class WorkerController:
             # B3: only pick tasks from domains that are under the concurrency limit
             eligible_tasks = [
                 t for t in pending_tasks
-                if domain_counts.get(t.domain or "writing", 0)
-                < self.domain_concurrency.get(t.domain or "writing", 1)  # type: ignore[arg-type]
+                if domain_counts.get(self._domain_from_task(t), 0)
+                < self.domain_concurrency.get(self._domain_from_task(t), 1)
             ]
             task_row = eligible_tasks[0] if eligible_tasks else None
             if task_row is None:
@@ -614,7 +670,7 @@ class WorkerController:
             await db.flush()
 
         # B3: track domain status when picking a task
-        task_domain: WorkerDomain = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"  # type: ignore[assignment]
+        task_domain = self._domain_from_task(task_row)
         self.domain_statuses[task_domain].current_task_id = task_row.id
         self.domain_statuses[task_domain].last_active_at = datetime.now(timezone.utc)
         self.domain_statuses[task_domain].running = True
@@ -1593,6 +1649,11 @@ class WorkerController:
         )
         worker_domain_status["discussion_worker"]["current_thread"] = self.domain_statuses["discussion"].current_task_id
         worker_domain_status["discussion_worker"]["tasks_processed"] = self.domain_statuses["discussion"].tasks_processed
+        worker_domain_status["review_worker"]["status"] = (
+            "running" if self.domain_statuses["review"].running else "idle"
+        )
+        worker_domain_status["review_worker"]["current_task"] = self.domain_statuses["review"].current_task_id
+        worker_domain_status["review_worker"]["tasks_processed"] = self.domain_statuses["review"].tasks_processed
         worker_domain_status["memory_worker"]["status"] = (
             "running" if self.domain_statuses["memory"].running else "idle"
         )
@@ -1603,9 +1664,8 @@ class WorkerController:
     def _domain_from_task(self, task_row: AgentTask) -> WorkerDomain:
         """Resolve the domain for a task row."""
         domain_val: str = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"
-        # Validate that it's a known WorkerDomain; fall back to "writing"
-        if domain_val not in {"writing", "deepstudy", "discussion", "memory", "model", "all"}:
-            domain_val = "writing"
+        if domain_val not in {"writing", "deepstudy", "discussion", "review", "memory", "model", "all"}:
+            return "writing"
         return domain_val  # type: ignore[return-value]
 
     def _clear_domain_task(self, domain: WorkerDomain) -> None:

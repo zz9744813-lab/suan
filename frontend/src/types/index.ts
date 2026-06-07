@@ -77,6 +77,29 @@ export type ChapterVersion = {
   created_at: string;
 };
 
+export type ReaderReviewRun = {
+  id: number;
+  project_id: number;
+  chapter_id: number;
+  chapter_version_id: number | null;
+  trigger: string;
+  status: string;
+  reader_agent_keys: string[];
+  generated_comment_ids: number[];
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type ReaderReviewQuickGenerateResponse = {
+  run: ReaderReviewRun;
+  comments: ReviewCommentRead[];
+};
+
 export type ProjectWorkspaceTocItem = {
   chapter_no: number;
   title: string;

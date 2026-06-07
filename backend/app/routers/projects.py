@@ -66,10 +66,53 @@ def _pick_export_version(versions: list[ChapterVersion]) -> ChapterVersion | Non
     return None
 
 
-async def _export_payload(db: AsyncSession, project_id: int) -> tuple[Project, list[dict]]:
+async def _export_payload(db: AsyncSession, project_id: int) -> tuple[Project, list[dict], dict, list[dict]]:
     project = await db.get(Project, project_id)
     if project is None:
         raise not_found("Project", project_id)
+    bible = (await db.execute(
+        select(Bible)
+        .where(Bible.project_id == project_id)
+        .order_by(Bible.version.desc(), Bible.id.desc())
+    )).scalars().first()
+    outlines = (await db.execute(
+        select(Outline)
+        .where(Outline.project_id == project_id)
+        .order_by(Outline.chapter_no.asc(), Outline.id.asc())
+    )).scalars().all()
+    characters = (await db.execute(
+        select(MemoryCharacter)
+        .where(MemoryCharacter.project_id == project_id)
+        .order_by(MemoryCharacter.id.asc())
+    )).scalars().all()
+    meta = {
+        "bible": {
+            "id": bible.id,
+            "version": bible.version,
+            "content": bible.content,
+            "created_at": bible.created_at.isoformat() if bible.created_at else None,
+        } if bible else None,
+        "outlines": [
+            {
+                "id": item.id,
+                "chapter_no": item.chapter_no,
+                "title": item.title,
+                "summary": item.summary,
+                "target_word_count": item.target_word_count,
+            }
+            for item in outlines
+        ],
+    }
+    character_rows = [
+        {
+            "id": c.id,
+            "name": c.name,
+            "aliases": c.aliases,
+            "role": c.role,
+            "base_profile": c.base_profile,
+        }
+        for c in characters
+    ]
     chapters = (await db.execute(
         select(Chapter)
         .where(Chapter.project_id == project_id)
@@ -103,10 +146,12 @@ async def _export_payload(db: AsyncSession, project_id: int) -> tuple[Project, l
             "summary": version.summary if version else None,
             "content": content,
         })
-    return project, rows
+    return project, rows, meta, character_rows
 
 
-def _render_export(project: Project, chapters: list[dict], export_format: str) -> tuple[str, str, str]:
+def _render_export(project: Project, chapters: list[dict], export_format: str, meta: dict | None = None, characters: list[dict] | None = None) -> tuple[str, str, str]:
+    meta = meta or {}
+    characters = characters or []
     exported_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
     stem = _safe_export_stem(project.name)
     if export_format in ("markdown", "md"):
@@ -148,13 +193,41 @@ def _render_export(project: Project, chapters: list[dict], export_format: str) -
             "project": {
                 "id": project.id,
                 "name": project.name,
+                "description": project.description,
                 "genre": project.genre,
+                "style": project.style,
                 "status": project.status,
+                "target_chapters": project.target_chapters,
+                "target_words_per_chapter": project.target_words_per_chapter,
                 "exported_at": exported_at,
             },
+            "bible": meta.get("bible"),
+            "outlines": meta.get("outlines", []),
+            "characters": characters,
             "chapters": chapters,
         }
         return json.dumps(payload, ensure_ascii=False, indent=2), "application/json; charset=utf-8", f"{stem}.json"
+    bible_html = ""
+    if meta.get("bible"):
+        bible_html = (
+            "<section><h2>作品设定</h2>"
+            f"<pre>{html.escape(json.dumps(meta['bible'].get('content') or {}, ensure_ascii=False, indent=2))}</pre>"
+            "</section>"
+        )
+    outline_html = "".join(
+        "<li>"
+        f"<strong>第 {o['chapter_no']} 章：{html.escape(o['title'])}</strong>"
+        f"<p>{html.escape(o.get('summary') or '')}</p>"
+        "</li>"
+        for o in meta.get("outlines", [])
+    )
+    characters_html = "".join(
+        "<li>"
+        f"<strong>{html.escape(c.get('name') or '')}</strong>"
+        f"<p>{html.escape(json.dumps(c.get('base_profile') or {}, ensure_ascii=False))}</p>"
+        "</li>"
+        for c in characters
+    )
     html_chapters = "\n".join(
         "<section>"
         f"<h2>Chapter {c['chapter_no']}: {html.escape(c['title'])}</h2>"
@@ -165,12 +238,16 @@ def _render_export(project: Project, chapters: list[dict], export_format: str) -
     doc = (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         f"<title>{html.escape(project.name)}</title>"
-        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.7;max-width:860px;margin:40px auto;padding:0 24px;color:#222}"
-        "pre{white-space:pre-wrap;font-family:inherit}section{border-top:1px solid #ddd;padding-top:20px;margin-top:28px}</style>"
+        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.7;max-width:920px;margin:40px auto;padding:0 24px;color:#222}"
+        "pre{white-space:pre-wrap;font-family:inherit;background:#f7f7f7;padding:14px;border-radius:8px}section{border-top:1px solid #ddd;padding-top:20px;margin-top:28px}"
+        "li{margin:10px 0}nav{background:#fafafa;border:1px solid #eee;border-radius:12px;padding:14px;margin:18px 0}</style>"
         "</head><body>"
         f"<h1>{html.escape(project.name)}</h1>"
         f"<p>Genre: {html.escape(project.genre)} · Status: {html.escape(project.status)} · Exported at: {exported_at}</p>"
-        f"{html_chapters}</body></html>"
+        f"{bible_html}"
+        f"<section><h2>大纲</h2><ol>{outline_html}</ol></section>"
+        f"<section><h2>人物卡</h2><ul>{characters_html}</ul></section>"
+        f"<section><h2>正文</h2></section>{html_chapters}</body></html>"
     )
     return doc, "text/html; charset=utf-8", f"{stem}.html"
 
@@ -531,8 +608,8 @@ async def export_project(
     export_format: str = Query(default="markdown", alias="format", pattern="^(txt|markdown|md|json|html)$"),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    project, chapters = await _export_payload(db, project_id)
-    content, media_type, filename = _render_export(project, chapters, export_format)
+    project, chapters, meta, characters = await _export_payload(db, project_id)
+    content, media_type, filename = _render_export(project, chapters, export_format, meta, characters)
     return Response(
         content=content,
         media_type=media_type,

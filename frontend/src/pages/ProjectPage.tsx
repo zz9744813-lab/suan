@@ -230,6 +230,14 @@ export function ProjectPage() {
   );
 }
 
+type WorkspacePanel = "chapters" | "outline" | "characters" | "world" | "export";
+type DetailDrawerState =
+  | { kind: "chapter"; title: string; meta: string; content: string; action?: React.ReactNode }
+  | { kind: "outline"; title: string; meta: string; content: string; action?: React.ReactNode }
+  | { kind: "character"; title: string; meta: string; content: string; action?: React.ReactNode }
+  | { kind: "world"; title: string; meta: string; content: string; action?: React.ReactNode }
+  | null;
+
 function BookWorkspaceTab({
   workspace,
   onEditBible,
@@ -241,181 +249,275 @@ function BookWorkspaceTab({
   onSelectChapter: (item: ProjectWorkspace["toc"][number]) => void;
   onLaunch: () => void;
 }) {
+  const [panel, setPanel] = useState<WorkspacePanel>("chapters");
+  const [drawer, setDrawer] = useState<DetailDrawerState>(null);
+  const [exportFormat, setExportFormat] = useState<ProjectExportFormat>("markdown");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
   if (!workspace) {
     return <div className="page-empty"><span className="spinner" /> 正在打开作品...</div>;
   }
+
   const selected = workspace.selected_chapter;
   const bibleContent = workspace.bible?.content ?? {};
-  const worldItems = [
-    ["世界观", bibleContent.world],
-    ["主线", bibleContent.main_plot ?? bibleContent.plot],
-    ["规则", bibleContent.rules ?? bibleContent.world_rules],
-    ["主角", bibleContent.protagonist],
-  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  const worldItems = buildWorldItems(bibleContent);
+  const outlineItems = workspace.toc.filter((item) => item.outline_summary || !item.has_content);
   const hasAnyChapter = workspace.toc.some((item) => item.chapter_id != null);
+  const completeChapters = workspace.toc.filter((item) => item.has_content).length;
+  const wordTotal = workspace.toc.reduce((sum, item) => sum + (item.actual_word_count || 0), 0);
+
+  const openChapterDetail = (chapter = selected) => {
+    if (!chapter) return;
+    setDrawer({
+      kind: "chapter",
+      title: `第 ${chapter.chapter_no} 章：${chapter.title}`,
+      meta: `${chapter.version_kind ? `${chapter.version_kind} v${chapter.version_no ?? "-"}` : "暂无正文版本"} · ${chapter.actual_word_count}/${chapter.target_word_count} 字${chapter.current_score != null ? ` · ${chapter.current_score} 分` : ""}`,
+      content: chapter.content?.trim() || chapter.outline_summary || "这一章暂时还没有正文或大纲。",
+      action: chapter.id ? <Link className="button primary" to={`/projects/${workspace.project.id}/chapters/${chapter.id}`}>打开章节编辑器</Link> : undefined,
+    });
+  };
+
+  const openOutlineDetail = (item: ProjectWorkspace["toc"][number]) => {
+    setDrawer({
+      kind: "outline",
+      title: `第 ${item.chapter_no} 章：${item.title}`,
+      meta: item.chapter_id ? `已绑定章节 #${item.chapter_id}` : "只有大纲，尚未生成章节",
+      content: item.outline_summary || "暂无大纲正文。",
+    });
+  };
+
+  const openWorldDetail = (label: string, value: any) => {
+    setDrawer({
+      kind: "world",
+      title: label,
+      meta: workspace.bible ? `设定版本 v${workspace.bible.version}` : "主设定",
+      content: formatBibleValue(value),
+      action: <button className="primary" type="button" onClick={onEditBible}>编辑世界观</button>,
+    });
+  };
+
+  const openCharacterDetail = (character: ProjectWorkspace["characters"][number]) => {
+    setDrawer({
+      kind: "character",
+      title: character.name,
+      meta: `${roleLabel(character.role)} · ${character.aliases?.length ? `别名：${character.aliases.join("、")}` : "暂无别名"}`,
+      content: characterDetailText(character),
+      action: <Link className="button primary" to={`/memory-shelf/${workspace.project.id}`}>打开人物库</Link>,
+    });
+  };
+
+  const onExport = async () => {
+    setExportBusy(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await exportProjectFile(workspace.project.id, exportFormat);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setExportError(e.message ?? String(e));
+    } finally {
+      setExportBusy(false);
+    }
+  };
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "280px minmax(0, 1fr) 340px",
-        gap: 16,
-        alignItems: "start",
-      }}
-    >
-      <aside className="card" style={{ position: "sticky", top: 12, maxHeight: "calc(100vh - 170px)", overflow: "auto" }}>
-        <div className="card-header">
-          <h3>目录</h3>
-          <span className="muted small">{workspace.toc.length} 章</span>
+    <div className="workfile-page">
+      <section className="workfile-hero card">
+        <div>
+          <div className="muted tiny">作品档案 / Project File</div>
+          <h2 className="serif">{workspace.project.name}</h2>
+          <p className="muted small">
+            把正文、大纲、人物卡、世界观和导出集中到这里。左侧选章节，中间看正文，右侧点卡片看完整详情。
+          </p>
         </div>
-        {workspace.toc.length === 0 ? (
-          <div>
-            <div className="muted">这本书还没有目录。</div>
-            <button className="primary" style={{ marginTop: 12, width: "100%" }} onClick={onLaunch}>
-              启动创作
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {workspace.toc.map((item) => (
-              <button
-                key={`${item.chapter_no}-${item.chapter_id ?? "outline"}`}
-                className={`ghost ${item.selected ? "active" : ""}`}
-                onClick={() => onSelectChapter(item)}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "10px 12px",
-                  border: item.selected ? "1px solid var(--accent-gold)" : "1px solid var(--border)",
-                  background: item.selected ? "var(--surface-2)" : "transparent",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <strong>第 {item.chapter_no} 章</strong>
-                  <span className={`pill ${item.has_content ? "succeeded" : "pending"}`}>
-                    {item.has_content ? "有正文" : item.chapter_id ? "待生成" : "大纲"}
-                  </span>
-                </div>
-                <div className="small" style={{ marginTop: 4 }}>{item.title}</div>
-                <div className="muted tiny" style={{ marginTop: 4 }}>
-                  {item.actual_word_count || 0} / {item.target_word_count || 0} 字
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </aside>
+        <div className="workfile-stats">
+          <div><strong>{workspace.toc.length}</strong><span>章节规划</span></div>
+          <div><strong>{completeChapters}</strong><span>有正文</span></div>
+          <div><strong>{(wordTotal / 10000).toFixed(1)}万</strong><span>已写字数</span></div>
+          <div><strong>{workspace.characters.length}</strong><span>人物卡</span></div>
+        </div>
+      </section>
 
-      <main className="card" style={{ minHeight: "calc(100vh - 170px)" }}>
-        <div className="card-header">
-          <div>
-            <h3>{selected ? `第 ${selected.chapter_no} 章：${selected.title}` : workspace.project.name}</h3>
-            {selected && (
-              <div className="muted small">
-                {selected.version_kind ? `${selected.version_kind} v${selected.version_no ?? "-"}` : "暂无正文版本"}
-                {" · "}
-                {selected.actual_word_count} / {selected.target_word_count} 字
-                {selected.current_score != null ? ` · ${selected.current_score} 分` : ""}
+      <div className="workfile-tabs">
+        {[
+          ["chapters", "正文"],
+          ["outline", "大纲"],
+          ["characters", "人物卡"],
+          ["world", "世界观"],
+          ["export", "导出"],
+        ].map(([key, label]) => (
+          <button key={key} className={`tab ${panel === key ? "active" : ""}`} onClick={() => setPanel(key as WorkspacePanel)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="workfile-layout">
+        <aside className="card workfile-toc">
+          <div className="card-header">
+            <h3>目录</h3>
+            <span className="muted small">{workspace.toc.length} 章</span>
+          </div>
+          {workspace.toc.length === 0 ? (
+            <div>
+              <div className="muted">这本书还没有目录。</div>
+              <button className="primary" style={{ marginTop: 12, width: "100%" }} onClick={onLaunch}>启动创作</button>
+            </div>
+          ) : (
+            <div className="workfile-list">
+              {workspace.toc.slice(0, 260).map((item) => (
+                <button
+                  key={`${item.chapter_no}-${item.chapter_id ?? "outline"}`}
+                  className={`workfile-list-item ${item.selected ? "active" : ""}`}
+                  onClick={() => onSelectChapter(item)}
+                  onDoubleClick={() => openOutlineDetail(item)}
+                >
+                  <div className="row between">
+                    <strong>第 {item.chapter_no} 章</strong>
+                    <span className={`pill ${item.has_content ? "succeeded" : "pending"}`}>{item.has_content ? "正文" : item.chapter_id ? "待写" : "大纲"}</span>
+                  </div>
+                  <div className="small ellipsis">{item.title}</div>
+                  <div className="muted tiny">{item.actual_word_count || 0} / {item.target_word_count || 0} 字</div>
+                </button>
+              ))}
+              {workspace.toc.length > 260 && <div className="muted tiny">已显示前 260 章，完整列表可去「章节」页。</div>}
+            </div>
+          )}
+        </aside>
+
+        <main className="card workfile-reader">
+          <div className="card-header">
+            <div>
+              <h3>{selected ? `第 ${selected.chapter_no} 章：${selected.title}` : "正文阅读区"}</h3>
+              {selected && <div className="muted small">{selected.actual_word_count} / {selected.target_word_count} 字 · {selected.status}</div>}
+            </div>
+            <div className="row">
+              {selected && <button type="button" onClick={() => openChapterDetail()}>查看详情</button>}
+              {selected?.id && <Link className="button" to={`/projects/${workspace.project.id}/chapters/${selected.id}`}>章节编辑器</Link>}
+            </div>
+          </div>
+
+          {!hasAnyChapter ? (
+            <div className="page-empty" style={{ minHeight: 360 }}>
+              <div className="big">这本书还没有章节</div>
+              <div className="muted">可以先录入大纲，也可以让系统自动生成大纲、角色和世界观。</div>
+              <button className="primary" style={{ marginTop: 16 }} onClick={onLaunch}>启动创作</button>
+            </div>
+          ) : selected?.content?.trim() ? (
+            <article className="workfile-content">{selected.content}</article>
+          ) : (
+            <div className="page-empty" style={{ minHeight: 360 }}>
+              <div className="big">这一章还没有正文</div>
+              {selected?.outline_summary && <div className="muted" style={{ maxWidth: 680 }}>{selected.outline_summary}</div>}
+              {selected && <button style={{ marginTop: 16 }} onClick={() => openChapterDetail()}>查看大纲详情</button>}
+            </div>
+          )}
+        </main>
+
+        <aside className="workfile-side">
+          {panel === "chapters" && (
+            <section className="card">
+              <div className="card-header"><h3>章节正文</h3><span className="muted small">双击目录看大纲</span></div>
+              {selected ? (
+                <button className="workfile-feature-card" onClick={() => openChapterDetail()}>
+                  <strong>{selected.title}</strong>
+                  <span>{selected.summary || selected.outline_summary || "查看章节正文、大纲摘要和版本状态"}</span>
+                </button>
+              ) : <div className="muted">请先选择一个章节。</div>}
+            </section>
+          )}
+
+          {panel === "outline" && (
+            <section className="card">
+              <div className="card-header"><h3>大纲正文</h3><span className="muted small">{outlineItems.length}</span></div>
+              <div className="workfile-mini-list">
+                {outlineItems.slice(0, 18).map((item) => (
+                  <button key={item.chapter_no} className="workfile-feature-card" onClick={() => openOutlineDetail(item)}>
+                    <strong>第 {item.chapter_no} 章 · {item.title}</strong>
+                    <span>{item.outline_summary || "暂无大纲正文"}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {panel === "characters" && (
+            <section className="card">
+              <div className="card-header">
+                <h3>人物卡</h3>
+                <Link className="ghost" to={`/memory-shelf/${workspace.project.id}`}>人物库</Link>
+              </div>
+              {workspace.characters.length === 0 ? <div className="muted">还没有角色设定。</div> : (
+                <div className="workfile-mini-list">
+                  {workspace.characters.slice(0, 20).map((character) => (
+                    <button key={character.id} className="workfile-feature-card" onClick={() => openCharacterDetail(character)}>
+                      <strong>{character.name} <span className="pill">{roleLabel(character.role)}</span></strong>
+                      <span>{character.latest_state?.current_goal || character.latest_state?.emotion_state || profileSummary(character.base_profile)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {panel === "world" && (
+            <section className="card">
+              <div className="card-header"><h3>世界观设定</h3><button className="ghost" type="button" onClick={onEditBible}>编辑</button></div>
+              {worldItems.length === 0 ? <div className="muted">还没有主设定。</div> : (
+                <div className="workfile-mini-list">
+                  {worldItems.map(([label, value]) => (
+                    <button key={label} className="workfile-feature-card" onClick={() => openWorldDetail(String(label), value)}>
+                      <strong>{String(label)}</strong>
+                      <span>{formatBibleValue(value)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {panel === "export" && (
+            <section className="card">
+              <div className="card-header"><h3>导出作品</h3><span className="muted small">正文 / 结构化 / 网页</span></div>
+              <label>导出格式</label>
+              <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as ProjectExportFormat)}>
+                <option value="markdown">Markdown 正文</option>
+                <option value="txt">纯文本正文</option>
+                <option value="html">HTML 阅读版</option>
+                <option value="json">JSON 作品包</option>
+              </select>
+              <p className="muted small">会按 final → rewrite → draft 优先级导出章节内容。JSON 可作为后续作品包基础。</p>
+              <button className="primary" style={{ width: "100%" }} disabled={exportBusy || workspace.toc.length === 0} onClick={onExport}>
+                {exportBusy ? "导出中..." : "立即导出"}
+              </button>
+              {exportError && <div className="error small" style={{ marginTop: 8 }}>{exportError}</div>}
+            </section>
+          )}
+
+          <section className="card">
+            <div className="card-header"><h3>最近任务</h3><Link className="ghost" to="/tasks">全部</Link></div>
+            {workspace.latest_tasks.length === 0 ? <div className="muted">暂无任务。</div> : (
+              <div className="workfile-mini-list compact">
+                {workspace.latest_tasks.slice(0, 5).map((task) => (
+                  <div key={task.id} className="small row between">
+                    <span className="ellipsis">{task.display_title || task.task_kind || task.task_type}</span>
+                    <span className={`pill ${task.status}`}>{task.status}</span>
+                  </div>
+                ))}
               </div>
             )}
-          </div>
-          {selected?.id && <Link className="button" to={`/projects/${workspace.project.id}/chapters/${selected.id}`}>打开章节</Link>}
-        </div>
+          </section>
+        </aside>
+      </div>
 
-        {!hasAnyChapter ? (
-          <div className="page-empty" style={{ minHeight: 360 }}>
-            <div className="big">这本书还没有章节</div>
-            <div className="muted">可以先录入大纲，也可以让系统自动生成大纲、角色和世界观。</div>
-            <button className="primary" style={{ marginTop: 16 }} onClick={onLaunch}>启动创作</button>
-          </div>
-        ) : selected?.content?.trim() ? (
-          <article
-            style={{
-              whiteSpace: "pre-wrap",
-              lineHeight: 1.9,
-              fontSize: 16,
-              maxWidth: 820,
-              margin: "8px auto 0",
-            }}
-          >
-            {selected.content}
-          </article>
-        ) : (
-          <div className="page-empty" style={{ minHeight: 360 }}>
-            <div className="big">这一章还没有正文</div>
-            {selected?.outline_summary && <div className="muted" style={{ maxWidth: 680 }}>{selected.outline_summary}</div>}
-            {selected?.id && (
-              <Link className="button primary" style={{ marginTop: 16 }} to={`/projects/${workspace.project.id}/chapters/${selected.id}`}>
-                去生成正文
-              </Link>
-            )}
-          </div>
-        )}
-      </main>
-
-      <aside style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <section className="card">
-          <div className="card-header">
-            <h3>世界观</h3>
-            <button className="ghost" type="button" onClick={onEditBible}>编辑</button>
-          </div>
-          {worldItems.length === 0 ? (
-            <div className="muted">还没有主设定。</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {worldItems.map(([label, value]) => (
-                <div key={label}>
-                  <div className="muted tiny">{label}</div>
-                  <div className="small" style={{ whiteSpace: "pre-wrap" }}>{formatBibleValue(value)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card">
-          <div className="card-header">
-            <h3>角色</h3>
-            <Link className="ghost" to={`/memory-shelf/${workspace.project.id}`}>{workspace.characters.length}</Link>
-          </div>
-          {workspace.characters.length === 0 ? (
-            <div className="muted">还没有角色设定。</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {workspace.characters.slice(0, 8).map((character) => (
-                <div key={character.id} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <strong>{character.name}</strong>
-                    <span className="pill">{roleLabel(character.role)}</span>
-                  </div>
-                  <div className="muted small" style={{ marginTop: 4 }}>
-                    {character.latest_state?.current_goal || character.latest_state?.emotion_state || profileSummary(character.base_profile)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card">
-          <div className="card-header">
-            <h3>最近任务</h3>
-            <Link className="ghost" to="/tasks">全部</Link>
-          </div>
-          {workspace.latest_tasks.length === 0 ? (
-            <div className="muted">暂无任务。</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {workspace.latest_tasks.slice(0, 5).map((task) => (
-                <div key={task.id} className="small" style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <span>{task.display_title || task.task_kind || task.task_type}</span>
-                  <span className={`pill ${task.status}`}>{task.status}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </aside>
+      <DetailDrawer drawer={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }
@@ -424,6 +526,75 @@ function formatBibleValue(value: any): string {
   if (Array.isArray(value)) return value.join("\n");
   if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
   return String(value ?? "");
+}
+
+function buildWorldItems(content: Record<string, any>): [string, any][] {
+  const preferred: [string, any][] = [
+    ["世界观", content.world],
+    ["主线", content.main_plot ?? content.plot],
+    ["规则", content.rules ?? content.world_rules],
+    ["势力", content.factions ?? content.organizations],
+    ["地图", content.map ?? content.locations],
+    ["修炼/能力体系", content.power_system ?? content.magic_system],
+    ["主角", content.protagonist],
+  ];
+  const seen = new Set(preferred.map(([key]) => key));
+  const extras = Object.entries(content)
+    .filter(([key, value]) => !seen.has(key) && value !== undefined && value !== null && String(value).trim() !== "")
+    .slice(0, 8)
+    .map(([key, value]) => [worldLabel(key), value] as [string, any]);
+  return [...preferred, ...extras].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+}
+
+function worldLabel(key: string): string {
+  const map: Record<string, string> = {
+    world: "世界观",
+    main_plot: "主线",
+    plot: "主线",
+    rules: "规则",
+    world_rules: "规则",
+    factions: "势力",
+    organizations: "势力",
+    locations: "地点",
+    power_system: "能力体系",
+    magic_system: "能力体系",
+    protagonist: "主角",
+  };
+  return map[key] ?? key;
+}
+
+function characterDetailText(character: ProjectWorkspace["characters"][number]): string {
+  const lines = [
+    `姓名：${character.name}`,
+    `定位：${roleLabel(character.role)}`,
+  ];
+  if (character.aliases?.length) lines.push(`别名：${character.aliases.join("、")}`);
+  const profile = profileSummary(character.base_profile);
+  if (profile) lines.push(`\n基础画像：\n${profile}`);
+  if (character.latest_state?.current_goal) lines.push(`\n当前目标：\n${character.latest_state.current_goal}`);
+  if (character.latest_state?.emotion_state) lines.push(`\n情绪状态：\n${character.latest_state.emotion_state}`);
+  if (character.latest_state?.relationships) lines.push(`\n关系备注：\n${formatBibleValue(character.latest_state.relationships)}`);
+  return lines.join("\n");
+}
+
+function DetailDrawer({ drawer, onClose }: { drawer: DetailDrawerState; onClose: () => void }) {
+  if (!drawer) return null;
+  return (
+    <div className="detail-drawer-backdrop" onClick={onClose}>
+      <aside className="detail-drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="detail-drawer-head">
+          <div>
+            <div className="muted tiny">{drawer.kind}</div>
+            <h2>{drawer.title}</h2>
+            <p className="muted small">{drawer.meta}</p>
+          </div>
+          <button type="button" className="ghost" onClick={onClose}>关闭</button>
+        </div>
+        <article className="detail-drawer-content">{drawer.content}</article>
+        {drawer.action && <div className="detail-drawer-actions">{drawer.action}</div>}
+      </aside>
+    </div>
+  );
 }
 
 function profileSummary(profile: Record<string, any>): string {

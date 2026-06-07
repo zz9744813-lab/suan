@@ -33,6 +33,9 @@ import type {
   Outline,
   Project,
   ProjectWorkspace,
+  ReaderReviewQuickGenerateResponse,
+  ReviewCommentRead,
+  ReviewCommentListResponse,
   PromptTemplate,
   PromptVersion,
   SearchResult,
@@ -191,6 +194,42 @@ export const getLatestVersion = (chapterId: number, kind: string) =>
   api.get<ChapterVersion>(`/api/chapters/${chapterId}/versions/${kind}`);
 export const listChapterSteps = (chapterId: number) =>
   api.get<any[]>(`/api/chapters/${chapterId}/steps`);
+
+// ----- reader reviews -----
+export const listReviewComments = (params: {
+  project_id?: number;
+  chapter_id?: number;
+  status?: string;
+  author_type?: string;
+  limit?: number;
+  offset?: number;
+} = {}) => {
+  const q = new URLSearchParams();
+  if (params.project_id) q.set("project_id", String(params.project_id));
+  if (params.chapter_id) q.set("chapter_id", String(params.chapter_id));
+  if (params.status) q.set("status", params.status);
+  if (params.author_type) q.set("author_type", params.author_type);
+  if (params.limit) q.set("limit", String(params.limit));
+  if (params.offset) q.set("offset", String(params.offset));
+  const s = q.toString();
+  return api.get<ReviewCommentListResponse>(`/api/reviews/comments${s ? `?${s}` : ""}`);
+};
+
+export const quickGenerateReaderReview = (body: {
+  project_id: number;
+  chapter_id: number;
+  chapter_version_id?: number | null;
+  trigger?: string;
+}) => api.post<ReaderReviewQuickGenerateResponse>("/api/reviews/runs/quick-generate", {
+  trigger: "manual_test",
+  ...body,
+});
+
+export const updateReviewComment = (id: number, body: Partial<Pick<ReviewCommentRead, "status" | "priority" | "tags">>) =>
+  api.patch<ReviewCommentRead>(`/api/reviews/comments/${id}`, body);
+
+export const triggerReviewTriage = (body: { project_id: number; chapter_id?: number | null; limit?: number }) =>
+  api.post<any>("/api/reviews/triage/trigger", body);
 
 // ----- tasks / worker -----
 export const listTasks = (params: {
