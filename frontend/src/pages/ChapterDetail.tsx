@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
-  getChapter, listChapterVersions, listChapterSteps, getLatestVersion, taskEvents, taskSteps,
-  createTask, workerStart,
+  getChapter,
+  listChapterVersions,
+  listChapterSteps,
+  getLatestVersion,
+  taskEvents,
+  taskSteps,
+  createTask,
+  workerStart,
+  listReviewComments,
+  quickGenerateReaderReview,
+  triggerReviewTriage,
+  updateReviewComment,
 } from "../api";
-import type { Chapter, ChapterVersion, AgentStep } from "../types";
+import type { Chapter, ChapterVersion, AgentStep, ReviewCommentRead } from "../types";
 import { useProjectStore } from "../stores/projectStore";
 import { ChapterCompare } from "../components/chapter/ChapterCompare";
 import { ShelfBreadcrumb } from "../components/shelf";
@@ -12,6 +22,7 @@ import "../components/chapter/ChapterCompare.css";
 
 const TABS = [
   { key: "manuscript", label: "正文" },
+  { key: "reader",     label: "读者" },
   { key: "compare",    label: "对比" },
   { key: "versions",   label: "版本" },
   { key: "timeline",   label: "时间线" },
@@ -28,8 +39,11 @@ export function ChapterDetail() {
   const [versions, setVersions] = useState<ChapterVersion[]>([]);
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [activeVersion, setActiveVersion] = useState<ChapterVersion | null>(null);
-  const [tab, setTab] = useState<"manuscript" | "compare" | "versions" | "timeline" | "context">("manuscript");
+  const [tab, setTab] = useState<"manuscript" | "reader" | "compare" | "versions" | "timeline" | "context">("manuscript");
   const [busy, setBusy] = useState(false);
+  const [readerBusy, setReaderBusy] = useState(false);
+  const [comments, setComments] = useState<ReviewCommentRead[]>([]);
+  const [readerError, setReaderError] = useState<string | null>(null);
 
   useEffect(() => {
     selectProject(projectId);
@@ -37,16 +51,19 @@ export function ChapterDetail() {
       getChapter(chapterId).then(setChapter).catch(() => navigate(`/projects/${projectId}`));
       listChapterVersions(chapterId).then(setVersions).catch(() => {});
       listChapterSteps(chapterId).then((data: any[]) => {
-        // backend may return raw dicts; coerce into AgentStep-like
         setSteps(data as AgentStep[]);
       }).catch(() => {});
       getLatestVersion(chapterId, "final").then(setActiveVersion).catch(() => {
-        // fall back to most recent draft
         getLatestVersion(chapterId, "draft").then(setActiveVersion).catch(() => {});
       });
+      listReviewComments({ project_id: projectId, chapter_id: chapterId, limit: 80 })
+        .then((data) => setComments(data.items || []))
+        .catch(() => {});
     };
     load();
-    const t = window.setInterval(load, 3000);
+    const t = window.setInterval(() => {
+      if (document.visibilityState === "visible") load();
+    }, 12000);
     return () => window.clearInterval(t);
   }, [chapterId, projectId, selectProject, navigate]);
 
@@ -62,6 +79,56 @@ export function ChapterDetail() {
     finally { setBusy(false); }
   };
 
+  const reloadComments = async () => {
+    const data = await listReviewComments({ project_id: projectId, chapter_id: chapterId, limit: 80 });
+    setComments(data.items || []);
+  };
+
+  const onGenerateReaderReview = async () => {
+    setReaderBusy(true);
+    setReaderError(null);
+    try {
+      const data = await quickGenerateReaderReview({
+        project_id: projectId,
+        chapter_id: chapterId,
+        chapter_version_id: activeVersion?.id ?? null,
+        trigger: "manual_test",
+      });
+      setComments((prev) => [...data.comments, ...prev]);
+      setTab("reader");
+    } catch (e: any) {
+      setReaderError(e.message ?? String(e));
+    } finally {
+      setReaderBusy(false);
+    }
+  };
+
+  const onUpdateCommentStatus = async (comment: ReviewCommentRead, status: ReviewCommentRead["status"]) => {
+    setReaderBusy(true);
+    setReaderError(null);
+    try {
+      const updated = await updateReviewComment(comment.id, { status });
+      setComments((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+    } catch (e: any) {
+      setReaderError(e.message ?? String(e));
+    } finally {
+      setReaderBusy(false);
+    }
+  };
+
+  const onTriageComments = async () => {
+    setReaderBusy(true);
+    setReaderError(null);
+    try {
+      await triggerReviewTriage({ project_id: projectId, chapter_id: chapterId, limit: 20 });
+      await reloadComments();
+    } catch (e: any) {
+      setReaderError(e.message ?? String(e));
+    } finally {
+      setReaderBusy(false);
+    }
+  };
+
   if (!chapter) return <div className="page-empty"><span className="spinner" /> 加载章节…</div>;
 
   const contentText = activeVersion?.content ?? "(本章还没有任何版本)";
@@ -69,8 +136,6 @@ export function ChapterDetail() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* P0 (01 §3): 三级页 (项目 → 章节 → tab) 也要有完整面包屑
-       *  + 顶部返回项目工作台按钮, 不能用单纯的 Link 「← 返回项目」糊弄. */}
       <ShelfBreadcrumb
         backTo={`/projects/${projectId}`}
         backLabel="返回项目工作台"
@@ -90,6 +155,9 @@ export function ChapterDetail() {
         )}
         <span className="meta">{words.toLocaleString()} 字 · 目标 {chapter.target_word_count.toLocaleString()}</span>
         <div className="actions">
+          <button onClick={onGenerateReaderReview} disabled={readerBusy}>
+            {readerBusy ? "读者评审中…" : "发起读者评审"}
+          </button>
           <button onClick={onReprocess} disabled={busy}>
             {busy ? "排入中…" : "重新跑流水线"}
           </button>
@@ -115,60 +183,44 @@ export function ChapterDetail() {
             </div>
           )}
 
+          {tab === "reader" && (
+            <ReaderReviewPanel
+              comments={comments}
+              busy={readerBusy}
+              error={readerError}
+              onGenerate={onGenerateReaderReview}
+              onTriage={onTriageComments}
+              onAccept={(comment) => onUpdateCommentStatus(comment, "accepted")}
+              onReject={(comment) => onUpdateCommentStatus(comment, "rejected")}
+              onRefresh={reloadComments}
+            />
+          )}
+
           {tab === "compare" && <ChapterCompare versions={versions} />}
 
           {tab === "versions" && (
-            <div className="card">
-              <h3>所有版本 ({versions.length})</h3>
-              {versions.length === 0 ? (
-                <div className="muted">本章还没有任何 Agent 输出。</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr><th>类型</th><th>版本</th><th style={{ textAlign: "right" }}>分数</th><th style={{ textAlign: "right" }}>字数</th><th>时间</th><th></th></tr>
-                  </thead>
-                  <tbody>
-                    {versions.map((v) => (
-                      <tr key={v.id} className="clickable" onClick={() => setActiveVersion(v)}>
-                        <td><span className="pill">{v.version_kind}</span></td>
-                        <td className="mono">v{v.version_no}</td>
-                        <td className="mono" style={{ textAlign: "right" }}>
-                          {v.score != null ? <span className={`score-pill ${scoreClass(v.score)}`}>{v.score}</span> : "—"}
-                        </td>
-                        <td className="mono" style={{ textAlign: "right" }}>{v.content.length}</td>
-                        <td className="muted tiny">{new Date(v.created_at).toLocaleString("zh-CN")}</td>
-                        <td>{activeVersion?.id === v.id ? <span className="gold">已展示</span> : <button>查看</button>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
-
-          {tab === "timeline" && (
-            <div className="card">
-              <h3>Agent 步骤时间线</h3>
-              {steps.length === 0 ? (
-                <div className="muted">本章没有记录到的步骤。运行流水线后这里会显示每个 Agent 的输入/输出。</div>
-              ) : (
-                <div className="timeline">
-                  {steps.map((s, i) => (
-                    <div key={s.id} className={`timeline-row ${s.status}`}>
-                      <span className="step-no mono">{i + 1}</span>
-                      <span className="step-name">{s.agent_name} · {s.step_name}</span>
-                      <span className="step-meta">
-                        {s.model_name ?? "—"} · {s.input_tokens}/{s.output_tokens} tok · {s.duration_ms}ms · ${s.cost_usd.toFixed(4)}
-                      </span>
-                    </div>
-                  ))}
+            <div className="grid-2">
+              {versions.map(v => (
+                <div key={v.id} className="card">
+                  <div className="card-header">
+                    <strong>{v.version_kind} v{v.version_no}</strong>
+                    {v.score != null && <span className={`score-pill ${scoreClass(v.score)}`}>{v.score}</span>}
+                  </div>
+                  <p className="muted small">{new Date(v.created_at).toLocaleString()}</p>
+                  {v.summary && <p>{v.summary}</p>}
+                  <details>
+                    <summary>查看全文</summary>
+                    <pre className="manuscript" style={{ maxHeight: 480, overflow: "auto" }}>{v.content}</pre>
+                  </details>
                 </div>
-              )}
+              ))}
             </div>
           )}
 
+          {tab === "timeline" && <Timeline chapterId={chapterId} />}
           {tab === "context" && (
-            <div className="col gap-3">
+            <div className="grid-2">
+              <ContextPane chapterId={chapterId} />
               <div className="card">
                 <h3>版本注释 (ContextCompiler 上下文快照)</h3>
                 {activeVersion?.notes ? (
@@ -204,6 +256,137 @@ export function ChapterDetail() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReaderReviewPanel({
+  comments,
+  busy,
+  error,
+  onGenerate,
+  onTriage,
+  onAccept,
+  onReject,
+  onRefresh,
+}: {
+  comments: ReviewCommentRead[];
+  busy: boolean;
+  error: string | null;
+  onGenerate: () => void;
+  onTriage: () => void;
+  onAccept: (comment: ReviewCommentRead) => void;
+  onReject: (comment: ReviewCommentRead) => void;
+  onRefresh: () => void;
+}) {
+  const active = comments.filter((comment) => comment.status !== "ignored" && comment.status !== "done");
+  return (
+    <div className="reader-review-grid">
+      <section className="card reader-review-hero">
+        <div>
+          <div className="muted tiny">Reader Review</div>
+          <h3>读者评审</h3>
+          <p className="muted small">生成五类读者反馈后，可以直接采纳、驳回，或交给评论分流器进入讨论/改写流程。</p>
+        </div>
+        <div className="row">
+          <button className="primary" disabled={busy} onClick={onGenerate}>{busy ? "生成中…" : "生成五维反馈"}</button>
+          <button disabled={busy || comments.length === 0} onClick={onTriage}>转分流</button>
+          <button disabled={busy} onClick={onRefresh}>刷新</button>
+        </div>
+        {error && <div className="error small">{error}</div>}
+      </section>
+
+      {active.length === 0 ? (
+        <div className="page-empty card" style={{ minHeight: 280 }}>
+          <div className="big">还没有读者反馈</div>
+          <div className="muted">点击“生成五维反馈”，系统会从钩子、情绪、逻辑、商业、毒点五个角度给出意见。</div>
+        </div>
+      ) : (
+        <div className="reader-comment-list">
+          {active.map((comment) => (
+            <article key={comment.id} className={`card reader-comment-card status-${comment.status}`}>
+              <div className="card-header">
+                <div>
+                  <strong>{comment.author_label}</strong>
+                  <div className="muted tiny">优先级 {comment.priority} · {comment.status}</div>
+                </div>
+                <span className="score-pill">{comment.rating?.score ?? "-"}</span>
+              </div>
+              <p className="reader-comment-content">{comment.content}</p>
+              <div className="row" style={{ flexWrap: "wrap" }}>
+                {comment.tags.map((tag) => <span key={tag} className="pill">{tag}</span>)}
+              </div>
+              <div className="row between" style={{ marginTop: 12 }}>
+                <span className="muted tiny">{new Date(comment.created_at).toLocaleString()}</span>
+                <div className="row">
+                  <button disabled={busy || comment.status === "accepted"} onClick={() => onAccept(comment)}>采纳</button>
+                  <button disabled={busy || comment.status === "rejected"} onClick={() => onReject(comment)}>驳回</button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Timeline({ chapterId }: { chapterId: number }) {
+  const [items, setItems] = useState<any[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      taskEvents(chapterId).catch(() => []),
+      taskSteps(chapterId).catch(() => []),
+    ]).then(([events, taskStepRows]) => {
+      if (!mounted) return;
+      const merged = [
+        ...(Array.isArray(events) ? events.map((item: any) => ({ type: "event", ...item })) : []),
+        ...(Array.isArray(taskStepRows) ? taskStepRows.map((item: any) => ({ type: "step", ...item })) : []),
+      ].sort((a: any, b: any) => String(b.created_at || b.timestamp || "").localeCompare(String(a.created_at || a.timestamp || "")));
+      setItems(merged);
+    });
+    return () => { mounted = false; };
+  }, [chapterId]);
+
+  if (items.length === 0) return <div className="page-empty card">暂无时间线记录。</div>;
+  return (
+    <div className="timeline-list">
+      {items.slice(0, 120).map((item, idx) => (
+        <div key={`${item.type}-${item.id ?? idx}`} className="card">
+          <div className="card-header">
+            <strong>{item.title || item.event_type || item.step_key || item.type}</strong>
+            <span className="muted tiny">{item.created_at || item.timestamp || ""}</span>
+          </div>
+          <pre className="mono tiny" style={{ whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto" }}>
+            {JSON.stringify(item, null, 2)}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ContextPane({ chapterId }: { chapterId: number }) {
+  const [rows, setRows] = useState<any[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    listChapterSteps(chapterId).then((data: any[]) => {
+      if (mounted) setRows(data || []);
+    }).catch(() => {
+      if (mounted) setRows([]);
+    });
+    return () => { mounted = false; };
+  }, [chapterId]);
+
+  return (
+    <div className="card">
+      <h3>章节上下文</h3>
+      {rows.length > 0 ? (
+        <pre className="mono tiny" style={{ whiteSpace: "pre-wrap", maxHeight: 620, overflow: "auto" }}>
+          {JSON.stringify(rows.slice(0, 8), null, 2)}
+        </pre>
+      ) : <div className="muted">暂无上下文记录。</div>}
     </div>
   );
 }

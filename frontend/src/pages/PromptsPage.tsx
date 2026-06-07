@@ -15,10 +15,21 @@ export function PromptsPage() {
   const [editing, setEditing] = useState<{ body: string; note: string; activate: boolean } | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newTpl, setNewTpl] = useState({ template_key: "", name: "", category: "writing", role: "Draft", genre: "", initial_body: "" });
 
-  useEffect(() => { listPromptTemplates().then(setTemplates).catch(() => {}); }, []);
+  useEffect(() => {
+    listPromptTemplates()
+      .then((items) => {
+        setTemplates(items);
+        setLoadError(null);
+      })
+      .catch((e: any) => {
+        setTemplates([]);
+        setLoadError(e.message ?? String(e));
+      });
+  }, []);
 
   const pickTemplate = async (t: PromptTemplate) => {
     setActive(t);
@@ -67,6 +78,14 @@ export function PromptsPage() {
           <button className="btn btn-sm" onClick={() => setShowCreate(true)} title="新建模板">+ 新建</button>
           <button className="btn btn-sm" onClick={() => navigate("/prompts-matrix")} title="类型矩阵">▦ 矩阵</button>
         </div>
+        {loadError && (
+          <div className="error small" style={{ marginBottom: 12 }}>
+            模板加载失败：{loadError}
+          </div>
+        )}
+        {!loadError && templates.length === 0 && (
+          <div className="muted small" style={{ marginBottom: 12 }}>暂无模板。</div>
+        )}
         {Object.entries(byCategory).map(([cat, items]) => (
           <div key={cat} style={{ marginBottom: 16 }}>
             <div className="muted tiny" style={{ textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{cat}</div>

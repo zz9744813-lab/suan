@@ -41,6 +41,7 @@ async def get_multi_worker_status():
         },
         "deepstudy_worker": worker_domain_status.get("deepstudy_worker", {}),
         "discussion_worker": worker_domain_status.get("discussion_worker", {}),
+        "review_worker": worker_domain_status.get("review_worker", {}),
         "memory_worker": worker_domain_status.get("memory_worker", {}),
         "model_router": worker_domain_status.get("model_router", {}),
     }
