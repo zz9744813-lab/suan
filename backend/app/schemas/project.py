@@ -153,3 +153,12 @@ class ChapterVersionRead(BaseModel):
     score: int | None
     notes: dict[str, Any] | None
     created_at: datetime
+
+
+class ProjectLaunchRequest(BaseModel):
+    """双模式创作启动请求。"""
+    mode: str = Field(..., description="启动模式: semi_auto | full_auto")
+    # 模式一 (semi_auto) 的输入
+    outline_text: str | None = Field(default=None, description="大纲文本 (管道符/JSON/纯文本格式)")
+    character_text: str | None = Field(default=None, description="人物设定文本")
+    bible_text: str | None = Field(default=None, description="世界观/设定文本")

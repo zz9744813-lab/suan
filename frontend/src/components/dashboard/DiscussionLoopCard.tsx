@@ -108,7 +108,7 @@ export function DiscussionLoopCard() {
 
   if (!projectId) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>讨论室留痕</h3>
           <span className="muted small">讨论闭环</span>
@@ -122,7 +122,7 @@ export function DiscussionLoopCard() {
 
   if (loading && threads.length === 0) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>讨论室留痕</h3>
           <span className="muted small">讨论闭环</span>
@@ -134,7 +134,7 @@ export function DiscussionLoopCard() {
 
   if (threads.length === 0) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>讨论室留痕</h3>
           <span className="muted small">讨论闭环</span>
@@ -147,7 +147,7 @@ export function DiscussionLoopCard() {
   }
 
   return (
-    <section className="card">
+    <section className="dashboard-card">
       <div className="card-header">
         <h3>讨论室留痕</h3>
         <span className="muted small">{threads.length} 条活跃</span>

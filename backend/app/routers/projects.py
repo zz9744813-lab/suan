@@ -31,6 +31,8 @@ from app.schemas import (
     WorkerPolicyRead,
     WorkerPolicyUpdate,
 )
+from app.schemas.project import ProjectLaunchRequest
+from app.services.project_launch import ProjectLaunchService
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -481,3 +483,37 @@ async def update_policy(
         setattr(row, k, v)
     await db.flush()
     return {"ok": True, "data": WorkerPolicyRead.model_validate(row)}
+
+
+# ----- Project Launch (双模式创作启动) -----
+
+@router.post("/{project_id}/launch", response_model=APIResponse)
+async def launch_project(
+    project_id: int, body: ProjectLaunchRequest, db: AsyncSession = Depends(get_db)
+) -> APIResponse:
+    """启动创作 — 模式一(半自动) / 模式二(全自动)。"""
+    svc = ProjectLaunchService(db)
+    if body.mode == "semi_auto":
+        result = await svc.launch_semi_auto(
+            project_id,
+            outline_text=body.outline_text,
+            character_text=body.character_text,
+            bible_text=body.bible_text,
+        )
+    elif body.mode == "full_auto":
+        result = await svc.launch_full_auto(project_id)
+    else:
+        raise bad_request(f"不支持的启动模式: {body.mode}")
+
+    # 通过 HTTP API 启动 Worker (避免直接操作 Worker 对象导致的 DB 锁冲突)
+    try:
+        import httpx
+        import asyncio
+        async def _start_worker():
+            async with httpx.AsyncClient() as client:
+                await client.post("http://localhost:8000/api/worker/start")
+        asyncio.create_task(_start_worker())
+    except Exception:
+        pass  # Worker 启动是 best-effort
+
+    return {"ok": True, "data": result}

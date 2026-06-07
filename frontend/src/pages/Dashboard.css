@@ -203,7 +203,7 @@
 .kpi-bar-fill.ok { background: var(--state-ok); }
 .kpi-bar-fill.warn { background: var(--state-warn); }
 
-.card {
+.dashboard-card {
   background: var(--bg-panel);
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-md);

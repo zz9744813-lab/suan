@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -98,6 +99,7 @@ SUPPORTED_TASKS: frozenset[str] = frozenset({
     "comment_discussion",   # P3 + P4, CommentDiscussionRunner — 跑讨论室
     "comment_cleanup",      # P4, CommentCleanupService — 7 天过期清理
     "rewrite_from_discussion",  # P9, Chief 结论触发的修改任务
+    "project_bootstrap",    # 双模式: 全自动启动项目 (LLM 生成大纲/人物/设定)
 })
 
 
@@ -500,9 +502,11 @@ class WorkerController:
         self.domain_statuses["all"].current_task_id = task_row.id
 
         # P6 §5.2: dispatch by task_type. chapter_pipeline 走老路径
-        # (重 timeout / cancel / auto_continue), 其它 4 种走对应 service.
+        # (重 timeout / cancel / auto_continue), 其它走对应 service.
         if task_row.task_type == "chapter_pipeline":
             return await self._run_chapter_pipeline(task_row, ws, policy)
+        if task_row.task_type == "project_bootstrap":
+            return await self._run_project_bootstrap(task_row, ws, policy)
         return await self._dispatch_event_task(task_row, ws, policy)
 
     # ----- P6 §5.2: 派发 (event task) -----
@@ -782,6 +786,205 @@ class WorkerController:
         except Exception as exc:
             err_text = str(exc)
             await self._mark_task_failed(target_task_id, err_text)
+
+    # ----- 双模式: project_bootstrap (全自动启动) -----
+
+    async def _run_project_bootstrap(
+        self,
+        task_row: AgentTask,
+        ws: WorkerStatus,
+        policy: WorkerPolicy,
+    ) -> bool:
+        """全自动模式: 用 LLM 生成大纲/人物/设定, 然后启动第一章写作。
+
+        流程:
+        1. 调用 LLM 生成大纲 (JSON 格式)
+        2. 写入 Outline 行
+        3. 生成人物/设定 → 写入 MemoryCharacter / Bible
+        4. 从第一个大纲创建 Chapter
+        5. 入队 chapter_pipeline 任务
+        """
+        from app.models.project import Bible, Chapter, Outline, Project
+        from app.models.memory import MemoryCharacter
+        from app.services.llm.router import LLMRouter
+        from app.services.prompt_engine import PromptEngine
+
+        payload = task_row.payload or {}
+        project_id = task_row.project_id
+        project = await self.db.get(Project, project_id)
+        if not project:
+            await self._mark_task_failed(task_row.id, f"Project {project_id} not found")
+            return False
+
+        task_row.status = "running"
+        task_row.started_at = datetime.utcnow()
+        await self.db.flush()
+
+        try:
+            router = LLMRouter(self.db)
+            engine = PromptEngine(self.db)
+
+            # Step 1: 用 LLM 生成大纲
+            outline_prompt = (
+                f"你是一位专业的长篇小说大纲规划师。\n"
+                f"请为小说《{project.name}》生成大纲，类型：{project.genre}。\n"
+                f"目标章节数：{project.target_chapter_count}，请生成前 30 章的详细大纲。\n"
+                f"{'简介：' + (project.description or '无')}\n\n"
+                f"请严格按照以下 JSON 格式输出，不要输出任何其他内容：\n"
+                f'```json\n'
+                f'[\n'
+                f'  {{"chapter_no": 1, "title": "章节标题", "summary": "章节简介(50-100字)", "importance": 80}},\n'
+                f'  ...\n'
+                f']\n'
+                f'```'
+            )
+
+            resolved = await router.resolve("PlannerAgent", project.genre or "default")
+            messages = [
+                {"role": "system", "content": "你是专业的网文大纲规划师，擅长构建长篇小说的故事线。只输出纯JSON，不要任何解释。"},
+                {"role": "user", "content": outline_prompt},
+            ]
+            import json as _json
+            from app.services.llm.client import LLMMessage
+            llm_messages = [LLMMessage(role=m["role"], content=m["content"]) for m in messages]
+            resp = await router.call(resolved, llm_messages, max_tokens=4000, temperature=0.7)
+
+            # 解析大纲 JSON
+            raw = resp.content.strip()
+            # 尝试提取 JSON 块
+            json_match = re.search(r'\[[\s\S]*\]', raw)
+            if json_match:
+                outline_items = _json.loads(json_match.group())
+            else:
+                outline_items = _json.loads(raw)
+
+            outlines_created = []
+            for item in outline_items[:30]:  # 最多 30 章
+                o = Outline(
+                    project_id=project_id,
+                    chapter_no=int(item.get("chapter_no", len(outlines_created) + 1)),
+                    title=str(item.get("title", f"第{len(outlines_created)+1}章")),
+                    summary=item.get("summary"),
+                    importance=int(item.get("importance", 50)),
+                    target_word_count=3000,
+                )
+                self.db.add(o)
+                outlines_created.append(o)
+            await self.db.flush()
+
+            # Step 2: 用 LLM 生成人物
+            char_prompt = (
+                f"你是一位专业的网文人物设计师。\n"
+                f"请为小说《{project.name}》({project.genre})设计主要人物。\n"
+                f"大纲摘要：\n"
+                + "\n".join(f"- 第{o.chapter_no}章: {o.title} - {o.summary or ''}" for o in outlines_created[:10])
+                + "\n\n请严格按照以下 JSON 格式输出，不要输出任何其他内容：\n"
+                f'```json\n'
+                f'[\n'
+                f'  {{"name": "人物名", "role": "protagonist|antagonist|supporting", "profile": {{"description": "人物描述"}}}},\n'
+                f'  ...\n'
+                f']\n'
+                f'```'
+            )
+            char_messages = [
+                LLMMessage(role="system", content="你是网文人物设计师，只输出纯JSON。"),
+                LLMMessage(role="user", content=char_prompt),
+            ]
+            resp2 = await router.call(resolved, char_messages, max_tokens=2000, temperature=0.7)
+            raw2 = resp2.content.strip()
+            json_match2 = re.search(r'\[[\s\S]*\]', raw2)
+            if json_match2:
+                char_items = _json.loads(json_match2.group())
+            else:
+                try:
+                    char_items = _json.loads(raw2)
+                except Exception:
+                    char_items = []
+
+            chars_created = 0
+            for item in char_items[:15]:  # 最多 15 个人物
+                c = MemoryCharacter(
+                    project_id=project_id,
+                    name=str(item.get("name", "未命名")),
+                    role=item.get("role", "supporting"),
+                    base_profile=item.get("profile", {}),
+                )
+                self.db.add(c)
+                chars_created += 1
+            await self.db.flush()
+
+            # Step 3: 更新 Bible (世界观)
+            bible_prompt = (
+                f"请为小说《{project.name}》({project.genre})写一段世界观设定(200-500字)。\n"
+                f"大纲涉及: {', '.join(o.title for o in outlines_created[:5])}\n"
+                f"只输出设定文本，不要其他内容。"
+            )
+            bible_messages = [
+                LLMMessage(role="system", content="你是网文世界观设计师，输出纯文本设定。"),
+                LLMMessage(role="user", content=bible_prompt),
+            ]
+            resp3 = await router.call(resolved, bible_messages, max_tokens=1000, temperature=0.7)
+
+            bible = (
+                await self.db.execute(
+                    select(Bible).where(Bible.project_id == project_id, Bible.is_active.is_(True))
+                )
+            ).scalar_one_or_none()
+            if bible:
+                bible.content = {
+                    "world": resp3.content.strip(),
+                    "protagonist": bible.content.get("protagonist", "（待设定）"),
+                }
+                bible.version += 1
+            await self.db.flush()
+
+            # Step 4: 从第一个大纲创建章节并启动管线
+            if outlines_created:
+                first_outline = outlines_created[0]
+                chapter = Chapter(
+                    project_id=project_id,
+                    outline_id=first_outline.id,
+                    chapter_no=first_outline.chapter_no,
+                    title=first_outline.title,
+                    target_word_count=first_outline.target_word_count,
+                    status="queued",
+                )
+                self.db.add(chapter)
+                await self.db.flush()
+
+                pipeline_task = AgentTask(
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                    task_type="chapter_pipeline",
+                    status="pending",
+                    priority=100,
+                    domain="writing",
+                    payload={"mode": "full", "auto_launched": True},
+                    display_title=f"写作: 第{chapter.chapter_no}章 {chapter.title}",
+                )
+                self.db.add(pipeline_task)
+                await self.db.flush()
+
+            # 标记 bootstrap 任务完成
+            task_row.status = "succeeded"
+            task_row.finished_at = datetime.utcnow()
+            task_row.cost_usd = (resp.cost_usd or 0) + (resp2.cost_usd or 0) + (resp3.cost_usd or 0)
+            task_row.input_tokens = (resp.input_tokens or 0) + (resp2.input_tokens or 0) + (resp3.input_tokens or 0)
+            task_row.output_tokens = (resp.output_tokens or 0) + (resp2.output_tokens or 0) + (resp3.output_tokens or 0)
+            task_row.summary_json = {
+                "outlines_created": len(outlines_created),
+                "characters_created": chars_created,
+                "bible_updated": True,
+            }
+            await self.db.flush()
+            return True
+
+        except Exception as exc:
+            task_row.status = "failed"
+            task_row.error = str(exc)[:2000]
+            task_row.finished_at = datetime.utcnow()
+            await self.db.flush()
+            return False
 
     # ----- 老 chapter_pipeline 逻辑 (抽出来) -----
 

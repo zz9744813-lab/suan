@@ -38,7 +38,7 @@ export function WorkbenchDomainsPanel() {
 
   if (err) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header"><h3>五域生产状态</h3></div>
         <div className="muted small" style={{ padding: 12 }}>加载失败：{err}</div>
       </section>
@@ -46,7 +46,7 @@ export function WorkbenchDomainsPanel() {
   }
   if (!data) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header"><h3>五域生产状态</h3></div>
         <div className="muted small" style={{ padding: 12 }}>加载中…</div>
       </section>
@@ -54,7 +54,7 @@ export function WorkbenchDomainsPanel() {
   }
 
   return (
-    <section className="card workbench-domains">
+    <section className="dashboard-card workbench-domains">
       <div className="card-header">
         <h3>五域生产状态</h3>
         <span className="muted small">

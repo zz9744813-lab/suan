@@ -9,6 +9,8 @@ import { ChiefAgentPanel } from "./ChiefAgentPanel";
 import { ProjectNav } from "./project/ProjectNav";
 import { RailNav } from "./layout/RailNav";
 import { BottomStatusBar } from "./layout/BottomStatusBar";
+import { MobileBottomNav } from "./layout/MobileBottomNav";
+import { ToastProvider } from "./ui/Toast";
 import { formatThousands } from "../lib/format";
 import "./AppShell.css";
 
@@ -174,6 +176,16 @@ export function AppShell({ children }: Props) {
       )}
 
       <BottomStatusBar />
+      <MobileBottomNav />
+      <ToastProvider />
+
+      {/* Global aria-live region for status announcements */}
+      <div
+        id="global-live-region"
+        className="sr-only"
+        aria-live="polite"
+        aria-atomic="true"
+      />
     </div>
   );
 }

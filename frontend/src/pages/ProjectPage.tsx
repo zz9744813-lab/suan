@@ -9,6 +9,7 @@ import {
 import type { Project, Bible, Outline, Chapter, WorkerPolicy, AgentTask } from "../types";
 import { useProjectStore } from "../stores/projectStore";
 import { ShelfBreadcrumb } from "../components/shelf";
+import { LaunchProjectDialog } from "../components/projects/LaunchProjectDialog";
 
 const TABS = [
   { key: "overview", label: "概览" },
@@ -32,6 +33,7 @@ export function ProjectPage() {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showLaunch, setShowLaunch] = useState(false);
   const selectProject = useProjectStore((s) => s.selectProject);
 
   useEffect(() => {
@@ -72,9 +74,6 @@ export function ProjectPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* P0 (01 §2.1 + §2.2): 顶部必须有「← 返回项目书架」按钮 + 面包屑
-       *  不用 window.history.back() (01 §8 禁 1), 直接 navigate("/projects").
-       *  刷新二级页 history 栈只有 1 条时也不会失效. */}
       <ShelfBreadcrumb
         backTo="/projects"
         backLabel="返回项目书架"
@@ -92,9 +91,35 @@ export function ProjectPage() {
           {" "}{project.total_words.toLocaleString()} / {project.target_word_count.toLocaleString()} 字
         </span>
         <div className="actions">
+          {chapters.length === 0 && (
+            <button
+              className="primary"
+              onClick={() => setShowLaunch(true)}
+              style={{
+                background: "linear-gradient(135deg, var(--accent-gold, #3f7cff), var(--accent-violet, #7b61ff))",
+                fontWeight: 600,
+              }}
+            >
+              启动创作
+            </button>
+          )}
           <button onClick={onDeleteProject} className="danger">删除</button>
         </div>
       </div>
+
+      {/* 启动创作弹窗 */}
+      <LaunchProjectDialog
+        open={showLaunch}
+        projectId={projectId}
+        projectName={project.name}
+        onClose={() => setShowLaunch(false)}
+        onLaunched={() => {
+          listTasks({ project_id: projectId, limit: 10 }).then(setTasks).catch(() => {});
+          listChapters(projectId).then(setChapters).catch(() => {});
+          listOutlines(projectId).then(setOutlines).catch(() => {});
+          workerStart().catch(() => {});
+        }}
+      />
 
       <div className="main-body" style={{ padding: 0, maxWidth: "100%" }}>
         <div className="tabs" style={{ padding: "0 24px" }}>
@@ -115,6 +140,7 @@ export function ProjectPage() {
               project={project}
               chapters={chapters}
               tasks={tasks}
+              onLaunch={() => setShowLaunch(true)}
               onSaveMeta={async (patch) => {
                 const updated = await updateProject(projectId, patch);
                 setProject(updated);
@@ -163,10 +189,11 @@ export function ProjectPage() {
   );
 }
 
-function OverviewTab({ project, chapters, tasks, onSaveMeta }: {
+function OverviewTab({ project, chapters, tasks, onLaunch, onSaveMeta }: {
   project: Project;
   chapters: Chapter[];
   tasks: AgentTask[];
+  onLaunch: () => void;
   onSaveMeta: (patch: Partial<Project>) => Promise<void>;
 }) {
   const [exportFormat, setExportFormat] = useState<ProjectExportFormat>("markdown");
@@ -200,6 +227,33 @@ function OverviewTab({ project, chapters, tasks, onSaveMeta }: {
 
   return (
     <div>
+      {/* 启动创作提示 (章节为0时显示) */}
+      {chapters.length === 0 && (
+        <div className="card" style={{
+          background: "linear-gradient(135deg, rgba(63,124,255,0.08), rgba(123,97,255,0.05))",
+          border: "1px dashed var(--accent-gold, #3f7cff)",
+          textAlign: "center",
+          padding: "32px 24px",
+        }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>📝</div>
+          <h3 style={{ margin: "0 0 8px" }}>项目已就绪，开始创作吧！</h3>
+          <p style={{ color: "var(--text-secondary)", margin: "0 0 16px", fontSize: 14 }}>
+            选择半自动模式提供大纲和人物，或全自动模式让 AI 生成一切
+          </p>
+          <button
+            className="primary"
+            onClick={onLaunch}
+            style={{
+              background: "linear-gradient(135deg, var(--accent-gold, #3f7cff), var(--accent-violet, #7b61ff))",
+              padding: "10px 28px",
+              fontSize: 15,
+              fontWeight: 600,
+            }}
+          >
+            启动创作
+          </button>
+        </div>
+      )}
       <div className="stat-grid">
         <div className="stat"><div className="label">已完成章节</div><div className="num">{done}</div><div className="sub">共 {chapters.length} 章</div></div>
         <div className="stat"><div className="label">待复盘</div><div className="num">{reviewing}</div><div className="sub">分数低于 80</div></div>

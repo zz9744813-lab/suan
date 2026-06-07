@@ -577,13 +577,12 @@
   color: #ffffff;
 }
 
-/* Final placement guard:
-   Pin the primary shell regions to the viewport directly. This keeps the
-   layout correct even if an older hot-reload snapshot or profile-level style
-   leaves the shell parent in a flex/centered state. */
+/* Layout stability guard:
+   Pin the shell to the viewport and ensure box-model consistency.
+   DO NOT override display:grid — the grid handles child placement
+   via grid-template-areas. Only set the container-level safety net. */
 .app-shell,
 .shell {
-  display: block !important;
   position: fixed !important;
   inset: 0 !important;
   width: 100vw !important;
@@ -593,67 +592,19 @@
   margin: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
-  transform: none !important;
+  box-sizing: border-box !important;
 }
 
-.app-shell > .rail,
-.shell > .rail {
-  position: fixed !important;
-  left: 0 !important;
-  top: 0 !important;
-  bottom: var(--statusbar-height) !important;
-  width: var(--rail-width) !important;
-  height: auto !important;
-  margin: 0 !important;
-  transform: none !important;
-  z-index: 120 !important;
+.app-shell *,
+.shell * {
+  box-sizing: border-box !important;
 }
 
-.app-shell > .projectnav,
-.shell > .projectnav {
-  position: fixed !important;
-  left: var(--rail-width) !important;
-  top: 0 !important;
-  bottom: var(--statusbar-height) !important;
-  width: var(--projectnav-width) !important;
-  height: auto !important;
-  margin: 0 !important;
-  transform: none !important;
-  z-index: 100 !important;
-}
-
+/* Hidden panel modes — grid variables already handle the width,
+   but we also need display:none so the DOM node doesn't eat space. */
 .app-shell.projectnav-hidden > .projectnav,
 .shell.projectnav-hidden > .projectnav {
   display: none !important;
-}
-
-.app-shell > .main,
-.shell > .main {
-  position: fixed !important;
-  left: calc(var(--rail-width) + var(--projectnav-width)) !important;
-  right: var(--chief-width) !important;
-  top: 0 !important;
-  bottom: var(--statusbar-height) !important;
-  width: auto !important;
-  height: auto !important;
-  margin: 0 !important;
-  transform: none !important;
-  display: grid !important;
-  grid-template-rows: auto 1fr !important;
-  z-index: 1 !important;
-}
-
-.app-shell > .chief-panel,
-.shell > .chief-panel {
-  position: fixed !important;
-  right: 0 !important;
-  top: 0 !important;
-  bottom: var(--statusbar-height) !important;
-  width: var(--chief-width) !important;
-  height: auto !important;
-  margin: 0 !important;
-  transform: none !important;
-  z-index: 90 !important;
 }
 
 .app-shell.chief-hidden > .chief-panel,
@@ -709,10 +660,66 @@
   z-index: 140 !important;
 }
 
+/* ---- Responsive breakpoints ---- */
+
+/* 1280px: slightly narrower panels */
+@media (max-width: 1280px) {
+  .app-shell,
+  .shell {
+    --chief-width: 300px;
+    --projectnav-width: 240px;
+  }
+}
+
+/* 1100px: hide chief, narrow projectnav */
 @media (max-width: 1100px) {
   .app-shell,
   .shell {
-    --projectnav-width: 0px;
+    --projectnav-width: 220px;
     --chief-width: 0px;
+    grid-template-columns:
+      var(--rail-width)
+      var(--projectnav-width)
+      minmax(0, 1fr);
+    grid-template-areas:
+      "rail projectnav main"
+      "statusbar statusbar statusbar";
+  }
+  .chief-panel { display: none; }
+}
+
+/* 860px: hide projectnav too */
+@media (max-width: 860px) {
+  .app-shell,
+  .shell {
+    --projectnav-width: 0px;
+    grid-template-columns:
+      var(--rail-width)
+      minmax(0, 1fr);
+    grid-template-areas:
+      "rail main"
+      "statusbar statusbar";
+  }
+  .projectnav { display: none; }
+}
+
+/* 720px: hide rail, show mobile bottom nav */
+@media (max-width: 720px) {
+  .app-shell,
+  .shell {
+    --rail-width: 0px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 56px var(--statusbar-height);
+    grid-template-areas:
+      "main"
+      "mobilenav"
+      "statusbar";
+  }
+  .rail { display: none; }
+  .projectnav { display: none; }
+  .chief-panel { display: none; }
+  .mobile-bottom-nav {
+    display: flex;
+    grid-area: mobilenav;
   }
 }

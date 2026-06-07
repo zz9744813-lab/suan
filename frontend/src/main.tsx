@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./styles/tokens.css";
 import "./styles/global.css";
+import "./styles/accessibility.css";
 
 // R17: read the persisted theme from localStorage BEFORE React mounts
 // so the very first paint already has the right `data-theme` on

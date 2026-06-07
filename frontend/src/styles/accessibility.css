@@ -1,0 +1,71 @@
+/* =========================================================================
+   NovelForge 2.0 — Accessibility base styles
+   ------------------------------------------------------------------------
+   Skip-link, focus-visible, reduced-motion, sr-only, touch targets.
+   ======================================================================== */
+
+/* ---- Skip-to-content link ---- */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 9999;
+  transform: translateY(-140%);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow);
+  transition: transform 120ms ease;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* ---- Focus-visible (keyboard only) ---- */
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Remove default outline for mouse clicks — only show for keyboard nav */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Touch targets (coarse pointer / mobile) ---- */
+@media (pointer: coarse) {
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role="button"] {
+    min-height: 44px;
+  }
+}
+
+/* ---- Screen-reader only utility ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

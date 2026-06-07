@@ -81,6 +81,27 @@ export const updateProject = (id: number, body: Partial<Project>) =>
 export const deleteProject = (id: number) =>
   api.delete<{ deleted: number }>(`/api/projects/${id}`);
 
+// 双模式创作启动
+export type LaunchMode = "semi_auto" | "full_auto";
+export interface LaunchResult {
+  mode: LaunchMode;
+  outlines_created?: number;
+  characters_created?: number;
+  bible_updated?: boolean;
+  first_task_id?: number;
+  bootstrap_task_id?: number;
+  message?: string;
+}
+export const launchProject = (
+  projectId: number,
+  mode: LaunchMode,
+  data?: { outline_text?: string; character_text?: string; bible_text?: string }
+) =>
+  api.post<LaunchResult>(`/api/projects/${projectId}/launch`, {
+    mode,
+    ...data,
+  });
+
 export type ProjectExportFormat = "markdown" | "txt" | "json" | "html";
 function filenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback;

@@ -1,0 +1,18 @@
+.ui-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ui-spinner__ring {
+  border: 2px solid var(--surface-muted);
+  border-right-color: var(--color-accent-primary);
+  border-radius: 50%;
+  animation: ui-spin 0.6s linear infinite;
+}
+.ui-spinner--sm .ui-spinner__ring { width: 16px; height: 16px; }
+.ui-spinner--md .ui-spinner__ring { width: 24px; height: 24px; }
+.ui-spinner--lg .ui-spinner__ring { width: 36px; height: 36px; border-width: 3px; }
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner__ring { animation-duration: 1.5s; }
+}

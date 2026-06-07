@@ -1,0 +1,13 @@
+.ui-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.ui-card--elevated { box-shadow: var(--shadow); }
+.ui-card--flat { box-shadow: none; }
+.ui-card--padding-none { padding: 0; }
+.ui-card--padding-sm { padding: 10px; }
+.ui-card--padding-md { padding: 16px; }
+.ui-card--padding-lg { padding: 24px; }

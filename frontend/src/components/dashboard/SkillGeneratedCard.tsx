@@ -128,7 +128,7 @@ export function SkillGeneratedCard() {
 
   if (!projectId) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>沉淀技能</h3>
           <span className="muted small">Skill 闭环</span>
@@ -142,7 +142,7 @@ export function SkillGeneratedCard() {
 
   if (loading && rows.length === 0) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>沉淀技能</h3>
           <span className="muted small">Skill 闭环</span>
@@ -154,7 +154,7 @@ export function SkillGeneratedCard() {
 
   if (rows.length === 0) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>沉淀技能</h3>
           <span className="muted small">Skill 闭环</span>
@@ -167,7 +167,7 @@ export function SkillGeneratedCard() {
   }
 
   return (
-    <section className="card">
+    <section className="dashboard-card">
       <div className="card-header">
         <h3>沉淀技能</h3>
         <span className="muted small">{rows.length} 条</span>

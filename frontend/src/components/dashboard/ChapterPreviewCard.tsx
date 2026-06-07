@@ -60,7 +60,7 @@ export function ChapterPreviewCard() {
   if (!currentProjectId) return null;
   if (loading && !chapter) {
     return (
-      <section className="card preview-card">
+      <section className="dashboard-card preview-card">
         <div className="card-header"><h3>当前章节预览</h3></div>
         <div className="preview-loading muted small">加载中…</div>
       </section>
@@ -68,7 +68,7 @@ export function ChapterPreviewCard() {
   }
   if (!chapter) {
     return (
-      <section className="card preview-card">
+      <section className="dashboard-card preview-card">
         <div className="card-header"><h3>当前章节预览</h3></div>
         <div className="muted small preview-empty">还没有章节。先在项目里添加章节，然后启动流水线。</div>
       </section>
@@ -77,7 +77,7 @@ export function ChapterPreviewCard() {
 
   const preview = (version?.content ?? "").slice(0, 600);
   return (
-    <section className="card preview-card">
+    <section className="dashboard-card preview-card">
       <div className="card-header">
         <h3>当前章节预览</h3>
         <Link to={`/projects/${currentProjectId}/chapters/${chapter.id}`} className="muted small">

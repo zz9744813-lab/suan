@@ -52,7 +52,7 @@ export function UsefulEventStream() {
   const recent = filtered.slice(0, 8);
 
   return (
-    <section className="card event-card">
+    <section className="dashboard-card event-card">
       <div className="card-header">
         <h3>事件看板</h3>
         <span className="muted small">最近 {filtered.length} 条有效事件</span>

@@ -10,17 +10,18 @@
  */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import {
-  listTasks, retryTask, cancelTask, taskSteps,
+  listTasks, retryTask, cancelTask, taskSteps, getCommandCenter,
 } from "../api";
-import type { AgentTask, AgentStep } from "../types";
+import type { AgentTask, AgentStep, TaskDisplayItem } from "../types";
 import { CommandCenterPanel } from "../components/tasks/CommandCenterPanel";
 import "./TasksPage.css";
 
-type DomainTab = "all" | "writing" | "model" | "discussion" | "memory" | "export" | "failed";
+type DomainTab = "all" | "writing" | "deepstudy" | "model" | "discussion" | "memory" | "export" | "failed";
 
 const DOMAINS: { key: DomainTab; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "writing", label: "写作" },
+  { key: "deepstudy", label: "拆书" },
   { key: "model", label: "模型" },
   { key: "discussion", label: "讨论" },
   { key: "memory", label: "记忆" },
@@ -39,6 +40,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 // P0 修复: 硬过滤历史脏任务, 即便后端 visibility 不规范也不会刷屏
+// 注意: deepstudy_run 是用户级任务, 不过滤; 过滤的是内部子任务。
 const HIDDEN_TASK_KINDS = new Set([
   "comment_cleanup", "heartbeat", "cleanup", "audit_cleanup",
   "study_character", "study_event", "study_relationship", "study_behavior",
@@ -53,15 +55,15 @@ const HIDDEN_TASK_TYPES = new Set([
   "heartbeat", "cleanup", "audit_cleanup",
 ]);
 
-function isDeepStudyTask(task: AgentTask) {
-  const domain = task.domain || "";
-  const kind = (task.task_kind || task.task_type || "").toLowerCase();
-  // 后端 domain 已经是 deepstudy
-  if (domain === "deepstudy") return true;
+function isHiddenInternalTask(task: AgentTask) {
+  const kind = (task.task_kind || "").toLowerCase();
+  const type_ = (task.task_type || "").toLowerCase();
+  // deepstudy_run 本身不过滤 (用户需要看到拆书主任务)
+  if (kind === "deepstudy_run" || type_ === "deepstudy_run") return false;
   if (HIDDEN_TASK_KINDS.has(task.task_kind || "")) return true;
   if (HIDDEN_TASK_TYPES.has(task.task_type || "")) return true;
-  // 兜底: kind 前缀命中
-  return kind.startsWith("deepstudy")
+  // 兜底: 内部子任务前缀
+  return kind.startsWith("deepstudy_stage")
     || kind.startsWith("study_")
     || kind === "study"
     || kind === "study_bulk"
@@ -87,7 +89,48 @@ export function TasksPage() {
     } else if (domain !== "all") {
       params.domain = domain;
     }
-    listTasks(params).then(setTasks).catch(() => {});
+    // 同时拉取 agent_tasks 和 command-center (拆书进度在 deepstudy_runs 独立表中)
+    Promise.all([
+      listTasks(params),
+      getCommandCenter().catch(() => null),
+    ]).then(([taskList, cc]) => {
+      let merged = [...taskList];
+      // 把 command-center 中的 deepstudy 运行中任务合并进来
+      if (cc && cc.active) {
+        const dsItems = cc.active.filter((a: TaskDisplayItem) => a.domain === "deepstudy" && a.status === "running");
+        for (const dsi of dsItems) {
+          // 避免重复 (用负数 ID 的 deepstudy_run)
+          if (!merged.some((t) => t.id === dsi.id)) {
+            merged.push({
+              id: dsi.id,
+              project_id: dsi.project_id ?? 0,
+              chapter_id: dsi.chapter_id,
+              task_type: dsi.task_type,
+              status: dsi.status,
+              priority: 100,
+              payload: dsi.summary_json ?? {},
+              error: dsi.error,
+              retry_count: 0,
+              cost_usd: dsi.cost_usd,
+              input_tokens: dsi.input_tokens,
+              output_tokens: dsi.output_tokens,
+              started_at: dsi.started_at,
+              finished_at: dsi.finished_at,
+              created_at: dsi.created_at,
+              domain: dsi.domain,
+              task_kind: dsi.task_kind,
+              material_id: dsi.material_id,
+              run_id: dsi.run_id,
+              progress_current: dsi.progress_current,
+              progress_total: dsi.progress_total,
+              display_title: dsi.title,
+              summary_json: dsi.summary_json,
+            } as AgentTask);
+          }
+        }
+      }
+      setTasks(merged);
+    }).catch(() => {});
   }, [domain]);
 
   useEffect(() => {
@@ -135,7 +178,7 @@ export function TasksPage() {
     }
   }
 
-  const visibleTasks = useMemo(() => tasks.filter((t) => !isDeepStudyTask(t)), [tasks]);
+  const visibleTasks = useMemo(() => tasks.filter((t) => !isHiddenInternalTask(t)), [tasks]);
 
   const stats = useMemo(() => ({
     running: visibleTasks.filter((t) => t.status === "running").length,

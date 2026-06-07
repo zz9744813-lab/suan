@@ -85,7 +85,7 @@ export function PassFailRateCard({ projectId }: Props) {
 
   if (!projectId) {
     return (
-      <section className="card pfr-card">
+      <section className="dashboard-card pfr-card">
         <div className="card-header">
           <h3>成稿率 / 废稿率</h3>
         </div>
@@ -96,7 +96,7 @@ export function PassFailRateCard({ projectId }: Props) {
 
   if (loading && total === 0) {
     return (
-      <section className="card pfr-card">
+      <section className="dashboard-card pfr-card">
         <div className="card-header">
           <h3>成稿率 / 废稿率</h3>
         </div>
@@ -106,7 +106,7 @@ export function PassFailRateCard({ projectId }: Props) {
   }
 
   return (
-    <section className="card pfr-card">
+    <section className="dashboard-card pfr-card">
       <div className="card-header">
         <h3>成稿率 / 废稿率</h3>
         <span className="muted small">项目 #{projectId} · 共 {total} 章 · 已判定 {decided}</span>

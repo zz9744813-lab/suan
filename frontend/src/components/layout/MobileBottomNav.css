@@ -1,0 +1,38 @@
+.mobile-bottom-nav {
+  display: none; /* shown via AppShell.css @media (max-width: 720px) */
+  align-items: center;
+  justify-content: space-around;
+  background: var(--surface-panel);
+  border-top: 1px solid var(--border);
+  padding: 4px 0 env(safe-area-inset-bottom, 4px);
+  height: 56px;
+}
+
+.mobile-bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 56px;
+  min-height: 44px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 10px;
+  transition: color 0.12s;
+  border-radius: var(--radius-sm);
+}
+
+.mobile-bottom-nav__item.active {
+  color: var(--color-accent-primary);
+}
+
+.mobile-bottom-nav__icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.mobile-bottom-nav__label {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}

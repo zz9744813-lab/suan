@@ -21,7 +21,15 @@ export default defineConfig({
     // whitelists this dev origin. Production runs behind nginx which
     // does proxy the body correctly.
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          state: ["zustand"],
+          motion: ["framer-motion"],
+        },
+      },
+    },
+  },
 });
-
-
-

@@ -141,7 +141,7 @@ export function ReaderFeedbackPanel() {
 
   if (!projectId) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>读者反馈</h3>
           <span className="muted small">5 位模拟读者</span>
@@ -155,7 +155,7 @@ export function ReaderFeedbackPanel() {
 
   if (loading && lines.length === 0) {
     return (
-      <section className="card">
+      <section className="dashboard-card">
         <div className="card-header">
           <h3>读者反馈</h3>
           <span className="muted small">5 位模拟读者</span>
@@ -166,7 +166,7 @@ export function ReaderFeedbackPanel() {
   }
 
   return (
-    <section className="card">
+    <section className="dashboard-card">
       <div className="card-header">
         <h3>读者反馈</h3>
         <span className="muted small">5 位模拟读者</span>

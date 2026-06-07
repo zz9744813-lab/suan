@@ -85,7 +85,7 @@ export function CurrentPipelinePanel() {
 
   if (!currentProjectId) {
     return (
-      <section className="card pipeline-card">
+      <section className="dashboard-card pipeline-card">
         <div className="card-header">
           <h3>当前生产线</h3>
         </div>
@@ -103,7 +103,7 @@ export function CurrentPipelinePanel() {
   const isSucceeded = task?.status === "succeeded";
 
   return (
-    <section className="card pipeline-card">
+    <section className="dashboard-card pipeline-card">
       <div className="card-header">
         <h3>当前生产线</h3>
         <div className="card-header-meta">

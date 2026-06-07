@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import bad_request, not_found
+from app.models.deepstudy import StudyRun
 from app.models.project import Chapter
+from app.models.study import StudyMaterial
 from app.models.task import AgentEvent, AgentStep, AgentTask
 from app.schemas import (
     APIResponse,
@@ -178,7 +180,44 @@ async def get_command_center(
     )
     all_rows = (await db.execute(base_stmt)).scalars().all()
 
-    # ----- 2. 按 domain 汇总 -----
+    # ----- 2. 拉取 deepstudy_runs 实时进度 (P0 fix: 拆书进度独立表) -----
+    ds_runs = (await db.execute(
+        select(StudyRun, StudyMaterial.title)
+        .join(StudyMaterial, StudyRun.material_id == StudyMaterial.id)
+        .where(StudyRun.status.in_(["running", "queued", "paused"]))
+        .order_by(StudyRun.id.desc())
+    )).all()
+    # 构建 material_id -> title 映射
+    ds_run_items: list[TaskDisplayItem] = []
+    for run, material_title in ds_runs:
+        progress = run.progress or {}
+        completed_stages = progress.get("completed_stages", [])
+        current_stage = run.current_stage or progress.get("current_stage", "")
+        stage_label = current_stage
+        ds_run_items.append(TaskDisplayItem(
+            id=-run.id,  # 负数 ID 避免与 agent_tasks 冲突
+            domain="deepstudy",
+            task_kind="deepstudy_run",
+            task_type="deepstudy_run",
+            title=f"DeepStudy《{material_title or '未命名'}》",
+            status=run.status,
+            project_id=run.project_id,
+            chapter_id=None,
+            material_id=run.material_id,
+            run_id=run.id,
+            progress_current=run.processed_chapters,
+            progress_total=run.total_chapters,
+            cost_usd=run.cost_usd,
+            input_tokens=run.input_tokens,
+            output_tokens=run.output_tokens,
+            started_at=run.started_at.isoformat() if run.started_at else None,
+            finished_at=run.finished_at.isoformat() if run.finished_at else None,
+            created_at=run.created_at.isoformat() if run.created_at else "",
+            error=run.error,
+            summary_json={"stages": completed_stages, "current_stage": stage_label},
+        ))
+
+    # ----- 3. 按 domain 汇总 -----
     domain_stats: dict[str, dict[str, Any]] = {
         d: {
             "running": 0, "pending": 0, "failed": 0,
@@ -219,14 +258,29 @@ async def get_command_center(
             s["cost_today"] += float(r.cost_usd or 0.0)
             s["tokens_today"] += int(r.input_tokens or 0) + int(r.output_tokens or 0)
 
-    # 转成 schema, 算 status
+    # 合并 deepstudy_runs 到 deepstudy domain 统计
+    for dsi in ds_run_items:
+        s = domain_stats["deepstudy"]
+        if dsi.status == "running":
+            s["running"] += 1
+            # 用 deepstudy_run 的进度覆盖 agent_task 的 (更实时)
+            s["current_task_id"] = dsi.id
+            s["current_title"] = dsi.title
+            s["progress_current"] = dsi.progress_current
+            s["progress_total"] = dsi.progress_total
+        elif dsi.status in ("pending", "queued"):
+            s["pending"] += 1
+        s["cost_today"] += dsi.cost_usd
+        s["tokens_today"] += dsi.input_tokens + dsi.output_tokens
+
+    # 转成 schema, 算 status (优先级: running > failed > blocked > succeeded > idle)
     domain_summaries: list[TaskDomainSummary] = []
     for d in TASK_DOMAINS:
         s = domain_stats[d]
-        if s["failed"] > 0:
-            status = "failed"
-        elif s["running"] > 0:
+        if s["running"] > 0:
             status = "running"
+        elif s["failed"] > 0:
+            status = "failed"
         elif s["pending"] > 0:
             status = "blocked"
         elif s["succeeded_today"] > 0:
@@ -246,11 +300,14 @@ async def get_command_center(
             last_event=None,
         ))
 
-    # ----- 3. active: 正在跑/等待, 最多 5 条 -----
+    # ----- 4. active: 正在跑/等待, 最多 5 条 -----
     active = [
         _to_display_item(r) for r in all_rows
         if r.status in ("running", "pending", "queued")
-    ][:5]
+    ]
+    # 把 deepstudy_runs 的 running 任务也加入 active (它们不在 agent_tasks 中)
+    active.extend([dsi for dsi in ds_run_items if dsi.status == "running"])
+    active = active[:5]
 
     # ----- 4. needs_attention: 失败 + 阻塞超过 30 分钟 -----
     thirty_min_ago = now - timedelta(minutes=30)

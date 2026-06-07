@@ -40,17 +40,24 @@ import { MemoryLayerCard } from "../components/dashboard/MemoryLayerCard";
 import { ReaderFeedbackPanel } from "../components/dashboard/ReaderFeedbackPanel";
 import { DiscussionLoopCard } from "../components/dashboard/DiscussionLoopCard";
 import { SkillGeneratedCard } from "../components/dashboard/SkillGeneratedCard";
+import { Skeleton } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
 import "./Dashboard.css";
 
 export function Dashboard() {
   const projects = useProjectStore((s) => s.projects);
   const currentProjectId = useProjectStore((s) => s.currentProjectId);
+  const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [multiStatus, setMultiStatus] = useState<MultiWorkerStatus | null>(null);
 
   useEffect(() => {
-    listTasks({ limit: 12 }).then(setTasks).catch(() => {});
-    multiWorkerStatus().then(setMultiStatus).catch(() => {});
+    setLoading(true);
+    Promise.all([
+      listTasks({ limit: 12 }).then(setTasks).catch(() => {}),
+      multiWorkerStatus().then(setMultiStatus).catch(() => {}),
+    ]).finally(() => setLoading(false));
+
     const id = window.setInterval(() => {
       listTasks({ limit: 12 }).then(setTasks).catch(() => {});
       multiWorkerStatus().then(setMultiStatus).catch(() => {});
@@ -85,6 +92,22 @@ export function Dashboard() {
       <div className="dashboard-body">
         <DashboardStatusBar noProject={noProject} />
 
+        {loading ? (
+          <>
+            <div style={{ height: 48, marginBottom: 16 }}>
+              <Skeleton height={48} radius="md" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <Skeleton height={200} radius="lg" />
+              <Skeleton height={200} radius="lg" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+              <Skeleton height={180} radius="lg" />
+              <Skeleton height={180} radius="lg" />
+            </div>
+          </>
+        ) : (
+        <>
         {/* B3: per-domain worker horizontal scaling status */}
         {multiStatus && <DomainWorkersCompact ms={multiStatus} />}
 
@@ -102,9 +125,16 @@ export function Dashboard() {
         </div>
 
         <div className="dashboard-row">
-          <CurrentPipelinePanel />
+          {tasks.length === 0 ? (
+            <EmptyState
+              title="暂无流水线任务"
+              description="还没有创建任何任务，去创建一个新任务开始创作吧。"
+            />
+          ) : (
+            <CurrentPipelinePanel />
+          )}
           {latestFailed && (
-            <section className="card dashboard-failure-wrap">
+            <section className="dashboard-card dashboard-failure-wrap">
               <div className="card-header">
                 <h3>最近失败诊断</h3>
                 <span className="muted small">任务 #{latestFailed.id} · {latestFailed.status}</span>
@@ -138,6 +168,8 @@ export function Dashboard() {
         <div className="dashboard-row dashboard-row-full">
           <SkillGeneratedCard />
         </div>
+        </>
+        )}
       </div>
     </div>
   );
