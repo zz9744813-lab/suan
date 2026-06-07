@@ -108,6 +108,15 @@ Thumbs.db
 .workbuddy/
 .trae/
 
+# ── playwright (Phase 9 e2e/visual/a11y) ───────────────
+# Don't commit the HTML report (huge, regeneratable) or the
+# failure screenshots/videos. ``test-results/`` also holds
+# diff images from ``toHaveScreenshot`` regression runs.
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+frontend/playwright/.cache/
+
 # ── dev-only scripts (kept under test_*.py, this excludes the
 #    diagnostic one-off dumps) ───────────────────────────────
 p10.json
