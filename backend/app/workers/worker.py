@@ -18,12 +18,14 @@ P4 改造: 不再只跑 chapter_pipeline, 改成多任务 dispatcher (P6 spec §
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import select, func
+from sqlalchemy import or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import session_scope
@@ -39,7 +41,7 @@ logger = logging.getLogger(__name__)
 # B3: Worker horizontal scaling — domain partitioning
 # ================================================================
 
-WorkerDomain = Literal["writing", "deepstudy", "discussion", "memory", "model", "all"]
+WorkerDomain = Literal["writing", "deepstudy", "discussion", "review", "memory", "model", "all"]
 
 
 class DomainWorkerStatus:
@@ -80,6 +82,7 @@ worker_domain_status: dict[str, dict[str, Any]] = {
     "writing_worker": {"status": "idle", "current_task": None, "tasks_processed": 0},
     "deepstudy_worker": {"status": "idle", "current_run": None, "tasks_processed": 0},
     "discussion_worker": {"status": "idle", "current_thread": None, "tasks_processed": 0},
+    "review_worker": {"status": "idle", "current_task": None, "tasks_processed": 0},
     "memory_worker": {"status": "idle", "current_job": None, "tasks_processed": 0},
     "model_router": {"status": "healthy", "providers_up": 0, "providers_total": 0, "tasks_processed": 0},
 }
@@ -117,12 +120,17 @@ class WorkerController:
         self._pause_event.set()
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
+        self.worker_id = f"worker-{uuid.uuid4().hex[:10]}"
+        self.lease_seconds = 3600
+        self.crash_count = 0
+        self.last_crash_at: datetime | None = None
 
         # B3: per-domain in-memory status tracking
         self.domain_statuses: dict[WorkerDomain, DomainWorkerStatus] = {
             "writing": DomainWorkerStatus("writing"),
             "deepstudy": DomainWorkerStatus("deepstudy"),
             "discussion": DomainWorkerStatus("discussion"),
+            "review": DomainWorkerStatus("review"),
             "memory": DomainWorkerStatus("memory"),
             "model": DomainWorkerStatus("model"),
             "all": DomainWorkerStatus("all"),
@@ -133,6 +141,7 @@ class WorkerController:
             "writing": 2,      # Allow 2 concurrent writing tasks
             "deepstudy": 1,    # 1 deepstudy at a time (heavy)
             "discussion": 3,   # Discussions are lightweight
+            "review": 2,       # Reader/comment tasks are isolated from writing
             "memory": 1,       # 1 consolidation at a time
             "model": 2,        # 2 health checks concurrently
         }
@@ -141,6 +150,114 @@ class WorkerController:
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    def _on_loop_done(self, task: asyncio.Task) -> None:
+        if self._stop.is_set():
+            return
+        exc = None
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        asyncio.create_task(self._mark_loop_crashed(exc))
+
+    def _spawn_background_loop(self, coro: Any, domain: WorkerDomain, name: str) -> asyncio.Task:
+        task = asyncio.create_task(coro, name=name)
+        task.add_done_callback(lambda done: self._on_background_loop_done(done, domain, name))
+        return task
+
+    def _on_background_loop_done(self, task: asyncio.Task, domain: WorkerDomain, name: str) -> None:
+        if self._stop.is_set():
+            return
+        exc: BaseException | None = None
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is None:
+            return
+        self.domain_statuses[domain].errors_count += 1
+        logger.exception("Background worker loop %s crashed: %s", name, exc)
+        asyncio.create_task(event_bus.publish(Event(
+            event_type="worker.background_loop_crashed",
+            payload={"worker_id": self.worker_id, "domain": domain, "loop": name, "error": str(exc)},
+        )))
+
+    async def _mark_loop_crashed(self, exc: BaseException | None) -> None:
+        self.crash_count += 1
+        self.last_crash_at = datetime.utcnow()
+        message = str(exc) if exc else "worker loop exited unexpectedly"
+        await self._set_state("error", error=message)
+        await event_bus.publish(Event(
+            event_type="worker.loop_crashed",
+            payload={
+                "worker_id": self.worker_id,
+                "error": message,
+                "crash_count": self.crash_count,
+            },
+        ))
+
+    async def recover_stale_tasks(
+        self,
+        *,
+        reason: str = "manual",
+        stale_after_seconds: int | None = None,
+    ) -> dict[str, int]:
+        """Recover tasks that were marked running but have no live lease."""
+        now = datetime.utcnow()
+        cutoff = now - timedelta(seconds=stale_after_seconds or self.lease_seconds)
+        recovered = 0
+        failed = 0
+        inspected = 0
+        async with session_scope() as db:
+            rows = (await db.execute(
+                select(AgentTask).where(
+                    AgentTask.status == "running",
+                    AgentTask.task_type.in_(SUPPORTED_TASKS),
+                    or_(
+                        AgentTask.lease_owner != self.worker_id,
+                        AgentTask.lease_expires_at < now,
+                        AgentTask.lease_expires_at.is_(None),
+                        AgentTask.last_heartbeat_at < cutoff,
+                        AgentTask.last_heartbeat_at.is_(None),
+                    ),
+                )
+            )).scalars().all()
+            for task in rows:
+                inspected += 1
+                task.lease_owner = None
+                task.lease_expires_at = None
+                task.last_heartbeat_at = None
+                task.error = (task.error or "")[:1500]
+                note = f"Recovered stale running task ({reason})"
+                task.error = f"{task.error}\n{note}".strip()
+                task.retry_count = int(task.retry_count or 0) + 1
+                if task.retry_count >= int(task.max_retries or 3):
+                    task.status = "failed"
+                    task.finished_at = now
+                    failed += 1
+                else:
+                    task.status = "pending"
+                    task.started_at = None
+                    task.finished_at = None
+                    task.not_before_at = now
+                    recovered += 1
+            ws = await self._get_or_create_status(db)
+            if rows and ws.current_task_id in {task.id for task in rows}:
+                ws.current_task_id = None
+            if rows:
+                ws.last_heartbeat_at = now
+        if inspected:
+            await event_bus.publish(Event(
+                event_type="worker.stale_tasks_recovered",
+                payload={
+                    "reason": reason,
+                    "inspected": inspected,
+                    "recovered": recovered,
+                    "failed": failed,
+                },
+            ))
+        return {"inspected": inspected, "recovered": recovered, "failed": failed}
+
     async def start(self) -> None:
         async with self._lock:
             if self.is_running:
@@ -148,6 +265,8 @@ class WorkerController:
             self._stop.clear()
             self._pause_event.set()
             self._task = asyncio.create_task(self._run_forever(), name="novelforge-worker")
+            self._task.add_done_callback(self._on_loop_done)
+        await self.recover_stale_tasks(reason="worker_start")
         # R12.1 / P0-WORKER-1 fix: clear stale failure state from a
         # previous run before the new loop starts. Otherwise the UI
         # keeps showing "consecutive_failures=N", "current_task_id=X"
@@ -210,6 +329,8 @@ class WorkerController:
         await event_bus.publish(Event(event_type="worker.resumed", payload={}))
 
     async def stop(self) -> None:
+        import logging as _logging, traceback as _tb
+        _logging.getLogger(__name__).warning("Worker stop() called\n%s", ''.join(_tb.format_stack()))
         self._stop.set()
         self._pause_event.set()  # unblock
         if self._task:
@@ -224,8 +345,25 @@ class WorkerController:
     async def status(self) -> dict[str, Any]:
         async with session_scope() as db:
             ws = await self._get_or_create_status(db)
+            now = datetime.utcnow()
+            cutoff = now - timedelta(seconds=self.lease_seconds)
+            stale_running_tasks = (await db.execute(
+                select(func.count(AgentTask.id)).where(
+                    AgentTask.status == "running",
+                    AgentTask.task_type.in_(SUPPORTED_TASKS),
+                    or_(
+                        AgentTask.lease_owner != self.worker_id,
+                        AgentTask.lease_expires_at < now,
+                        AgentTask.lease_expires_at.is_(None),
+                        AgentTask.last_heartbeat_at < cutoff,
+                        AgentTask.last_heartbeat_at.is_(None),
+                    ),
+                )
+            )).scalar() or 0
             return {
                 "state": ws.state,
+                "loop_state": "alive" if self.is_running else "dead",
+                "worker_id": self.worker_id,
                 "current_task_id": ws.current_task_id,
                 "last_heartbeat_at": ws.last_heartbeat_at.isoformat() if ws.last_heartbeat_at else None,
                 "consecutive_failures": ws.consecutive_failures,
@@ -233,48 +371,81 @@ class WorkerController:
                 "today_cost_usd": ws.today_cost_usd,
                 "last_error": ws.last_error,
                 "is_loop_alive": self.is_running,
+                "last_crash_at": self.last_crash_at.isoformat() if self.last_crash_at else None,
+                "crash_count": self.crash_count,
+                "stale_running_tasks": stale_running_tasks,
+                "domain_statuses": {
+                    key: value.to_dict() for key, value in self.domain_statuses.items()
+                },
             }
 
     async def _run_forever(self) -> None:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
         try:
             await self._set_state("running")
             # P9: 启动讨论 worker 和回收 worker 作为后台任务
-            self._discussion_task = asyncio.create_task(
-                self._discussion_worker_loop(), name="novelforge-discussion-worker"
+            self._discussion_task = self._spawn_background_loop(
+                self._discussion_worker_loop(), "discussion", "novelforge-discussion-worker"
             )
-            self._recycle_task = asyncio.create_task(
-                self._recycle_worker_loop(), name="novelforge-recycle-worker"
+            self._recycle_task = self._spawn_background_loop(
+                self._recycle_worker_loop(), "discussion", "novelforge-recycle-worker"
             )
             # P10: 启动记忆整理 worker 作为后台任务
-            self._memory_consolidation_task = asyncio.create_task(
-                self._memory_consolidation_worker_loop(), name="novelforge-memory-consolidation"
+            self._memory_consolidation_task = self._spawn_background_loop(
+                self._memory_consolidation_worker_loop(), "memory", "novelforge-memory-consolidation"
             )
             # P3-Model-Failover: 启动 Provider 健康检查 worker
-            self._provider_health_task = asyncio.create_task(
-                self._provider_health_worker_loop(), name="novelforge-provider-health"
+            self._provider_health_task = self._spawn_background_loop(
+                self._provider_health_worker_loop(), "model", "novelforge-provider-health"
             )
             # P0-DeepStudy: 启动 DeepStudy worker
-            self._deepstudy_task = asyncio.create_task(
-                self._deepstudy_worker_loop(), name="novelforge-deepstudy"
+            self._deepstudy_task = self._spawn_background_loop(
+                self._deepstudy_worker_loop(), "deepstudy", "novelforge-deepstudy"
             )
             while not self._stop.is_set():
                 await self._pause_event.wait()
                 if self._stop.is_set():
+                    _log.warning("Worker _run_forever: _stop set after pause_event.wait()")
                     break
                 did_work = await self._tick()
+                self._ensure_background_loops_alive()
                 if not did_work:
                     # idle: short sleep
                     try:
                         await asyncio.wait_for(self._stop.wait(), timeout=1.0)
                     except asyncio.TimeoutError:
                         pass
+            _log.warning("Worker _run_forever: loop exited normally (stop=%s)", self._stop.is_set())
         except Exception as exc:  # pragma: no cover
+            import logging
+            logging.getLogger(__name__).exception("Worker _run_forever crashed: %s", exc)
             await self._set_state("error", error=str(exc))
+            # 关键修复: 崩溃时回滚当前 running 任务, 防止永久卡在 running
+            try:
+                await self.recover_stale_tasks(reason="worker_crash")
+            except Exception as recover_exc:
+                logging.getLogger(__name__).warning("Failed to recover stale tasks after crash: %s", recover_exc)
         finally:
             # cancel background tasks
             for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None), getattr(self, '_deepstudy_task', None), getattr(self, '_memory_consolidation_task', None)]:
                 if t and not t.done():
                     t.cancel()
+
+    def _ensure_background_loops_alive(self) -> None:
+        if self._stop.is_set():
+            return
+        specs = [
+            ("_discussion_task", "discussion", "novelforge-discussion-worker", self._discussion_worker_loop),
+            ("_recycle_task", "discussion", "novelforge-recycle-worker", self._recycle_worker_loop),
+            ("_memory_consolidation_task", "memory", "novelforge-memory-consolidation", self._memory_consolidation_worker_loop),
+            ("_provider_health_task", "model", "novelforge-provider-health", self._provider_health_worker_loop),
+            ("_deepstudy_task", "deepstudy", "novelforge-deepstudy", self._deepstudy_worker_loop),
+        ]
+        for attr, domain, name, factory in specs:
+            current = getattr(self, attr, None)
+            if current is None or current.done():
+                setattr(self, attr, self._spawn_background_loop(factory(), domain, name))
 
     async def _discussion_worker_loop(self) -> None:
         """P9: 每 20 秒轮询 pending_discussion 线程。"""
@@ -429,9 +600,9 @@ class WorkerController:
                 )
             ).scalars().all()
 
-            domain_counts: dict[str, int] = {"writing": 0, "deepstudy": 0, "discussion": 0, "memory": 0, "model": 0}
+            domain_counts: dict[str, int] = {"writing": 0, "deepstudy": 0, "discussion": 0, "review": 0, "memory": 0, "model": 0}
             for t in running_tasks:
-                d = t.domain if hasattr(t, 'domain') and t.domain else "writing"
+                d = self._domain_from_task(t)
                 domain_counts[d] = domain_counts.get(d, 0) + 1
 
             # P1-2 fix: pick the next task FIRST, then load its
@@ -460,8 +631,8 @@ class WorkerController:
             # B3: only pick tasks from domains that are under the concurrency limit
             eligible_tasks = [
                 t for t in pending_tasks
-                if domain_counts.get(t.domain or "writing", 0)
-                < self.domain_concurrency.get(t.domain or "writing", 1)  # type: ignore[arg-type]
+                if domain_counts.get(self._domain_from_task(t), 0)
+                < self.domain_concurrency.get(self._domain_from_task(t), 1)
             ]
             task_row = eligible_tasks[0] if eligible_tasks else None
             if task_row is None:
@@ -490,12 +661,16 @@ class WorkerController:
 
             task_row.status = "running"
             task_row.started_at = datetime.utcnow()
+            task_row.last_heartbeat_at = task_row.started_at
+            task_row.lease_owner = self.worker_id
+            task_row.lease_expires_at = task_row.started_at + timedelta(seconds=self.lease_seconds)
+            task_row.correlation_id = task_row.correlation_id or f"task-{task_row.id}-{uuid.uuid4().hex[:8]}"
             ws.current_task_id = task_row.id
             project_id = task_row.project_id
             await db.flush()
 
         # B3: track domain status when picking a task
-        task_domain: WorkerDomain = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"  # type: ignore[assignment]
+        task_domain = self._domain_from_task(task_row)
         self.domain_statuses[task_domain].current_task_id = task_row.id
         self.domain_statuses[task_domain].last_active_at = datetime.now(timezone.utc)
         self.domain_statuses[task_domain].running = True
@@ -586,6 +761,9 @@ class WorkerController:
                 trigger=trigger,
             )
             t.status = "succeeded"
+            t.lease_owner = None
+            t.lease_expires_at = None
+            t.last_heartbeat_at = None
             t.finished_at = datetime.utcnow()
             t.cost_usd = outcome.total_cost_usd
             t.input_tokens = outcome.total_input_tokens
@@ -780,6 +958,9 @@ class WorkerController:
                 ws2.consecutive_failures = 0
                 task.status = "succeeded"
                 task.finished_at = datetime.utcnow()
+                task.lease_owner = None
+                task.lease_expires_at = None
+                task.last_heartbeat_at = None
                 task.cost_usd = result.total_cost_usd
                 ws2.current_task_id = None
                 await db.flush()
@@ -788,6 +969,249 @@ class WorkerController:
             await self._mark_task_failed(target_task_id, err_text)
 
     # ----- 双模式: project_bootstrap (全自动启动) -----
+
+    async def _run_project_bootstrap_v2(self, task_id: int) -> bool:
+        from app.models.memory import MemoryCharacter
+        from app.models.project import Bible, Chapter, Outline, Project
+        from app.services.llm.client import LLMClient, LLMMessage
+        from app.services.llm.router import LLMRouter
+
+        router = LLMRouter(LLMClient())
+        try:
+            async with session_scope() as db:
+                task = await db.get(AgentTask, task_id)
+                if task is None:
+                    return False
+                project = await db.get(Project, task.project_id)
+                if project is None:
+                    await self._mark_task_failed(task_id, f"Project {task.project_id} not found")
+                    return False
+                task.status = "running"
+                task.started_at = task.started_at or datetime.utcnow()
+                task.last_heartbeat_at = datetime.utcnow()
+
+                outline_prompt = (
+                    "请为长篇小说生成前 30 章大纲。只输出 JSON："
+                    '{"outlines":[{"chapter_no":1,"title":"标题","summary":"50-100字简介","importance":80}]}。\n'
+                    f"书名：{project.name}\n类型：{project.genre}\n简介：{project.description or '无'}"
+                )
+                _, outline_result = await router.chat(
+                    db, "Planner", [LLMMessage(role="user", content=outline_prompt)],
+                    max_tokens=4000, response_format={"type": "json_object"},
+                    stream=False, project_id=project.id, task_id=task.id,
+                    task_type="project_bootstrap",
+                    step_key="bootstrap_outline",
+                )
+                outline_data = self._parse_bootstrap_json(outline_result.content)
+                outline_items = outline_data.get("outlines") or outline_data.get("items") or []
+                if not isinstance(outline_items, list):
+                    outline_items = []
+
+                existing_outlines = (await db.execute(
+                    select(Outline).where(Outline.project_id == project.id)
+                )).scalars().all()
+                existing_outline_nos = {row.chapter_no for row in existing_outlines}
+                outlines_created: list[Outline] = []
+                for item in outline_items[:30]:
+                    if not isinstance(item, dict):
+                        continue
+                    chapter_no = int(item.get("chapter_no") or len(existing_outline_nos) + len(outlines_created) + 1)
+                    if chapter_no in existing_outline_nos:
+                        continue
+                    outline = Outline(
+                        project_id=project.id,
+                        chapter_no=chapter_no,
+                        title=str(item.get("title") or f"第 {chapter_no} 章"),
+                        summary=item.get("summary"),
+                        importance=int(item.get("importance") or 50),
+                        target_word_count=int(item.get("target_word_count") or 3000),
+                    )
+                    db.add(outline)
+                    outlines_created.append(outline)
+                    existing_outline_nos.add(chapter_no)
+                await db.flush()
+
+                outline_context = "\n".join(
+                    f"{o.chapter_no}. {o.title}: {o.summary or ''}"
+                    for o in (existing_outlines + outlines_created)[:12]
+                )
+                character_prompt = (
+                    "请为这本小说设计主要角色。只输出 JSON："
+                    '{"characters":[{"name":"姓名","role":"protagonist|antagonist|supporting",'
+                    '"profile":{"description":"人物简介"}}]}。\n'
+                    f"书名：{project.name}\n类型：{project.genre}\n大纲：\n{outline_context}"
+                )
+                _, character_result = await router.chat(
+                    db, "Planner", [LLMMessage(role="user", content=character_prompt)],
+                    max_tokens=2500, response_format={"type": "json_object"},
+                    stream=False, project_id=project.id, task_id=task.id,
+                    task_type="project_bootstrap",
+                    step_key="bootstrap_characters",
+                )
+                character_data = self._parse_bootstrap_json(character_result.content)
+                character_items = character_data.get("characters") or character_data.get("items") or []
+                if not isinstance(character_items, list):
+                    character_items = []
+                existing_chars = (await db.execute(
+                    select(MemoryCharacter).where(MemoryCharacter.project_id == project.id)
+                )).scalars().all()
+                existing_char_names = {c.name for c in existing_chars}
+                chars_created = 0
+                for item in character_items[:15]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or "").strip()
+                    if not name or name in existing_char_names:
+                        continue
+                    db.add(MemoryCharacter(
+                        project_id=project.id,
+                        name=name,
+                        role=item.get("role") or "supporting",
+                        tags=item.get("tags") or [],
+                        base_profile=item.get("profile") if isinstance(item.get("profile"), dict) else {},
+                    ))
+                    existing_char_names.add(name)
+                    chars_created += 1
+                await db.flush()
+
+                bible_prompt = (
+                    "请为这本小说生成世界观与主线设定。只输出 JSON："
+                    '{"world":"世界观","main_plot":"主线","rules":["规则1"],"protagonist":"主角设定"}。\n'
+                    f"书名：{project.name}\n类型：{project.genre}\n大纲：\n{outline_context}"
+                )
+                _, bible_result = await router.chat(
+                    db, "Planner", [LLMMessage(role="user", content=bible_prompt)],
+                    max_tokens=1800, response_format={"type": "json_object"},
+                    stream=False, project_id=project.id, task_id=task.id,
+                    task_type="project_bootstrap",
+                    step_key="bootstrap_bible",
+                )
+                bible_data = self._parse_bootstrap_json(bible_result.content)
+                bible = (await db.execute(
+                    select(Bible).where(Bible.project_id == project.id, Bible.is_active.is_(True))
+                )).scalar_one_or_none()
+                if bible is None:
+                    bible = Bible(project_id=project.id, title="主设定", content={})
+                    db.add(bible)
+                    await db.flush()
+                bible.content = {
+                    **(bible.content or {}),
+                    **{k: v for k, v in bible_data.items() if v not in (None, "")},
+                }
+                bible.version += 1
+
+                first_outline = (await db.execute(
+                    select(Outline)
+                    .where(Outline.project_id == project.id)
+                    .order_by(Outline.chapter_no.asc(), Outline.id.asc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                first_task_id = None
+                if first_outline is not None:
+                    chapter = (await db.execute(
+                        select(Chapter).where(
+                            Chapter.project_id == project.id,
+                            Chapter.chapter_no == first_outline.chapter_no,
+                        )
+                    )).scalar_one_or_none()
+                    if chapter is None:
+                        chapter = Chapter(
+                            project_id=project.id,
+                            outline_id=first_outline.id,
+                            chapter_no=first_outline.chapter_no,
+                            title=first_outline.title,
+                            target_word_count=first_outline.target_word_count,
+                            status="queued",
+                        )
+                        db.add(chapter)
+                        await db.flush()
+                    existing_task = (await db.execute(
+                        select(AgentTask).where(
+                            AgentTask.project_id == project.id,
+                            AgentTask.chapter_id == chapter.id,
+                            AgentTask.task_type == "chapter_pipeline",
+                            AgentTask.status.in_(["pending", "running"]),
+                        )
+                    )).scalar_one_or_none()
+                    if existing_task is None:
+                        pipeline_task = AgentTask(
+                            project_id=project.id,
+                            chapter_id=chapter.id,
+                            task_type="chapter_pipeline",
+                            status="pending",
+                            priority=100,
+                            domain="writing",
+                            payload={"mode": "full", "auto_launched": True},
+                            display_title=f"写作: 第 {chapter.chapter_no} 章 {chapter.title}",
+                        )
+                        db.add(pipeline_task)
+                        await db.flush()
+                        first_task_id = pipeline_task.id
+                    else:
+                        first_task_id = existing_task.id
+
+                task.status = "succeeded"
+                task.finished_at = datetime.utcnow()
+                task.lease_owner = None
+                task.lease_expires_at = None
+                task.last_heartbeat_at = None
+                task.cost_usd = (
+                    (outline_result.cost_usd or 0)
+                    + (character_result.cost_usd or 0)
+                    + (bible_result.cost_usd or 0)
+                )
+                task.input_tokens = (
+                    (outline_result.input_tokens or 0)
+                    + (character_result.input_tokens or 0)
+                    + (bible_result.input_tokens or 0)
+                )
+                task.output_tokens = (
+                    (outline_result.output_tokens or 0)
+                    + (character_result.output_tokens or 0)
+                    + (bible_result.output_tokens or 0)
+                )
+                task.summary_json = {
+                    "outlines_created": len(outlines_created),
+                    "characters_created": chars_created,
+                    "bible_updated": True,
+                    "first_task_id": first_task_id,
+                }
+                ws = await self._get_or_create_status(db)
+                ws.current_task_id = None
+                ws.consecutive_failures = 0
+            await event_bus.publish(Event(
+                event_type="project_bootstrap.completed",
+                payload={"task_id": task_id},
+            ))
+            return True
+        except Exception as exc:
+            await self._mark_task_failed(task_id, str(exc)[:2000])
+            return False
+
+    @staticmethod
+    def _parse_bootstrap_json(text: str) -> dict[str, Any]:
+        if not text:
+            return {}
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+            if isinstance(obj, list):
+                return {"items": obj}
+        except Exception:
+            pass
+        match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+        if not match:
+            return {}
+        try:
+            obj = json.loads(match.group(1))
+            if isinstance(obj, dict):
+                return obj
+            if isinstance(obj, list):
+                return {"items": obj}
+        except Exception:
+            return {}
+        return {}
 
     async def _run_project_bootstrap(
         self,
@@ -804,6 +1228,8 @@ class WorkerController:
         4. 从第一个大纲创建 Chapter
         5. 入队 chapter_pipeline 任务
         """
+        return await self._run_project_bootstrap_v2(task_row.id)
+
         from app.models.project import Bible, Chapter, Outline, Project
         from app.models.memory import MemoryCharacter
         from app.services.llm.router import LLMRouter
@@ -1172,6 +1598,9 @@ class WorkerController:
                 from datetime import timedelta
                 delay_s = min(30 * (2 ** (t.retry_count - 1)), 300)  # 最大 5min
                 t.status = "pending"
+                t.lease_owner = None
+                t.lease_expires_at = None
+                t.last_heartbeat_at = None
                 t.not_before_at = datetime.utcnow() + timedelta(seconds=delay_s)
                 t.started_at = None
                 logger.info(
@@ -1185,6 +1614,9 @@ class WorkerController:
 
             # 耗尽重试次数, 最终失败
             t.status = "failed"
+            t.lease_owner = None
+            t.lease_expires_at = None
+            t.last_heartbeat_at = None
             t.finished_at = datetime.utcnow()
             ws2 = await self._get_or_create_status(db)
             ws2.consecutive_failures += 1
@@ -1217,6 +1649,11 @@ class WorkerController:
         )
         worker_domain_status["discussion_worker"]["current_thread"] = self.domain_statuses["discussion"].current_task_id
         worker_domain_status["discussion_worker"]["tasks_processed"] = self.domain_statuses["discussion"].tasks_processed
+        worker_domain_status["review_worker"]["status"] = (
+            "running" if self.domain_statuses["review"].running else "idle"
+        )
+        worker_domain_status["review_worker"]["current_task"] = self.domain_statuses["review"].current_task_id
+        worker_domain_status["review_worker"]["tasks_processed"] = self.domain_statuses["review"].tasks_processed
         worker_domain_status["memory_worker"]["status"] = (
             "running" if self.domain_statuses["memory"].running else "idle"
         )
@@ -1227,9 +1664,8 @@ class WorkerController:
     def _domain_from_task(self, task_row: AgentTask) -> WorkerDomain:
         """Resolve the domain for a task row."""
         domain_val: str = task_row.domain if hasattr(task_row, 'domain') and task_row.domain else "writing"
-        # Validate that it's a known WorkerDomain; fall back to "writing"
-        if domain_val not in {"writing", "deepstudy", "discussion", "memory", "model", "all"}:
-            domain_val = "writing"
+        if domain_val not in {"writing", "deepstudy", "discussion", "review", "memory", "model", "all"}:
+            return "writing"
         return domain_val  # type: ignore[return-value]
 
     def _clear_domain_task(self, domain: WorkerDomain) -> None:

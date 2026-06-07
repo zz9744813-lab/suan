@@ -44,16 +44,30 @@ engine = create_async_engine(
 #   - 生产环境: PRAGMA foreign_keys = ON 是 SQLite 的推荐配置, 不开
 #     FK 反而会让 schema 失去保护.
 @event.listens_for(engine.sync_engine, "connect")
-def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
-    """新 connection 打开时强制启用 FK 约束 (SQLite only)."""
+def _enable_sqlite_pragmas(dbapi_connection, _connection_record):
+    """新 connection 打开时启用 SQLite 生产级 PRAGMA 配置."""
     try:
         cursor = dbapi_connection.cursor()
+        # FK 约束: SQLite 默认 OFF, 必须手动开
         cursor.execute("PRAGMA foreign_keys = ON")
+        # WAL 模式: 读写并发, 不再互相阻塞.
+        # 默认 DELETE 模式下写操作独占整个文件锁, 是 "database is locked"
+        # 的根本原因. WAL 允许读者在写者提交期间继续读取旧快照.
+        cursor.execute("PRAGMA journal_mode = WAL")
+        # busy_timeout: 锁冲突时等待 5 秒再报 SQLITE_BUSY,
+        # 而不是立即抛错. 配合 WAL 模式, 绝大多数情况下等几毫秒就能拿到锁.
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        # synchronous=NORMAL: WAL 模式下足够安全 (比 FULL 少一次 fsync),
+        # 写入性能提升约 30%. 断电最多丢最近一个 WAL checkpoint 的数据.
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        # cache_size: 默认约 2MB, 对于 1000+ 章节的 DeepStudy 不够用.
+        # 负数表示 KB, -64000 = 64MB.
+        cursor.execute("PRAGMA cache_size = -64000")
+        # temp_store=MEMORY: 临时表和排序操作放内存, 不写磁盘.
+        cursor.execute("PRAGMA temp_store = MEMORY")
         cursor.close()
     except Exception:
-        # 非 SQLite / 无 cursor 时忽略. SQLAlchemy 在异步引擎里
-        # ``engine.sync_engine`` 实际仍跑在同一个进程, 但 listener
-        # 对 sqlite3 之外的 dialect 也不会执行 PRAGMA (无副作用).
+        # 非 SQLite dialect 时忽略 (无副作用).
         pass
 
 AsyncSessionLocal = async_sessionmaker(
@@ -78,16 +92,34 @@ async def get_db() -> AsyncIterator[AsyncSession]:
 
 @asynccontextmanager
 async def session_scope() -> AsyncIterator[AsyncSession]:
-    """Context manager equivalent of get_db for non-FastAPI code paths."""
+    """Context manager equivalent of get_db for non-FastAPI code paths.
+
+    WAL mode + busy_timeout 已大幅减少 ``database is locked`` 错误,
+    但在高并发写入场景下仍可能偶发. 此处做最后一道防线:
+    commit 阶段遇到 OperationalError 时短暂等待后重试.
+    """
+    import asyncio as _asyncio
+    from sqlalchemy.exc import OperationalError
+
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
+            # commit 阶段重试: WAL + busy_timeout 下极少触发,
+            # 但作为安全网保留
+            max_commit_retries = 2
+            for attempt in range(max_commit_retries):
+                try:
+                    await session.commit()
+                    break
+                except OperationalError as exc:
+                    await session.rollback()
+                    if "database is locked" in str(exc) and attempt < max_commit_retries - 1:
+                        await _asyncio.sleep(0.3 * (attempt + 1))
+                        continue
+                    raise
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 async def init_db() -> None:

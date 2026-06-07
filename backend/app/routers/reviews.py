@@ -30,7 +30,7 @@ from app.models.comment_review import (
     ReviewCommentGroup,
     ReviewSettings,
 )
-from app.models.project import Chapter, Project
+from app.models.project import Chapter, ChapterVersion, Project
 from app.schemas import APIResponse
 from app.schemas.review import (
     AgentAutoCreateRequest,
@@ -40,6 +40,7 @@ from app.schemas.review import (
     ReaderAgentProfileRead,
     ReaderReviewRunCreate,
     ReaderReviewRunRead,
+    ReaderReviewQuickGenerateResponse,
     ReviewCommentCreate,
     ReviewCommentGroupCreate,
     ReviewCommentGroupDetail,
@@ -106,6 +107,61 @@ def _resolve_expiry_days(
     if expires_in_days <= 0:
         return None  # 永久
     return datetime.utcnow() + timedelta(days=expires_in_days)
+
+
+def _quick_reader_comments(chapter: Chapter, content: str) -> list[dict[str, Any]]:
+    excerpt = (content or "").strip().replace("\r", "")[:180]
+    if not excerpt:
+        excerpt = "当前章节暂无可评审正文，建议先生成正文后再发起正式评审。"
+    word_count = len(content or "")
+    density_hint = "篇幅偏短，建议补足场景推进和人物反应。" if word_count < 1200 else "篇幅充足，可以重点检查节奏和信息密度。"
+    return [
+        {
+            "key": "reader_hook",
+            "label": "钩子读者",
+            "dimension": "开篇钩子 / 追读欲",
+            "priority": 72,
+            "tags": ["钩子", "追读"],
+            "content": f"第 {chapter.chapter_no} 章《{chapter.title}》的追读点需要更明确。当前片段：{excerpt}\n\n建议：在章末或关键转折处增加一个更锋利的问题、反差或危机，让读者有'下一章必须看'的理由。{density_hint}",
+            "rating": {"score": 74, "dimension": "hook"},
+        },
+        {
+            "key": "reader_emotion",
+            "label": "情绪读者",
+            "dimension": "情绪共鸣 / 爽感",
+            "priority": 68,
+            "tags": ["情绪", "爽点"],
+            "content": f"这一章的情绪落点可以再放大。读者需要更清楚地知道主角此刻'想要什么、害怕什么、赢了什么'。\n\n建议：补一两处内心反应或旁人反馈，把胜负感、压迫感、委屈感/释放感写实。",
+            "rating": {"score": 76, "dimension": "emotion"},
+        },
+        {
+            "key": "reader_logic",
+            "label": "逻辑读者",
+            "dimension": "因果 / 设定一致性",
+            "priority": 80,
+            "tags": ["逻辑", "因果"],
+            "content": f"请重点复查本章事件的因果链：角色为什么这么做、信息从哪里来、能力/资源是否突然出现。\n\n建议：如果有关键行动，补一句动机或前置信息，避免读者觉得是作者强推剧情。",
+            "rating": {"score": 71, "dimension": "logic"},
+        },
+        {
+            "key": "reader_commercial",
+            "label": "商业读者",
+            "dimension": "网文节奏 / 付费转化",
+            "priority": 75,
+            "tags": ["商业", "节奏"],
+            "content": f"商业节奏上建议检查：本章是否有明确目标、明确阻力、明确结果。\n\n如果本章主要是铺垫，建议加入一个小兑现点；如果是高潮章，建议减少解释，增加行动和反馈。",
+            "rating": {"score": 73, "dimension": "commercial"},
+        },
+        {
+            "key": "reader_toxic",
+            "label": "毒点读者",
+            "dimension": "弃读风险 / 雷点",
+            "priority": 86,
+            "tags": ["毒点", "弃读风险"],
+            "content": f"潜在弃读风险：解释过多、目标不清、角色反应弱、冲突兑现不足。\n\n建议：删掉重复说明，把关键信息交给动作、对话或冲突结果呈现；尤其注意章中不要让读者长时间看不到推进。",
+            "rating": {"score": 69, "dimension": "toxic"},
+        },
+    ]
 
 
 # ============================================================
@@ -834,6 +890,97 @@ async def create_run(
     await db.commit()
     await db.refresh(run)
     return {"ok": True, "data": ReaderReviewRunRead.model_validate(run)}
+
+
+@router.post(
+    "/runs/quick-generate",
+    response_model=APIResponse[ReaderReviewQuickGenerateResponse],
+    status_code=201,
+)
+async def quick_generate_reader_review(
+    body: ReaderReviewRunCreate, db: AsyncSession = Depends(get_db),
+) -> APIResponse[ReaderReviewQuickGenerateResponse]:
+    """立即生成一轮可用的五维读者反馈。
+
+    这是读者模块的轻量实装入口: 不等待后台 LLM runner,
+    直接把 5 个读者维度写入评论表, 前端即可采纳/驳回/转分流。
+    后续替换为真正 reader agent 时可保持前端 API 不变。
+    """
+    proj = await db.get(Project, body.project_id)
+    if proj is None:
+        raise not_found("Project", body.project_id)
+    ch = await db.get(Chapter, body.chapter_id)
+    if ch is None:
+        raise not_found("Chapter", body.chapter_id)
+    if ch.project_id != body.project_id:
+        raise bad_request(f"Chapter {body.chapter_id} does not belong to project {body.project_id}")
+
+    version = None
+    if body.chapter_version_id:
+        version = await db.get(ChapterVersion, body.chapter_version_id)
+    if version is None:
+        versions = (await db.execute(
+            select(ChapterVersion)
+            .where(ChapterVersion.chapter_id == ch.id)
+            .order_by(ChapterVersion.version_kind.desc(), ChapterVersion.version_no.desc(), ChapterVersion.id.desc())
+        )).scalars().all()
+        for kind in ("final", "rewrite", "draft"):
+            candidates = [v for v in versions if v.version_kind == kind or v.version_kind.startswith(kind)]
+            if candidates:
+                version = candidates[0]
+                break
+        if version is None and versions:
+            version = versions[0]
+
+    settings = await _get_or_create_settings(db, body.project_id)
+    specs = _quick_reader_comments(ch, version.content if version else "")
+    run = ReaderReviewRun(
+        project_id=body.project_id,
+        chapter_id=body.chapter_id,
+        chapter_version_id=version.id if version else body.chapter_version_id,
+        trigger=body.trigger,
+        status="succeeded",
+        reader_agent_keys=[s["key"] for s in specs],
+        started_at=datetime.utcnow(),
+        finished_at=datetime.utcnow(),
+    )
+    db.add(run)
+    await db.flush()
+
+    comments: list[ReviewComment] = []
+    for spec in specs[: settings.max_reader_comments_per_run]:
+        comment = ReviewComment(
+            project_id=body.project_id,
+            chapter_id=body.chapter_id,
+            chapter_version_id=version.id if version else body.chapter_version_id,
+            target_type="chapter",
+            author_type="reader_agent",
+            author_label=spec["label"],
+            agent_role_id=None,
+            content=spec["content"],
+            evidence=[{"chapter_id": ch.id, "chapter_no": ch.chapter_no, "excerpt": (version.content if version else "")[:220]}],
+            rating=spec["rating"],
+            tags=spec["tags"],
+            weight_at_created=1.0,
+            status="new",
+            priority=spec["priority"],
+            expires_at=datetime.utcnow() + timedelta(days=settings.retention_days),
+        )
+        db.add(comment)
+        comments.append(comment)
+    await db.flush()
+    run.generated_comment_ids = [c.id for c in comments]
+    await db.commit()
+    await db.refresh(run)
+    for comment in comments:
+        await db.refresh(comment)
+    return {
+        "ok": True,
+        "data": ReaderReviewQuickGenerateResponse(
+            run=ReaderReviewRunRead.model_validate(run),
+            comments=[ReviewCommentRead.model_validate(c) for c in comments],
+        ),
+    }
 
 
 @router.get(

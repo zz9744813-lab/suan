@@ -139,9 +139,15 @@ backend/*_now.json
 backend/*_final.json
 backend/probe*.json
 backend/dump*.json
+frontend/openapi.json
+CODE_HEALTH_*
+CODE_HEALTH_REPORT.md
+drafter_r15_ch13.txt
+backend/planner_test_v2.txt
 
 # R19: study batch upload test artifacts (probe books left over
 # from manual endpoint testing — book1/2/3/overflow_N + detail_out).
 # These are NOT real test files; the real suite lives under
 # backend/app/tests/ (excluded by the python section above).
 backend/tests/
+.uploads/

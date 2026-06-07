@@ -243,6 +243,11 @@ class ReaderReviewRunRead(BaseModel):
     created_at: datetime
 
 
+class ReaderReviewQuickGenerateResponse(BaseModel):
+    run: ReaderReviewRunRead
+    comments: list[ReviewCommentRead]
+
+
 # ============================================================
 # ReaderAgentProfile — 读者档案
 # ============================================================

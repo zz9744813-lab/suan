@@ -1,4 +1,0 @@
-{
-  "tests/r19_batch/test_db_bom.py": true,
-  "app/tests/test_router_r21.py::test_router_explicit_role_binding_still_uses_mock": true
-}

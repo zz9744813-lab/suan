@@ -77,6 +77,89 @@ export type ChapterVersion = {
   created_at: string;
 };
 
+export type ReaderReviewRun = {
+  id: number;
+  project_id: number;
+  chapter_id: number;
+  chapter_version_id: number | null;
+  trigger: string;
+  status: string;
+  reader_agent_keys: string[];
+  generated_comment_ids: number[];
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type ReaderReviewQuickGenerateResponse = {
+  run: ReaderReviewRun;
+  comments: ReviewCommentRead[];
+};
+
+export type ProjectWorkspaceTocItem = {
+  chapter_no: number;
+  title: string;
+  outline_id: number | null;
+  chapter_id: number | null;
+  outline_summary: string | null;
+  target_word_count: number;
+  actual_word_count: number;
+  status: string;
+  has_content: boolean;
+  selected: boolean;
+};
+
+export type ProjectWorkspaceChapter = {
+  id: number;
+  chapter_no: number;
+  title: string;
+  status: string;
+  target_word_count: number;
+  actual_word_count: number;
+  current_score: number | null;
+  outline_id: number | null;
+  outline_summary: string | null;
+  version_id: number | null;
+  version_kind: string | null;
+  version_no: number | null;
+  version_score: number | null;
+  summary: string | null;
+  content: string;
+  updated_at: string;
+};
+
+export type ProjectWorkspaceTask = {
+  id: number;
+  project_id: number;
+  chapter_id: number | null;
+  task_type: string;
+  task_kind: string | null;
+  display_title: string | null;
+  status: string;
+  error: string | null;
+  progress_current: number;
+  progress_total: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type ProjectWorkspace = {
+  project: Project;
+  bible: Bible | null;
+  characters: MemoryCharacter[];
+  toc: ProjectWorkspaceTocItem[];
+  selected_chapter: ProjectWorkspaceChapter | null;
+  latest_tasks: ProjectWorkspaceTask[];
+};
+
 export type AgentTask = {
   id: number;
   project_id: number;
@@ -92,6 +175,10 @@ export type AgentTask = {
   output_tokens: number;
   started_at: string | null;
   finished_at: string | null;
+  lease_owner?: string | null;
+  lease_expires_at?: string | null;
+  last_heartbeat_at?: string | null;
+  correlation_id?: string | null;
   created_at: string;
   updated_at?: string;
   // P0 task center
