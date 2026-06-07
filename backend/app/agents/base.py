@@ -111,6 +111,7 @@ class BaseAgent(ABC):
                 chapter_id=ctx.chapter_id,
                 step_key=self.step_name,
                 agent_step_id=step.id,
+                task_type=ctx.task.task_type,
                 stream=False,
             )
         except Exception as exc:
