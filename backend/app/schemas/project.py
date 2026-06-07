@@ -155,6 +155,47 @@ class ChapterVersionRead(BaseModel):
     created_at: datetime
 
 
+class ProjectWorkspaceTocItem(BaseModel):
+    chapter_no: int
+    title: str
+    outline_id: int | None = None
+    chapter_id: int | None = None
+    outline_summary: str | None = None
+    target_word_count: int = 0
+    actual_word_count: int = 0
+    status: str = "outline"
+    has_content: bool = False
+    selected: bool = False
+
+
+class ProjectWorkspaceChapter(BaseModel):
+    id: int
+    chapter_no: int
+    title: str
+    status: str
+    target_word_count: int
+    actual_word_count: int
+    current_score: int | None = None
+    outline_id: int | None = None
+    outline_summary: str | None = None
+    version_id: int | None = None
+    version_kind: str | None = None
+    version_no: int | None = None
+    version_score: int | None = None
+    summary: str | None = None
+    content: str = ""
+    updated_at: datetime
+
+
+class ProjectWorkspaceResponse(BaseModel):
+    project: ProjectRead
+    bible: BibleRead | None = None
+    characters: list[Any] = Field(default_factory=list)
+    toc: list[ProjectWorkspaceTocItem] = Field(default_factory=list)
+    selected_chapter: ProjectWorkspaceChapter | None = None
+    latest_tasks: list[Any] = Field(default_factory=list)
+
+
 class ProjectLaunchRequest(BaseModel):
     """双模式创作启动请求。"""
     mode: str = Field(..., description="启动模式: semi_auto | full_auto")

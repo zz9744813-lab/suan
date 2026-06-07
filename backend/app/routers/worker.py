@@ -64,6 +64,12 @@ async def resume() -> APIResponse[dict]:
     return {"ok": True, "data": {"resumed": True, "status": await get_worker().status()}}
 
 
+@router.post("/recover", response_model=APIResponse[dict])
+async def recover() -> APIResponse[dict]:
+    result = await get_worker().recover_stale_tasks(reason="manual")
+    return {"ok": True, "data": {"recovery": result, "status": await get_worker().status()}}
+
+
 @router.post("/stop", response_model=APIResponse[dict])
 async def stop() -> APIResponse[dict]:
     await get_worker().stop()

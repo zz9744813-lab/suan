@@ -33,6 +33,10 @@ class AgentTaskRead(BaseModel):
     output_tokens: int
     started_at: datetime | None
     finished_at: datetime | None
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    last_heartbeat_at: datetime | None = None
+    correlation_id: str | None = None
     created_at: datetime
 
 
