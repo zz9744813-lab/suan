@@ -24,6 +24,7 @@ import {
   createProvider,
   updateProvider,
   deleteProvider,
+  getProviderDeletePreview,
   testProvider,
   healthCheckProvider,
   previewProviderModels,
@@ -35,6 +36,7 @@ import type {
   AgentRoleMatrixResponse,
   AgentRoleUpdateBody,
   ModelProvider,
+  ProviderDeletePreview,
 } from "../types";
 import {
   ShelfLayout, ShelfToolbar, ShelfSidePanel,
@@ -47,6 +49,7 @@ import {
   AgentRoleEditorModal,
   FirstRunGuide,
   AutoConfigureModal,
+  ConfirmDialog,
 } from "../components/models";
 
 export function ModelsPage() {
@@ -66,6 +69,20 @@ export function ModelsPage() {
   const [showAutoConfigure, setShowAutoConfigure] = useState(false);
   const [autoConfigureProvider, setAutoConfigureProvider] = useState<ModelProvider | null>(null);
   const [expandedProviderId, setExpandedProviderId] = useState<number | null>(null);
+  // P-Delete-Preview: which provider the delete dialog is open
+  // for, and the preflight summary we just fetched. ``null`` means
+  // the dialog is closed. We keep the id + the summary side by side
+  // so the dialog can show the cascade details without a second
+  // round-trip on every re-render.
+  const [deletePreview, setDeletePreview] = useState<{
+    providerId: number;
+    preview: ProviderDeletePreview;
+  } | null>(null);
+  // P-Delete-Preview: per-provider busy flag for the delete flow
+  // (used to disable the confirm button while the DELETE call is
+  // in flight; the dialog also tracks its own busy state but we
+  // want the accordion's delete button disabled too).
+  const [deletingProviderId, setDeletingProviderId] = useState<number | null>(null);
 
   // 拉数据
   const load = () => {
@@ -132,11 +149,55 @@ export function ModelsPage() {
     }
   };
   const onProviderDelete = async (id: number) => {
-    if (!confirm("确认删除这个 Provider?")) return;
+    // P-Delete-Preview: replaced the native `confirm()` with a
+    // project-styled dialog. First we fetch the preflight summary
+    // (which role bindings / call events will cascade) and only
+    // then open the dialog. If the fetch fails (404, network, ...)
+    // we surface the error in the page-level error banner and
+    // bail — no dialog appears, no destructive action taken.
+    if (deletePreview?.providerId === id) {
+      // Already showing the dialog for this provider; clicking
+      // the delete button again is a no-op (the dialog handles
+      // its own confirm/cancel).
+      return;
+    }
     try {
-      await deleteProvider(id);
+      const preview = await getProviderDeletePreview(id);
+      setDeletePreview({ providerId: id, preview });
+    } catch (e: any) {
+      setErrorMsg(`无法加载删除预检：${e?.message ?? e}`);
+    }
+  };
+  // P-Delete-Preview: actual DELETE call. Called from the
+  // ConfirmDialog's onConfirm handler. The dialog handles its own
+  // busy/disabled state; we set a page-level flag so the
+  // accordion's "删除" button also reflects in-flight state.
+  const onProviderDeleteConfirm = async () => {
+    if (!deletePreview) return;
+    const { providerId, preview } = deletePreview;
+    setDeletingProviderId(providerId);
+    try {
+      await deleteProvider(providerId);
+      setDeletePreview(null);
+      const cascade = preview.will_cascade_role_bindings.length;
+      if (cascade > 0) {
+        setSuccessMsg(
+          `已删除 Provider「${preview.provider_name}」及 ${cascade} 个角色绑定`,
+        );
+      } else {
+        setSuccessMsg(`已删除 Provider「${preview.provider_name}」`);
+      }
+      setTimeout(() => setSuccessMsg(null), 3000);
       load();
-    } catch (e: any) { setErrorMsg(String(e?.message ?? e)); }
+    } finally {
+      setDeletingProviderId(null);
+    }
+  };
+  const onProviderDeleteCancel = () => {
+    // ``ConfirmDialog`` calls this on cancel and on backdrop
+    // click. We just drop the preflight state; the dialog itself
+    // unmounts because ``deletePreview`` is null.
+    setDeletePreview(null);
   };
   const onProviderTest = async (id: number) => {
     setBusyProviders((p) => ({ ...p, [id]: { ...p[id], test: true } }));
@@ -351,7 +412,14 @@ export function ModelsPage() {
                 onTest={() => onProviderTest(p.id)}
                 onHealth={(model) => onProviderHealth(p.id, model)}
                 onPreviewModels={(baseUrl, apiKey) => onProviderPreview(p.id, baseUrl, apiKey)}
-                busy={busyProviders[p.id] ?? {}}
+                busy={{
+                  ...(busyProviders[p.id] ?? {}),
+                  // P-Delete-Preview: also flip on the delete button
+                  // while a DELETE is in flight. The button label
+                  // stays "删除" — we don't surface a spinner inside
+                  // the accordion because the dialog already has one.
+                  delete: deletingProviderId === p.id,
+                }}
               />
             ))}
           </>
@@ -432,6 +500,67 @@ export function ModelsPage() {
           load();
         }}
       />
+
+      {/* P-Delete-Preview: 删除 Provider 二次确认弹窗. 只在
+          ``deletePreview`` 不为 null 时挂载; 弹窗自己处理
+          cancel/backdrop-click 来调用 onCancel 清空状态. */}
+      {deletePreview && (
+        <ConfirmDialog
+          open={true}
+          title="删除 Provider?"
+          subtitle={
+            <span>
+              <b style={{ color: "var(--text-primary)" }}>
+                {deletePreview.preview.provider_name}
+              </b>
+              <br />
+              {deletePreview.preview.base_url}
+            </span>
+          }
+          summary={deletePreview.preview.summary}
+          details={
+            deletePreview.preview.will_cascade_role_bindings.length > 0 ? (
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    marginBottom: 6,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  将被级联删除的角色绑定
+                </div>
+                <ul
+                  style={{
+                    margin: 0,
+                    paddingLeft: 18,
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {deletePreview.preview.will_cascade_role_bindings.map((b) => (
+                    <li key={b.id}>
+                      <span style={{ fontFamily: "monospace" }}>{b.role}</span>
+                      <span style={{ color: "var(--text-muted)" }}>
+                        {" → "}
+                        {b.model}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null
+          }
+          dangerLevel={deletePreview.preview.danger_level}
+          confirmLabel="确认删除"
+          cancelLabel="取消"
+          confirmDisabled={deletingProviderId === deletePreview.providerId}
+          onCancel={onProviderDeleteCancel}
+          onConfirm={onProviderDeleteConfirm}
+        />
+      )}
     </>
   );
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -31,6 +31,30 @@ engine = create_async_engine(
     # tiny and a COMMIT is sub-millisecond.
     connect_args={"check_same_thread": False, "timeout": 30.0},
 )
+
+
+# P-Delete-Preview: SQLite 的 ``PRAGMA foreign_keys`` 默认是 OFF, 跨
+# connection 不持久 — reset_test_db 关掉它做 TRUNCATE 后, 后续从池里
+# 拿到的 connection 仍是 OFF, 导致 ``ON DELETE SET NULL`` / ``CASCADE``
+# 在端点请求里不生效 (DELETE 端点会用 200 回应但事件行的 provider_id
+# 没被清). 给每个新 connection 自动打开 FK 约束:
+#   - 测试环境: reset_test_db 在自己的 connection 上 OFF 完做 TRUNCATE,
+#     那个 connection 关闭时 PRAGMA 也跟着失效, 池里换出来的新
+#     connection 进入这个 listener 时被强制 ON.
+#   - 生产环境: PRAGMA foreign_keys = ON 是 SQLite 的推荐配置, 不开
+#     FK 反而会让 schema 失去保护.
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    """新 connection 打开时强制启用 FK 约束 (SQLite only)."""
+    try:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.close()
+    except Exception:
+        # 非 SQLite / 无 cursor 时忽略. SQLAlchemy 在异步引擎里
+        # ``engine.sync_engine`` 实际仍跑在同一个进程, 但 listener
+        # 对 sqlite3 之外的 dialect 也不会执行 PRAGMA (无副作用).
+        pass
 
 AsyncSessionLocal = async_sessionmaker(
     engine,

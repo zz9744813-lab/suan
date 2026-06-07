@@ -38,3 +38,7 @@ export { CircuitBreakerBadge } from "./CircuitBreakerBadge";
 export { FirstRunGuide } from "./FirstRunGuide";
 export { ProviderModelPicker } from "./ProviderModelPicker";
 export { AutoConfigureModal } from "./AutoConfigureModal";
+// P-Delete-Preview: project-styled confirmation dialog used by the
+// Provider delete flow (replaces the native `confirm()` in
+// ``ModelsPage``).
+export { ConfirmDialog } from "./ConfirmDialog";

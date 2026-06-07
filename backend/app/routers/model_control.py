@@ -55,6 +55,11 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
             "enabled": p.enabled,
             "default_model": p.default_model,
             "model_count": len(p.model_list or []),
+            # P-Auto-Config: AutoConfigureModal 在前端做"轻量模型
+            # 启发" (匹配 mini/flash/lite/small 关键字), 需要拿到
+            # 完整 ``model_list`` 字符串数组. ``model_count`` 只能
+            # 告诉数量, 拿不到名字.
+            "model_list": p.model_list or [],
             "healthy_count": healthy,
             "failing_count": failing,
             "success_rate": p.success_rate_24h or 1.0,

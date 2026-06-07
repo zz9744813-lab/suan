@@ -389,6 +389,30 @@ export type ModelPreviewResult = {
   latency_ms?: number | null;
 };
 
+// P-Delete-Preview: preflight summary for DELETE /providers/{id}.
+// Shape mirrors ``ProviderDeletePreview`` on the backend (see
+// ``backend/app/schemas/model_provider.py``). The dialog uses
+// ``summary`` as its body text and ``danger_level`` to pick the
+// header colour / confirm-button style.
+export type ProviderDeleteDangerLevel = "safe" | "caution" | "danger";
+
+export type ProviderRoleBindingImpact = {
+  id: number;
+  role: string;
+  model: string;
+};
+
+export type ProviderDeletePreview = {
+  provider_id: number;
+  provider_name: string;
+  base_url: string;
+  will_cascade_role_bindings: ProviderRoleBindingImpact[];
+  will_cascade_call_events_count: number;
+  last_call_event_at?: string | null;
+  summary: string;
+  danger_level: ProviderDeleteDangerLevel;
+};
+
 // P0-MODEL-3 + P15 / P0-HEALTH-1: lightweight per-model health probe
 // result. The top-level fields stay backward-compatible with the
 // R11 ping-only probe; the per-test breakdown lives in ``results``.

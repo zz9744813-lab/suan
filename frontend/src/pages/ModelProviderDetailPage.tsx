@@ -7,6 +7,14 @@ interface ProviderInfo {
   id: number; name: string; base_url: string;
   enabled: boolean; default_model: string;
   model_count: number; is_stub: boolean;
+  // P-Monitor: 实时监测 banner 要展示的字段, 来自
+  // ``/api/model-control/providers/{id}`` 后端聚合, 详情见
+  // ``backend/app/routers/model_control.py``.
+  healthy_count?: number; failing_count?: number;
+  success_rate?: number | null; avg_latency_ms?: number | null;
+  circuit_state?: string;
+  last_health_at?: string | null;
+  consecutive_successes?: number; consecutive_failures?: number;
 }
 
 interface ModelItem {
@@ -61,6 +69,12 @@ export default function ModelProviderDetailPage() {
   const [pullingModels, setPullingModels] = useState(false);
   const [probeResults, setProbeResults] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
+  // P-Monitor: 详情页实时监测. 15s 拉一次 (详情页比列表页更需要
+  // 接近实时, 因为这里展示的是单 Provider 的 health_score 时间
+  // 轴, 越快越好). 切走 tab 不会停; 离开页面再清理.
+  const [monitoringOn, setMonitoringOn] = useState(true);
+  // P-Monitor: "重置熔断" 按钮的 in-flight 状态.
+  const [resettingCircuit, setResettingCircuit] = useState(false);
 
   const fetchDetail = async () => {
     try {
@@ -76,6 +90,34 @@ export default function ModelProviderDetailPage() {
   };
 
   useEffect(() => { fetchDetail(); }, [providerId]);
+
+  // P-Monitor: 15s 轮询. 静默失败 (不弹错), 避免在网络抖动时
+  // 把 banner 推高亮闪.
+  useEffect(() => {
+    if (!monitoringOn) return;
+    const id = window.setInterval(() => {
+      fetchDetail().catch(() => {/* 静默 */});
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [monitoringOn, providerId]);
+
+  // P-Monitor: 重置熔断. 端点 ``POST /api/models/providers/{id}/circuit/reset``
+  // 会把 ``model_providers`` 行的 ``circuit_state`` 从 ``open`` /
+  // ``half_open`` 拨回 ``closed``, 同时清零 consecutive_failures.
+  const resetCircuit = async () => {
+    if (!providerId) return;
+    setResettingCircuit(true);
+    setError("");
+    try {
+      await api.post(`/api/models/providers/${providerId}/circuit/reset`);
+      setNotice("熔断器已重置");
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message || "重置熔断失败");
+    } finally {
+      setResettingCircuit(false);
+    }
+  };
 
   const probeAll = async () => {
     setProbing(true);
@@ -180,6 +222,25 @@ export default function ModelProviderDetailPage() {
         </div>
       )}
 
+      {/* P-Monitor: 实时监测 banner. 显示 4 个核心指标:
+            - 可用 / 失败 (来自 model_health_snapshots)
+            - 24h 成功率 / 延迟 (来自 model_providers.success_rate_24h)
+            - 熔断状态 (closed/half_open/open) — 打开时显示
+              "重置熔断" 按钮.
+            - 上次检查时间.
+          整行根据 circuit_state 着色 (open = 红色脉冲边框,
+          half_open = 黄色边框, closed = 默认). */}
+      {data && (
+        <MonitorBanner
+          info={data.provider}
+          modelCount={data.models.length}
+          monitoringOn={monitoringOn}
+          onToggleMonitoring={() => setMonitoringOn((v) => !v)}
+          onResetCircuit={resetCircuit}
+          resettingCircuit={resettingCircuit}
+        />
+      )}
+
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, marginBottom: 20, borderBottom: "1px solid #334155" }}>
         {(["models", "fallback", "records", "bindings", "settings"] as Tab[]).map((t) => (
@@ -218,6 +279,135 @@ export default function ModelProviderDetailPage() {
           Provider 设置 — 返回 Provider 列表编辑
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * MonitorBanner — P-Monitor 实时监测 banner.
+ *
+ * 把 4 个核心 SRE 指标塞进一行, 让操作员一眼看清这个 Provider
+ * 当前是健康 / 降级 / 熔断:
+ *   - 可用 / 失败 (来自 ``model_health_snapshots`` 实时表)
+ *   - 24h 成功率 (来自 ``model_providers.success_rate_24h``)
+ *   - 平均延迟
+ *   - 熔断状态 (closed / half_open / open)
+ *
+ * 整行边框颜色由 ``circuit_state`` 决定:
+ *   - closed    → 默认 (灰)
+ *   - half_open → 黄色, 提示"半开恢复中, 观察中"
+ *   - open      → 红色, 提示"已熔断, 不再发请求"
+ *
+ * "重置熔断" 按钮只在 ``circuit_state != 'closed'`` 时显示.
+ */
+function MonitorBanner({
+  info, modelCount, monitoringOn, onToggleMonitoring, onResetCircuit, resettingCircuit,
+}: {
+  info: ProviderInfo;
+  modelCount: number;
+  monitoringOn: boolean;
+  onToggleMonitoring: () => void;
+  onResetCircuit: () => void;
+  resettingCircuit: boolean;
+}) {
+  const circuit = (info.circuit_state ?? "closed").toLowerCase();
+  const circuitColor =
+    circuit === "open" ? "#ef4444" :
+    circuit === "half_open" ? "#f59e0b" :
+    "#22c55e";
+  const circuitLabel =
+    circuit === "open" ? "熔断打开" :
+    circuit === "half_open" ? "半开恢复" :
+    "正常";
+  const success = info.success_rate != null ? Math.round((info.success_rate ?? 0) * 100) : null;
+  const lastAt = info.last_health_at
+    ? new Date(info.last_health_at).toLocaleTimeString("zh-CN")
+    : "—";
+
+  return (
+    <div
+      style={{
+        marginBottom: 16, padding: "10px 14px", borderRadius: 8,
+        background: "rgba(30,41,59,0.6)",
+        border: `1px solid ${circuitColor}55`,
+        boxShadow: circuit === "open" ? `0 0 0 1px ${circuitColor}33` : "none",
+        display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+        fontSize: 12,
+      }}
+    >
+      {/* 监测开关 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span
+          aria-hidden
+          style={{
+            width: 8, height: 8, borderRadius: 4,
+            background: monitoringOn ? "#22c55e" : "#64748b",
+            boxShadow: monitoringOn ? "0 0 6px #22c55eaa" : "none",
+            animation: monitoringOn ? "pulse 2s infinite" : "none",
+          }}
+        />
+        <span style={{ color: monitoringOn ? "#22c55e" : "#94a3b8" }}>
+          {monitoringOn ? "实时监测中 (15s)" : "监测已暂停"}
+        </span>
+        <button
+          onClick={onToggleMonitoring}
+          style={{
+            marginLeft: 4, background: "none", border: "1px solid #334155",
+            color: "#94a3b8", padding: "2px 8px", borderRadius: 4, cursor: "pointer",
+            fontSize: 11,
+          }}
+        >
+          {monitoringOn ? "暂停" : "开启"}
+        </button>
+      </div>
+
+      <div style={{ height: 24, width: 1, background: "#334155" }} />
+
+      <BannerStat label="可用" value={`${info.healthy_count ?? 0} / ${modelCount}`} color="#22c55e" />
+      <BannerStat label="失败" value={`${info.failing_count ?? 0}`} color={info.failing_count ? "#ef4444" : "#64748b"} />
+      <BannerStat label="24h 成功率" value={success != null ? `${success}%` : "—"} color={success == null ? "#94a3b8" : success >= 90 ? "#22c55e" : success >= 60 ? "#f59e0b" : "#ef4444"} />
+      <BannerStat label="平均延迟" value={info.avg_latency_ms != null ? `${info.avg_latency_ms}ms` : "—"} />
+      <BannerStat label="熔断" value={circuitLabel} color={circuitColor} pulse={circuit === "open"} />
+      <BannerStat label="上次检查" value={lastAt} />
+
+      {circuit !== "closed" && (
+        <button
+          onClick={onResetCircuit}
+          disabled={resettingCircuit}
+          style={{
+            marginLeft: "auto",
+            padding: "4px 12px", borderRadius: 4,
+            border: `1px solid ${circuitColor}`,
+            background: "transparent", color: circuitColor,
+            cursor: resettingCircuit ? "not-allowed" : "pointer",
+            fontSize: 12, opacity: resettingCircuit ? 0.6 : 1,
+          }}
+        >
+          {resettingCircuit ? "重置中..." : "重置熔断"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BannerStat({
+  label, value, color, pulse,
+}: {
+  label: string; value: string; color?: string; pulse?: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+      <span style={{ color: "#64748b", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span>
+      <span
+        style={{
+          color: color ?? "#e2e8f0",
+          fontSize: 14, fontWeight: 600,
+          fontFamily: "monospace",
+          animation: pulse ? "pulse 1.5s infinite" : "none",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }

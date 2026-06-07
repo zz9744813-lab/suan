@@ -27,7 +27,7 @@ export function ProviderAccordion({
   onTest: () => void;
   onHealth: (model?: string) => void;
   onPreviewModels: (baseUrl: string, apiKey: string) => Promise<string[]> | void;
-  busy: { test?: boolean; health?: boolean; preview?: boolean };
+  busy: { test?: boolean; health?: boolean; preview?: boolean; delete?: boolean };
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [draft, setDraft] = useState<Partial<ModelProvider>>({});
@@ -169,7 +169,9 @@ export function ProviderAccordion({
                 重置熔断
               </button>
             )}
-            <button onClick={onDelete} className="danger">删除</button>
+            <button onClick={onDelete} className="danger" disabled={busy.delete}>
+              {busy.delete ? "删除中..." : "删除"}
+            </button>
           </div>
           {previewedModels && previewedModels.length > 0 && (
             <details className="provider-accordion-details">

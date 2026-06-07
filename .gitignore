@@ -52,6 +52,13 @@ npm-debug.log*
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+# Some local setups put the sqlite db under ``backend/data/`` (e.g. when
+# running uvicorn from the backend/ working dir, which is the project's
+# ``dev.bat`` default). Same rule applies — never commit DBs, WALs, or
+# any *.bak_*/after_*/empty_recovered_* sibling files used by ``reset_test_db.py``.
+backend/data/
+# Keep the directory itself in git (with a .gitkeep) so the dir tree
+# survives fresh clones.
 
 # ── logs / runtime ──────────────────────────────────────────
 *.log
@@ -93,6 +100,13 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# ── AI assistant private state (workbuddy + trae) ─────────
+# These are session-level memory/notes from the user's AI
+# assistant harness. They are NOT project artefacts; keep them
+# out of git so we don't leak private context to a public repo.
+.workbuddy/
+.trae/
 
 # ── dev-only scripts (kept under test_*.py, this excludes the
 #    diagnostic one-off dumps) ───────────────────────────────

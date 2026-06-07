@@ -29,6 +29,7 @@ import type {
   ModelProvider,
   ModelProviderTestResult,
   ModelRoleAssignment,
+  ProviderDeletePreview,
   Outline,
   Project,
   PromptTemplate,
@@ -258,6 +259,12 @@ export const updateProvider = (id: number, body: Partial<ModelProvider>) =>
   api.put<ModelProvider>(`/api/models/providers/${id}`, body);
 export const deleteProvider = (id: number) =>
   api.delete<{ deleted: number }>(`/api/models/providers/${id}`);
+// P-Delete-Preview: preflight summary the UI uses to populate the
+// "Delete provider?" confirmation dialog. Read-only; does not
+// mutate anything. See
+// ``backend/app/routers/models.py::get_provider_delete_preview``.
+export const getProviderDeletePreview = (id: number) =>
+  api.get<ProviderDeletePreview>(`/api/models/providers/${id}/delete-preview`);
 export const testProvider = (id: number) =>
   api.post<ModelProviderTestResult>(`/api/models/providers/${id}/test`, undefined, 25_000);
 // P0-MODEL-7: stateless model-list preview. Called from the new/edit

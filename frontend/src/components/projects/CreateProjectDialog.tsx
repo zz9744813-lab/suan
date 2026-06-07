@@ -87,12 +87,12 @@ export function CreateProjectDialog(props: {
       setLocalError("书名不能超过 200 字。");
       return;
     }
-    if (!Number.isFinite(targetWords) || targetWords < 10_000) {
-      setLocalError("目标字数至少 10000。");
+    if (!Number.isFinite(targetWords)) {
+      setLocalError("目标字数必须是数字。");
       return;
     }
-    if (!Number.isFinite(targetChapters) || targetChapters < 10) {
-      setLocalError("目标章节至少 10。");
+    if (!Number.isFinite(targetChapters)) {
+      setLocalError("目标章节必须是数字。");
       return;
     }
     await onSubmit(
@@ -178,7 +178,6 @@ export function CreateProjectDialog(props: {
             <input
               className="input"
               type="number"
-              min={10_000}
               step={100_000}
               value={targetWords}
               onChange={(e) => setTargetWords(Number(e.target.value) || 0)}
@@ -189,7 +188,6 @@ export function CreateProjectDialog(props: {
             <input
               className="input"
               type="number"
-              min={10}
               step={10}
               value={targetChapters}
               onChange={(e) => setTargetChapters(Number(e.target.value) || 0)}

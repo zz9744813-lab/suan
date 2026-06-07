@@ -27,7 +27,7 @@
   /* ---- text (dark on light main, used as ink elsewhere) ---- */
   --text-primary: #18202d;       /* main ink */
   --text-secondary: #4a5868;     /* secondary ink */
-  --text-muted: #8a96a8;         /* tertiary ink */
+  --text-muted: #5f6b7a;         /* tertiary ink (WCAG AA 4.54:1 on #f4f7fb) */
   --ink: #18202d;                /* reading text on paper */
   --ink-soft: #4a5868;           /* secondary reading text */
 
@@ -39,7 +39,7 @@
   --accent-cyan: #23b7d8;        /* info accent */
 
   /* ---- semantic state colors ---- */
-  --state-ok: #20b486;           /* green — running / succeeded */
+  --state-ok: #168a6b;           /* green — running / succeeded (WCAG AA 4.53:1 on #fff) */
   --state-warn: #f59e0b;         /* orange — paused / warning */
   --state-error: #ee4d5a;        /* red — failed / error */
   --state-info: #3f7cff;         /* blue — info / selected */
@@ -57,10 +57,18 @@
   --size-statusbar: 28px;
   --size-header: 44px;
 
-  /* ---- radius / shadow / fonts ---- */
+  /* ---- z-index scale ---- */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-drawer: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+  --radius-sm: 4px;
   --radius: 6px;
+  --radius-md: 8px;
   --radius-lg: 12px;
-  --radius-sm: 8px;
+  --radius-xl: 16px;
   --shadow: 0 1px 2px rgba(15, 23, 39, 0.04), 0 4px 16px rgba(15, 23, 39, 0.06);
   --shadow2: 0 8px 24px rgba(15, 23, 39, 0.10);
 

@@ -275,3 +275,61 @@ class ProviderPreviewModelsResponse(BaseModel):
     message: str = ""
     suggestion: str | None = None
     latency_ms: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# P-Delete-Preview: delete-preview payload
+# ---------------------------------------------------------------------------
+class ProviderRoleBindingImpact(BaseModel):
+    """A role assignment that will be cascade-deleted with the provider.
+
+    The UI shows each row so the operator can spot the binding they
+    care about (e.g. "Draft -> stub" disappearing).
+    """
+
+    id: int
+    role: str
+    model: str
+
+
+class ProviderCallEventImpact(BaseModel):
+    """Summary of the call events that will lose their provider_id.
+
+    The rows themselves are NOT deleted (they're an audit log); we
+    just clear their ``provider_id`` via ``ON DELETE SET NULL``. The
+    UI uses ``count`` and ``last_called_at`` to set expectations:
+    "yes, the history stays, but the provider badge will be blank".
+    """
+
+    count: int
+    last_called_at: datetime | None = None
+
+
+class ProviderDeletePreview(BaseModel):
+    """P-Delete-Preview: preflight summary for DELETE /providers/{id}.
+
+    Returned by ``GET /providers/{id}/delete-preview`` so the UI can
+    warn the operator before pulling the trigger. The intent is to
+    surface cascade effects (which role bindings will disappear, how
+    much call history will lose its provider badge) without
+    preventing the delete — we picked "physical delete" in the design
+    phase. The only block-worthy case is a not-found provider.
+    """
+
+    provider_id: int
+    provider_name: str
+    base_url: str
+    will_cascade_role_bindings: list[ProviderRoleBindingImpact] = Field(
+        default_factory=list,
+    )
+    will_cascade_call_events_count: int = 0
+    last_call_event_at: datetime | None = None
+    # P-Delete-Preview: human-readable rollup. The UI shows this in
+    # the confirmation dialog as the body text, but a backend-side
+    # summary keeps it consistent with any future CLI / API consumer.
+    summary: str
+    # P-Delete-Preview: danger level drives the dialog header colour
+    # and the confirm-button style. ``safe`` = no role bindings and
+    # no call history; ``caution`` = some history; ``danger`` =
+    # currently bound to one or more roles.
+    danger_level: Literal["safe", "caution", "danger"]

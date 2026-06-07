@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     genre: str = Field(default="玄幻")
-    target_word_count: int = Field(default=3_000_000, ge=10_000)
-    target_chapter_count: int = Field(default=2000, ge=10)
+    target_word_count: int = Field(default=3_000_000)
+    target_chapter_count: int = Field(default=2000)
     description: str | None = None
     # Round 2 (P0-UI-2): let the create form start with a category
     # so the project lands in the right group on day one. Optional —

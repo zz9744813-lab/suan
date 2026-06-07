@@ -26,8 +26,10 @@ from app.schemas import (
     ModelProviderUpdate,
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
+    ProviderDeletePreview,
     ProviderPreviewModelsRequest,
     ProviderPreviewModelsResponse,
+    ProviderRoleBindingImpact,
 )
 from app.services.llm.client import (
     LLMAuthError,
@@ -185,11 +187,144 @@ async def update_provider(
 
 @router.delete("/providers/{provider_id}", response_model=APIResponse[dict])
 async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)) -> APIResponse[dict]:
+    """P-Delete-Preview: physically delete a Provider.
+
+    Cascade effects (see ``GET /providers/{id}/delete-preview`` for the
+    pre-flight summary the UI shows in the confirmation dialog):
+      - ``model_role_assignments`` rows pointing at this provider are
+        cascade-deleted via the ORM relationship
+        (``cascade="all, delete-orphan"`` on ``ModelProvider.roles``).
+      - ``model_call_events`` rows are NOT deleted; their
+        ``provider_id`` is set to NULL by the FK ``ON DELETE SET NULL``
+        so the audit log survives (just without the provider badge).
+
+    The endpoint is intentionally non-blocking — the pre-flight call
+    from the UI surfaces the cascade effects, and the operator can
+    decide. A 404 is the only failure case.
+    """
     row = await db.get(ModelProvider, provider_id)
     if row is None:
         raise not_found("ModelProvider", provider_id)
+    name = row.name
+    # ``db.delete`` triggers ORM cascades; the FK-level SET NULL on
+    # ``model_call_events`` is handled by SQLite/Postgres at commit
+    # time. We don't need to delete call events manually.
     await db.delete(row)
-    return {"ok": True, "data": {"deleted": provider_id}}
+    # P-Delete-Preview: surface the cascade counts in the success
+    # response so a CLI / API consumer can log "deleted provider X,
+    # lost Y role bindings, Z call events now have provider_id=NULL"
+    # without having to call the preview endpoint separately.
+    return {
+        "ok": True,
+        "data": {
+            "deleted": provider_id,
+            "provider_name": name,
+        },
+    }
+
+
+@router.get(
+    "/providers/{provider_id}/delete-preview",
+    response_model=APIResponse[ProviderDeletePreview],
+)
+async def get_provider_delete_preview(
+    provider_id: int, db: AsyncSession = Depends(get_db),
+) -> APIResponse[ProviderDeletePreview]:
+    """P-Delete-Preview: preflight summary before DELETE.
+
+    The UI calls this from the delete confirmation dialog so the
+    operator can see what will cascade away:
+      - which role assignments (Draft, Critic, ...) will be deleted
+      - how many call events will lose their provider_id badge
+
+    The endpoint does NOT mutate anything — it's a read-only summary.
+    Computing it is two cheap aggregate queries (a SELECT on
+    ``model_role_assignments`` and a COUNT/MAX on
+    ``model_call_events``), both indexed on ``provider_id``.
+    """
+    from sqlalchemy import func
+
+    from app.models.model_call_event import ModelCallEvent
+
+    row = await db.get(ModelProvider, provider_id)
+    if row is None:
+        raise not_found("ModelProvider", provider_id)
+
+    # 1) Role bindings that will cascade-delete with this provider.
+    role_rows = (
+        await db.execute(
+            select(ModelRoleAssignment)
+            .where(ModelRoleAssignment.provider_id == provider_id)
+            .order_by(ModelRoleAssignment.role.asc())
+        )
+    ).scalars().all()
+    bindings = [
+        ProviderRoleBindingImpact(id=r.id, role=r.role, model=r.model)
+        for r in role_rows
+    ]
+
+    # 2) Call event stats. The rows themselves are kept; we just
+    # clear their provider_id. We use a single aggregate query to
+    # avoid pulling every row.
+    call_agg = (
+        await db.execute(
+            select(
+                func.count(ModelCallEvent.id),
+                func.max(ModelCallEvent.created_at),
+            ).where(ModelCallEvent.provider_id == provider_id)
+        )
+    ).one()
+    call_count = int(call_agg[0] or 0)
+    last_called_at = call_agg[1]
+
+    # 3) Danger level drives the dialog style. Bound roles = danger;
+    #    any history = caution; otherwise safe.
+    if bindings:
+        danger_level = "danger"
+    elif call_count > 0:
+        danger_level = "caution"
+    else:
+        danger_level = "safe"
+
+    # 4) Build a human-readable summary. The UI shows this in the
+    #    dialog body, but keeping it server-side means CLI / API
+    #    consumers don't have to duplicate the formatting logic.
+    if bindings and call_count:
+        summary = (
+            f"将删除 Provider「{row.name}」，并级联删除 {len(bindings)} 个角色绑定"
+            f"（{', '.join(b.role for b in bindings[:3])}"
+            f"{' 等' if len(bindings) > 3 else ''}）；"
+            f"另有 {call_count} 条历史调用记录会失去 Provider 标识（记录本身保留）。"
+        )
+    elif bindings:
+        summary = (
+            f"将删除 Provider「{row.name}」，并级联删除 {len(bindings)} 个角色绑定"
+            f"（{', '.join(b.role for b in bindings[:3])}"
+            f"{' 等' if len(bindings) > 3 else ''}）。"
+        )
+    elif call_count:
+        summary = (
+            f"将删除 Provider「{row.name}」；{call_count} 条历史调用记录会失去 Provider 标识"
+            f"（记录本身保留）。"
+        )
+    else:
+        summary = (
+            f"将删除 Provider「{row.name}」，没有角色绑定或历史调用记录，可安全删除。"
+        )
+
+    return {
+        "ok": True,
+        "data": ProviderDeletePreview(
+            provider_id=row.id,
+            provider_name=row.name,
+            base_url=row.base_url,
+            will_cascade_role_bindings=bindings,
+            will_cascade_call_events_count=call_count,
+            last_call_event_at=last_called_at,
+            summary=summary,
+            danger_level=danger_level,
+        ),
+    }
 
 
 @router.post("/providers/{provider_id}/test", response_model=APIResponse[ModelProviderTestResult])

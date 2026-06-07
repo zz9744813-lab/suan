@@ -351,6 +351,15 @@ table tbody tr.clickable { cursor: pointer; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* WCAG: respect user's reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* progress */
 .progress { height: 6px; background: var(--bg-paper-soft); border-radius: 3px; overflow: hidden; }
 .progress > .fill {

@@ -74,6 +74,13 @@ export function AppShell({ children }: Props) {
 
   return (
     <div className={shellClass}>
+      <a href="#main-content" className="skip-link" style={{
+        position: "fixed", top: "-100%", left: 8, zIndex: 9999,
+        padding: "8px 16px", background: "var(--bg-panel)", color: "var(--accent-gold)",
+        border: "2px solid var(--accent-gold)", borderRadius: "var(--radius)",
+        fontSize: 13, fontWeight: 500, textDecoration: "none",
+      }}>跳到主内容</a>
+
       <RailNav />
 
       {projectNavMode !== "hidden" && (
@@ -133,7 +140,7 @@ export function AppShell({ children }: Props) {
         </aside>
       )}
 
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         {/* P6 P5: 删了 GlobalSearch (F:\07_P6 spec §7).
             留 .main-topbar 占位让 grid 布局不变 (R15/P0-SCROLL-1
             依赖 :not(.main-topbar) 选择器). */}

@@ -6,6 +6,12 @@
    .chief-hidden) reflows the entire grid. The default app shell leaves
    the spec'd widths in place.
    ========================================================================== */
+
+/* WCAG: skip-to-content link — hidden until focused via Tab */
+.skip-link:focus {
+  top: 8px !important;
+}
+
 .app-shell,
 .shell {
   --rail-width: var(--size-rail, 56px);

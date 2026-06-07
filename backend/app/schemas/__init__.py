@@ -42,8 +42,10 @@ from app.schemas.model_provider import (
     ModelProviderUpdate,
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
+    ProviderDeletePreview,
     ProviderPreviewModelsRequest,
     ProviderPreviewModelsResponse,
+    ProviderRoleBindingImpact,
 )
 from app.schemas.prompt import (
     PromptTemplateRead,
@@ -295,8 +297,10 @@ __all__ = [
     "ModelProviderUpdate",
     "ModelRoleAssignmentRead",
     "ModelRoleAssignmentUpdate",
+    "ProviderDeletePreview",
     "ProviderPreviewModelsRequest",
     "ProviderPreviewModelsResponse",
+    "ProviderRoleBindingImpact",
     "HealthCheckItemName",
     "HealthCheckItemStatus",
     "HealthStatus",

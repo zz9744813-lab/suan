@@ -43,8 +43,8 @@ const LEARN_ITEMS: Item[] = [
   // P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7)
   { to: "/reviews",    label: "评论评审", icon: "✦" },
   // NF2: 读者Agent + 审计
-  { to: "/reader-agents", label: "读者", icon: "📖" },
-  { to: "/audit",      label: "审计",   icon: "🔍" },
+  { to: "/reader-agents", label: "读者", icon: "👥" },
+  { to: "/audit",      label: "审计",   icon: "⚖" },
 ];
 
 export function RailNav() {
