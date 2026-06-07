@@ -1,0 +1,4 @@
+--- response content ---
+通常天空是蓝色的，阴天时呈灰白色，清晨和傍晚则会变为橙红色。
+--- usage ---
+tokens: 43/134, cost=$0.0002, latency=2513ms

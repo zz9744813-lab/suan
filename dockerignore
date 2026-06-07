@@ -1,0 +1,55 @@
+# Build context hygiene for docker.
+# Keep the build context small: don't ship node_modules, .venv, dist,
+# data, or .env into the image builder.
+
+# git / build state
+.git/
+.gitignore
+.github/
+
+# node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.next/
+
+# python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.coverage
+backend/htmlcov/
+
+# data
+backend/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# docs / editor
+docs/
+*.md
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# tests
+backend/tests/
+
+# docker meta (avoid recursive copy)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
