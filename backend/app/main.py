@@ -53,9 +53,27 @@ async def lifespan(app: FastAPI):
         "app": settings.app_name, "version": settings.app_version,
     }))
     yield
-    # shutdown
-    from app.workers.worker import get_worker
-    await get_worker().stop()
+    # shutdown — 阶段 3.6
+    # 1) 关掉 in-process Worker (如果存在). 默认 worker_run_in_process=False,
+    #    业务侧不再持有 WorkerController, 这里走 try/except 兼容.
+    try:
+        from app.workers.worker import get_worker
+        await get_worker().stop()
+    except Exception:
+        pass
+    # 2) 关掉 Redis 异步连接池
+    try:
+        from app.queue.redis_client import close_async_pool, close_sync_redis
+        await close_async_pool()
+        close_sync_redis()
+    except Exception:
+        pass
+    # 3) 释放 SQLAlchemy engine 池
+    try:
+        from app.core.database import engine
+        await engine.dispose()
+    except Exception:
+        pass
 
 
 app = FastAPI(

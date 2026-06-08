@@ -758,15 +758,39 @@ async def launch_project(
     else:
         raise bad_request(f"不支持的启动模式: {body.mode}")
 
-    # 通过 HTTP API 启动 Worker (避免直接操作 Worker 对象导致的 DB 锁冲突)
-    try:
-        import httpx
-        import asyncio
-        async def _start_worker():
-            async with httpx.AsyncClient() as client:
-                await client.post("http://localhost:8000/api/worker/start")
-        asyncio.create_task(_start_worker())
-    except Exception:
-        pass  # Worker 启动是 best-effort
+    # 阶段 3.6: 默认走 Redis 队列. 老 httpx 兜底仅在 worker_run_in_process=True
+    # 时启用, 用于本地 SQLite 回归.
+    from app.core.config import settings
+
+    if not settings.worker_run_in_process:
+        first_task_type = (result or {}).get("first_task_type") or "chapter_pipeline"
+        try:
+            from app.workers.writing_pipeline import (
+                enqueue_bootstrap_task,
+                enqueue_chapter_task,
+            )
+            if str(first_task_type) == "project_bootstrap":
+                task_id = (result or {}).get("bootstrap_task_id") or (result or {}).get("first_task_id")
+                if isinstance(task_id, int):
+                    result["queued_job_id"] = await enqueue_bootstrap_task(task_id)
+            else:
+                chapter_id = (result or {}).get("first_chapter_id")
+                if isinstance(chapter_id, int):
+                    result["queued_job_id"] = await enqueue_chapter_task(chapter_id)
+        except Exception as exc:
+            # 入队失败不影响 HTTP 响应, 但返回给前端用于诊断
+            result["queue_error"] = str(exc)
+    else:
+        # 老路径: HTTP 自调 /api/worker/start
+        # 阶段 3.6 标记为 legacy, 计划在 3.7 删除
+        try:
+            import httpx
+            import asyncio
+            async def _start_worker():
+                async with httpx.AsyncClient() as client:
+                    await client.post("http://localhost:8000/api/worker/start")
+            asyncio.create_task(_start_worker())
+        except Exception:
+            pass  # Worker 启动是 best-effort
 
     return {"ok": True, "data": result}

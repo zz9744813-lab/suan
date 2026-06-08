@@ -1,42 +1,124 @@
 # NovelForge 2.0 — Production deployment
 #
-# Three services on a private network:
-#   - backend    FastAPI + in-process asyncio worker (port 8000, internal)
-#   - frontend   Nginx serving the Vite bundle, /api proxied to backend
-#   - (no DB container)   SQLite is mounted as a volume — fine for a single
-#                          author / small team. Switch to Postgres by
-#                          changing DATABASE_URL and adding a db service.
+# 阶段 3.1: 升级到 PostgreSQL + Redis 队列.
+# 4 个核心服务 (均在私有网络 nfnet):
+#   - postgres    PostgreSQL 16 业务库
+#   - redis       Redis 7 任务队列 + 缓存
+#   - backend-api FastAPI, 只入队不执行
+#   - backend-worker arq Worker, 独立进程消费队列
+#   - frontend    Nginx 反向代理
 #
-# Quick start:
-#   cp .env.example .env   # edit NOVELFORGE_API_KEY
+# 快速启动:
+#   cp .env.example .env   # 改 NOVELFORGE_API_KEY 与数据库密码
 #   docker compose up -d --build
 #   open http://localhost:8080
 #
-# Data persists in the named volume `novelforge_data`. To start fresh:
-#   docker compose down -v
+# 数据卷:
+#   - pg_data     PostgreSQL 数据
+#   - redis_data  Redis AOF 数据
+#   - novelforge_data  后端上传文件 + 日志
+#
+# 重新初始化: docker compose down -v
 
 services:
-  backend:
+  postgres:
+    image: postgres:16-alpine
+    container_name: novelforge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-novelforge}
+      POSTGRES_USER: ${POSTGRES_USER:-novelforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-novelforge}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-novelforge} -d ${POSTGRES_DB:-novelforge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - nfnet
+
+  redis:
+    image: redis:7-alpine
+    container_name: novelforge-redis
+    restart: unless-stopped
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "512mb"
+      - "--maxmemory-policy"
+      - "noeviction"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - nfnet
+
+  backend-api:
     build:
       context: .
       dockerfile: Dockerfile
-    image: novelforge-backend:0.1.0
-    container_name: novelforge-backend
+    image: novelforge-backend-api:0.1.0
+    container_name: novelforge-backend-api
     restart: unless-stopped
     environment:
-      # Pass-through from host .env if present, else inline defaults
       NOVELFORGE_API_KEY: ${NOVELFORGE_API_KEY:-novelforge-local-dev-key}
       DEBUG: ${DEBUG:-false}
-      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////app/backend/data/novelforge.db}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://novelforge:novelforge@postgres:5432/novelforge}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
+      WORKER_RUN_IN_PROCESS: ${WORKER_RUN_IN_PROCESS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - novelforge_data:/app/backend/data
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 20s
+    networks:
+      - nfnet
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: novelforge-backend-worker:0.1.0
+    container_name: novelforge-backend-worker
+    restart: unless-stopped
+    environment:
+      NOVELFORGE_API_KEY: ${NOVELFORGE_API_KEY:-novelforge-local-dev-key}
+      DEBUG: ${DEBUG:-false}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://novelforge:novelforge@postgres:5432/novelforge}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-8}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend-api:
+        condition: service_healthy
+    volumes:
+      - novelforge_data:/app/backend/data
+    # 阶段 3.3: 启动真正的 arq worker, 替换阶段 3.1 的占位 heartbeat.
+    command: ["python", "-m", "app.workers.arq_worker"]
     networks:
       - nfnet
 
@@ -48,11 +130,9 @@ services:
     container_name: novelforge-frontend
     restart: unless-stopped
     depends_on:
-      backend:
+      backend-api:
         condition: service_healthy
     ports:
-      # host :8080 -> container :80
-      # Change to 80:80 if you want to serve on the standard port.
       - "${FRONTEND_PORT:-8080}:80"
     networks:
       - nfnet
@@ -62,5 +142,9 @@ networks:
     driver: bridge
 
 volumes:
+  pg_data:
+    name: novelforge_pg_data
+  redis_data:
+    name: novelforge_redis_data
   novelforge_data:
     name: novelforge_data

@@ -20,7 +20,7 @@ import {
   type AgentRunMode,
 } from "../../types";
 
-const CATEGORIES: AgentCategory[] = ["writing", "memory", "study", "discussion", "custom"];
+const CATEGORIES: AgentCategory[] = ["writing", "memory", "study", "discussion", "review", "custom"];
 const RUN_MODES: AgentRunMode[] = ["manual", "pipeline", "scheduled", "event"];
 
 export function AgentRoleEditor({

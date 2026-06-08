@@ -59,7 +59,7 @@ export function AgentRoleMatrix({
   }, [items]);
 
   // 按 P4 §10 顺序
-  const categoryOrder: AgentCategory[] = ["writing", "memory", "study", "discussion", "custom"];
+  const categoryOrder: AgentCategory[] = ["writing", "memory", "study", "discussion", "review", "custom"];
 
   return (
     <div className="agent-role-matrix">

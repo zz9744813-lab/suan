@@ -157,6 +157,8 @@ class StudyRunStartResponse(BaseModel):
     run_id: int
     material_id: int
     status: str
+    queued_job_id: str | None = None
+    queue_error: str | None = None
     message: str = "后台处理中。可轮询 /api/deepstudy/runs/{id} 看进度。"
 
 

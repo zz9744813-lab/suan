@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -206,9 +206,18 @@ async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)) 
     if row is None:
         raise not_found("ModelProvider", provider_id)
     name = row.name
-    # ``db.delete`` triggers ORM cascades; the FK-level SET NULL on
-    # ``model_call_events`` is handled by SQLite/Postgres at commit
-    # time. We don't need to delete call events manually.
+    # 部分 SQLite 测试库/既有库可能没有落到最新 FK 约束，先显式置空
+    # 调用事件的 provider_id，再删除 Provider，确保审计事件保留。
+    from app.models.model_call_event import ModelCallEvent
+
+    await db.execute(
+        update(ModelCallEvent)
+        .where(ModelCallEvent.provider_id == provider_id)
+        .values(provider_id=None)
+    )
+    # ``db.delete`` triggers ORM cascades for role bindings. The explicit
+    # UPDATE above keeps model_call_events rows stable across SQLite/Postgres
+    # and across databases created before the FK migration existed.
     await db.delete(row)
     # P-Delete-Preview: surface the cascade counts in the success
     # response so a CLI / API consumer can log "deleted provider X,
@@ -344,7 +353,11 @@ async def test_provider(provider_id: int, db: AsyncSession = Depends(get_db)) ->
         row.model_list = merged
         if not row.default_model and models:
             row.default_model = models[0]
-        await db.flush()
+        try:
+            await db.flush()
+        except Exception:
+            # flush 失败不影响返回结果 (SQLite locked 时静默跳过)
+            pass
         return {"ok": True, "data": ModelProviderTestResult(
             ok=True,
             message=f"连接成功，识别到 {len(models)} 个模型。",
@@ -352,10 +365,13 @@ async def test_provider(provider_id: int, db: AsyncSession = Depends(get_db)) ->
             latency_ms=int((time.perf_counter() - t0) * 1000),
         )}
     except Exception as exc:
-        row.last_test_status = "failed"
-        row.last_test_message = str(exc)
-        row.last_test_at = datetime.utcnow()
-        await db.flush()
+        try:
+            row.last_test_status = "failed"
+            row.last_test_message = str(exc)
+            row.last_test_at = datetime.utcnow()
+            await db.flush()
+        except Exception:
+            pass
         return {"ok": True, "data": ModelProviderTestResult(
             ok=False,
             message=str(exc),

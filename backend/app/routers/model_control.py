@@ -175,7 +175,9 @@ async def get_provider_detail(
     )).scalars().all()
 
     models_list = []
+    snapshot_names = set()
     for s in snapshots:
+        snapshot_names.add(s.model_name)
         models_list.append({
             "model_name": s.model_name,
             "status": s.status,
@@ -191,23 +193,24 @@ async def get_provider_detail(
             "output_price_per_million": s.output_price_per_million,
         })
 
-    # If no snapshots yet, use model_list raw
-    if not snapshots and provider.model_list:
+    # Add models from model_list that don't have snapshots yet
+    if provider.model_list:
         for m in provider.model_list:
-            models_list.append({
-                "model_name": m,
-                "status": "unknown",
-                "health_score": 0.0,
-                "success_rate": 0.0,
-                "avg_latency_ms": 0,
-                "supports_json": False,
-                "supports_text": True,
-                "last_error_message": None,
-                "probe_count": 0,
-                "consecutive_failures": 0,
-                "input_price_per_million": None,
-                "output_price_per_million": None,
-            })
+            if m not in snapshot_names:
+                models_list.append({
+                    "model_name": m,
+                    "status": "unknown",
+                    "health_score": 0.0,
+                    "success_rate": 0.0,
+                    "avg_latency_ms": 0,
+                    "supports_json": False,
+                    "supports_text": True,
+                    "last_error_message": None,
+                    "probe_count": 0,
+                    "consecutive_failures": 0,
+                    "input_price_per_million": None,
+                    "output_price_per_million": None,
+                })
 
     # Route events (最近 50 条)
     route_events = (await db.execute(

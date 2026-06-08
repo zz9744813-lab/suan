@@ -1957,7 +1957,7 @@ export type AgentRoleUpdate = {
     /**
      * Category
      */
-    category?: 'writing' | 'study' | 'memory' | 'discussion' | 'custom' | null;
+    category?: 'writing' | 'study' | 'memory' | 'discussion' | 'review' | 'custom' | null;
     /**
      * Avatar Style
      */

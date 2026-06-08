@@ -119,6 +119,8 @@ class ProjectLaunchService:
             self.db.add(task)
             await self.db.flush()
             results["first_task_id"] = task.id
+            results["first_chapter_id"] = chapter.id
+            results["first_task_type"] = "chapter_pipeline"
 
         return results
 
@@ -153,6 +155,8 @@ class ProjectLaunchService:
         return {
             "mode": "full_auto",
             "bootstrap_task_id": task.id,
+            "first_task_id": task.id,
+            "first_task_type": "project_bootstrap",
             "message": "已创建全自动启动任务，Worker 将自动生成大纲、人物、设定并开始写作。",
         }
 

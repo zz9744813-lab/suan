@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, ForeignKey, Index, String, Text, func
+from sqlalchemy import JSON, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -74,7 +74,7 @@ class AuditLog(Base):
 
     # ── 时间戳 ────────────────────────────────────────────────
     created_at: Mapped[datetime] = mapped_column(
-        default=func.now,
+        default=datetime.utcnow,
         index=True,
     )
 

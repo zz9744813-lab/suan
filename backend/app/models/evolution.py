@@ -35,8 +35,8 @@ class SkillCard(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     content_fingerprint: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
     __table_args__ = (Index("ix_skill_status", "status"),)
 
 
@@ -52,7 +52,7 @@ class SkillVersion(Base):
     metrics_before: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     metrics_after: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow())
 
 
 class SkillUsageEvent(Base):
@@ -66,7 +66,7 @@ class SkillUsageEvent(Base):
     injected_into: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
     matched_tags: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     prompt_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
-    used_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    used_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow())
     critic_score_before: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     critic_score_after: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     reader_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
@@ -90,7 +90,7 @@ class EvolutionRun(Base):
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow())
 
 
 class EvolutionPatch(Base):
@@ -109,7 +109,7 @@ class EvolutionPatch(Base):
     status: Mapped[str] = mapped_column(String(30), default="proposed")
     evaluation_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     created_by_agent_role: Mapped[str | None] = mapped_column(String(80), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow())
     applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
 
 
@@ -129,4 +129,4 @@ class ModelQualityStat(Base):
     avg_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     avg_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
     window: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())

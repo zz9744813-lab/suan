@@ -136,12 +136,21 @@ export function ReaderAgentsPage() {
 
               {/* Model & Prompt binding */}
               <div style={{ fontSize: 12 }}>
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>绑定信息</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>模型与提示词</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button className="ghost" onClick={() => navigate("/models")}>配置模型</button>
+                    <button className="ghost" onClick={() => navigate("/prompts")}>配置提示词</button>
+                  </div>
+                </div>
                 <div className="muted" style={{ marginBottom: 4 }}>
-                  模型: {current.model_binding ?? "未绑定"}
+                  模型: {formatModelBinding(current)}
+                </div>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  系统提示词: {current.system_prompt_template_name ?? current.system_prompt_template_key ?? "未绑定"}
                 </div>
                 <div className="muted">
-                  Prompt: {current.prompt_binding ?? "未绑定"}
+                  任务提示词: {current.task_prompt_template_name ?? current.task_prompt_template_key ?? "未绑定"}
                 </div>
               </div>
             </div>
@@ -152,6 +161,16 @@ export function ReaderAgentsPage() {
       </div>
     </div>
   );
+}
+
+function formatModelBinding(reader: any) {
+  if (!reader) return "未绑定";
+  const provider = reader.provider_name ?? (reader.provider_id ? `Provider #${reader.provider_id}` : null);
+  const model = reader.model_name;
+  if (provider && model) return `${provider} / ${model}`;
+  if (model) return model;
+  if (provider) return provider;
+  return "未绑定";
 }
 
 function StatCard({ label, value }: { label: string; value: any }) {

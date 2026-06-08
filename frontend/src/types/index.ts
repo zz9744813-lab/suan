@@ -1475,7 +1475,7 @@ export type ApplyDecisionResponse = {
 // ===== P4: Agent Role / Model Binding / Prompt Binding / Run / Event =====
 // 跟 backend/app/schemas/agent_role.py 1:1 对应. P4 spec 05 §8/§9.
 export type AgentCategory =
-  | "writing" | "study" | "memory" | "discussion" | "custom";
+  | "writing" | "study" | "memory" | "discussion" | "review" | "custom";
 
 export type AgentRunMode = "manual" | "pipeline" | "scheduled" | "event";
 
@@ -1498,6 +1498,7 @@ export const AGENT_CATEGORY_LABEL: Record<AgentCategory, string> = {
   study:      "拆书",
   memory:     "记忆",
   discussion: "讨论",
+  review:     "评审",
   custom:     "自定义",
 };
 

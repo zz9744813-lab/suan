@@ -348,12 +348,30 @@ async def start_run(
     }
     await db.flush()
 
+    queued_job_id = None
+    queue_error = None
+    try:
+        from app.core.config import settings
+        if not settings.worker_run_in_process:
+            from app.workers.deepstudy_pipeline import enqueue_dispatch
+            await enqueue_dispatch(run.id)
+            queued_job_id = f"study_deepstudy_dispatch:{run.id}"
+    except Exception as exc:
+        queue_error = str(exc)
+        material.study_progress = {
+            **(material.study_progress or {}),
+            "queue_error": queue_error,
+        }
+        await db.flush()
+
     return {
         "ok": True,
         "data": StudyRunStartResponse(
             run_id=run.id,
             material_id=material_id,
             status=run.status,
+            queued_job_id=queued_job_id,
+            queue_error=queue_error,
         ),
     }
 

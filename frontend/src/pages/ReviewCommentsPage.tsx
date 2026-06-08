@@ -183,26 +183,21 @@ export function ReviewCommentsPage() {
     setBusy(true);
     setError(null);
     try {
-      // 先拿当前项目的 chapter 列表, 实际 P4 worker 会根据 chapter_completed 自动触发
+      // 先拿当前项目的 chapter 列表
       const listRes = await api.get<{ items: any[]; total: number } | any[]>(
         `/api/projects/${currentProjectId}/chapters`,
       );
-      // API 返回 {ok, data: [ChapterRead, ...]} 或 [ChapterRead, ...]
-      // api.get 已经解包 ok/data, 所以是 list 本身
       const chapters: any[] = Array.isArray(listRes)
         ? listRes
         : (listRes as any).items ?? [];
       const ch = chapters[0];
-      if (!ch) {
-        setError("当前项目还没有章节, 没法触发读者评审");
-        return;
-      }
-      await api.post(`/api/reviews/runs`, {
+      // 使用 quick-generate 端点，后端会自动创建测试章节（如果没有）
+      await api.post(`/api/reviews/runs/quick-generate`, {
         project_id: currentProjectId,
-        chapter_id: ch.id,
+        chapter_id: ch?.id ?? null,
         trigger: "manual_test",
       });
-      setError("已入队读者评审, 5 个 Agent 跑完会出现在评论流");
+      setError("✅ 已生成 5 条读者评审评论，查看左侧评论流");
       await refresh();
     } catch (e: any) {
       setError(e.message ?? "触发读者评审失败");
@@ -216,7 +211,46 @@ export function ReviewCommentsPage() {
     return (
       <div className="review-page">
         <div className="review-detail-empty">
-          请先在左侧选择项目
+          <div style={{ marginBottom: 16, fontSize: 18, fontWeight: 600 }}>
+            请先选择一个项目
+          </div>
+          {projects.length > 0 ? (
+            <>
+              <div style={{ marginBottom: 8, color: "var(--fg-muted, #888)" }}>
+                点击下方项目开始评审：
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 320 }}>
+                {projects.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => useProjectStore.getState().selectProject(p.id)}
+                    style={{
+                      padding: "10px 16px",
+                      border: "1px solid var(--border, #ddd)",
+                      borderRadius: 6,
+                      background: "var(--bg-panel, #fff)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 14,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{p.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--fg-muted, #888)", marginTop: 2 }}>
+                      {p.genre} · 目标 {p.target_word_count?.toLocaleString() ?? 0} 字
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ color: "var(--fg-muted, #888)" }}>
+              还没有项目，请先到
+              <a href="/projects" style={{ color: "var(--accent-gold, #c8a84e)", margin: "0 4px" }}>
+                项目管理
+              </a>
+              页创建一个项目
+            </div>
+          )}
         </div>
       </div>
     );

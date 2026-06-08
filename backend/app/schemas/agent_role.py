@@ -46,7 +46,7 @@ class AgentRoleUpdate(BaseModel):
     """PUT /api/agent-roles/{id} — 允许部分更新"""
     display_name: str | None = None
     description: str | None = None
-    category: Literal["writing", "study", "memory", "discussion", "custom"] | None = None
+    category: Literal["writing", "study", "memory", "discussion", "review", "custom"] | None = None
     avatar_style: str | None = None
     enabled: bool | None = None
     visible_in_matrix: bool | None = None

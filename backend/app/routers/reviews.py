@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.errors import bad_request, not_found
-from app.models.agent_role import AgentRole
+from app.models.agent_role import AgentModelBinding, AgentPromptBinding, AgentRole
 from app.models.comment_review import (
     ReaderAgentProfile,
     ReaderReviewRun,
@@ -31,6 +31,8 @@ from app.models.comment_review import (
     ReviewSettings,
 )
 from app.models.project import Chapter, ChapterVersion, Project
+from app.models.model_provider import ModelProvider
+from app.models.prompt import PromptTemplate
 from app.schemas import APIResponse
 from app.schemas.review import (
     AgentAutoCreateRequest,
@@ -464,8 +466,6 @@ async def reply_to_comment(
     # 父评论状态推进
     if parent.status == "new":
         parent.status = "replied"
-    await db.commit()
-    await db.refresh(reply)
     # ── 审计 ─────────────────────────────────────────────
     await log_review_action(
         db,
@@ -474,6 +474,8 @@ async def reply_to_comment(
         chapter_id=parent.chapter_id,
         comment_id=comment_id, action="reply", decision=None,
     )
+    await db.commit()
+    await db.refresh(reply)
     return {"ok": True, "data": ReviewCommentRead.model_validate(reply)}
 
 
@@ -495,8 +497,6 @@ async def update_comment(
     data = body.model_dump(exclude_unset=True)
     for k, v in data.items():
         setattr(c, k, v)
-    await db.commit()
-    await db.refresh(c)
     # ── 审计 ──────────────────────────────────────────
     await log_review_action(
         db,
@@ -508,6 +508,8 @@ async def update_comment(
         action=f"update:{','.join(data.keys())}",
         decision=None,
     )
+    await db.commit()
+    await db.refresh(c)
     return {"ok": True, "data": ReviewCommentRead.model_validate(c)}
 
 
@@ -905,13 +907,57 @@ async def quick_generate_reader_review(
     这是读者模块的轻量实装入口: 不等待后台 LLM runner,
     直接把 5 个读者维度写入评论表, 前端即可采纳/驳回/转分流。
     后续替换为真正 reader agent 时可保持前端 API 不变。
+
+    如果 chapter_id 为空或章节不存在, 会自动创建一个测试章节。
     """
     proj = await db.get(Project, body.project_id)
     if proj is None:
         raise not_found("Project", body.project_id)
-    ch = await db.get(Chapter, body.chapter_id)
+
+    # 如果没有指定 chapter_id, 自动创建测试章节
+    ch = None
+    if body.chapter_id:
+        ch = await db.get(Chapter, body.chapter_id)
     if ch is None:
-        raise not_found("Chapter", body.chapter_id)
+        # 查找项目是否已有章节
+        existing = (await db.execute(
+            select(Chapter)
+            .where(Chapter.project_id == body.project_id)
+            .order_by(Chapter.chapter_no)
+            .limit(1)
+        )).scalar_one_or_none()
+        if existing:
+            ch = existing
+        else:
+            # 自动创建一个测试章节
+            ch = Chapter(
+                project_id=body.project_id,
+                chapter_no=1,
+                title="测试章节 — 读者评审",
+                target_word_count=3000,
+                actual_word_count=0,
+                status="done",
+            )
+            db.add(ch)
+            await db.flush()
+            # 创建一个带示例内容的版本
+            test_content = (
+                "这是一段用于测试读者评审功能的示例文本。\n\n"
+                "主角站在悬崖边，望着远方的城市灯火。身后传来脚步声，他没有回头。\n"
+                "\u201c你确定要这么做吗？\u201d她的声音带着颤抖。\n"
+                "他握紧了手中的信物，那是父亲留给他的唯一遗物。风从谷底吹上来，"
+                "卷起他的衣角。他终于转过身，目光坚定。\n"
+                "\u201c我没有选择。\u201d\n\n"
+                "这段场景需要更多的环境描写和内心独白来增强代入感。"
+            )
+            ver = ChapterVersion(
+                chapter_id=ch.id,
+                version_kind="draft",
+                version_no=1,
+                content=test_content,
+            )
+            db.add(ver)
+            await db.flush()
     if ch.project_id != body.project_id:
         raise bad_request(f"Chapter {body.chapter_id} does not belong to project {body.project_id}")
 
@@ -936,7 +982,7 @@ async def quick_generate_reader_review(
     specs = _quick_reader_comments(ch, version.content if version else "")
     run = ReaderReviewRun(
         project_id=body.project_id,
-        chapter_id=body.chapter_id,
+        chapter_id=ch.id,
         chapter_version_id=version.id if version else body.chapter_version_id,
         trigger=body.trigger,
         status="succeeded",
@@ -951,7 +997,7 @@ async def quick_generate_reader_review(
     for spec in specs[: settings.max_reader_comments_per_run]:
         comment = ReviewComment(
             project_id=body.project_id,
-            chapter_id=body.chapter_id,
+            chapter_id=ch.id,
             chapter_version_id=version.id if version else body.chapter_version_id,
             target_type="chapter",
             author_type="reader_agent",
@@ -970,6 +1016,16 @@ async def quick_generate_reader_review(
         comments.append(comment)
     await db.flush()
     run.generated_comment_ids = [c.id for c in comments]
+    await log_review_action(
+        db,
+        actor_type="agent",
+        actor_key="reader_agents",
+        project_id=body.project_id,
+        chapter_id=ch.id,
+        comment_id=comments[0].id if comments else 0,
+        action=f"quick_generate:{len(comments)}",
+        decision="reader_review_run",
+    )
     await db.commit()
     await db.refresh(run)
     for comment in comments:
@@ -1210,7 +1266,82 @@ class ReaderAgentPatch(BaseModel):
     dimension: str | None = Field(None, min_length=1, max_length=80)
 
 
-@router.get("/readers", response_model=APIResponse[list[ReaderAgentProfileRead]])
+class ReaderAgentDetailRead(ReaderAgentProfileRead):
+    agent_role_key: str | None = None
+    agent_role_name: str | None = None
+    provider_id: int | None = None
+    provider_name: str | None = None
+    model_name: str | None = None
+    binding_mode: str | None = None
+    prompt_binding_id: int | None = None
+    system_prompt_template_id: int | None = None
+    system_prompt_template_key: str | None = None
+    system_prompt_template_name: str | None = None
+    task_prompt_template_id: int | None = None
+    task_prompt_template_key: str | None = None
+    task_prompt_template_name: str | None = None
+    strict_json: bool | None = None
+    evidence_required: bool | None = None
+
+
+async def _reader_agent_detail(db: AsyncSession, profile: ReaderAgentProfile) -> ReaderAgentDetailRead:
+    role = await db.get(AgentRole, profile.agent_role_id)
+    model_binding = (await db.execute(
+        select(AgentModelBinding).where(AgentModelBinding.agent_role_id == profile.agent_role_id)
+    )).scalar_one_or_none()
+    prompt_binding = (await db.execute(
+        select(AgentPromptBinding).where(AgentPromptBinding.agent_role_id == profile.agent_role_id)
+    )).scalar_one_or_none()
+
+    provider = None
+    if model_binding and model_binding.provider_id:
+        provider = await db.get(ModelProvider, model_binding.provider_id)
+
+    system_prompt = None
+    task_prompt = None
+    if prompt_binding and prompt_binding.system_prompt_template_id:
+        system_prompt = await db.get(PromptTemplate, prompt_binding.system_prompt_template_id)
+    if prompt_binding and prompt_binding.task_prompt_template_id:
+        task_prompt = await db.get(PromptTemplate, prompt_binding.task_prompt_template_id)
+    if task_prompt is None:
+        task_prompt = (await db.execute(
+            select(PromptTemplate).where(
+                PromptTemplate.template_key == f"{profile.reader_key}_comment",
+            )
+        )).scalar_one_or_none()
+    if task_prompt is None:
+        task_prompt = (await db.execute(
+            select(PromptTemplate)
+            .where(
+                PromptTemplate.category == "review",
+                PromptTemplate.template_key.like(f"{profile.reader_key}%"),
+            )
+            .order_by(PromptTemplate.id.asc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+    data = ReaderAgentProfileRead.model_validate(profile).model_dump()
+    data.update({
+        "agent_role_key": role.key if role else None,
+        "agent_role_name": role.display_name if role else None,
+        "provider_id": model_binding.provider_id if model_binding else None,
+        "provider_name": provider.name if provider else None,
+        "model_name": model_binding.model_name if model_binding else None,
+        "binding_mode": model_binding.binding_mode if model_binding else None,
+        "prompt_binding_id": prompt_binding.id if prompt_binding else None,
+        "system_prompt_template_id": prompt_binding.system_prompt_template_id if prompt_binding else None,
+        "system_prompt_template_key": system_prompt.template_key if system_prompt else None,
+        "system_prompt_template_name": system_prompt.name if system_prompt else None,
+        "task_prompt_template_id": prompt_binding.task_prompt_template_id if prompt_binding else None,
+        "task_prompt_template_key": task_prompt.template_key if task_prompt else None,
+        "task_prompt_template_name": task_prompt.name if task_prompt else None,
+        "strict_json": prompt_binding.strict_json if prompt_binding else None,
+        "evidence_required": prompt_binding.evidence_required if prompt_binding else None,
+    })
+    return ReaderAgentDetailRead.model_validate(data)
+
+
+@router.get("/readers", response_model=APIResponse[list[ReaderAgentDetailRead]])
 async def list_reader_agents(
     db: AsyncSession = Depends(get_db),
 ):
@@ -1218,15 +1349,16 @@ async def list_reader_agents(
     rows = (await db.execute(
         select(ReaderAgentProfile).order_by(ReaderAgentProfile.id)
     )).scalars().all()
+    details = [await _reader_agent_detail(db, r) for r in rows]
     return {
         "ok": True,
-        "data": [ReaderAgentProfileRead.model_validate(r) for r in rows],
+        "data": details,
     }
 
 
 @router.get(
     "/readers/{reader_key}",
-    response_model=APIResponse[ReaderAgentProfileRead],
+    response_model=APIResponse[ReaderAgentDetailRead],
 )
 async def get_reader_agent(
     reader_key: str,
@@ -1240,12 +1372,12 @@ async def get_reader_agent(
     )).scalar_one_or_none()
     if row is None:
         raise not_found("ReaderAgentProfile", reader_key)
-    return {"ok": True, "data": ReaderAgentProfileRead.model_validate(row)}
+    return {"ok": True, "data": await _reader_agent_detail(db, row)}
 
 
 @router.patch(
     "/readers/{reader_key}",
-    response_model=APIResponse[ReaderAgentProfileRead],
+    response_model=APIResponse[ReaderAgentDetailRead],
 )
 async def update_reader_agent(
     reader_key: str,
@@ -1265,7 +1397,7 @@ async def update_reader_agent(
     for k, v in data.items():
         setattr(row, k, v)
     await db.flush()
-    return {"ok": True, "data": ReaderAgentProfileRead.model_validate(row)}
+    return {"ok": True, "data": await _reader_agent_detail(db, row)}
 
 
 @router.get(

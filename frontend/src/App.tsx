@@ -84,9 +84,6 @@ const GenrePromptMatrixPage = lazy(() =>
 const ModelObservabilityPanel = lazy(() =>
   import("./components/models/ModelObservabilityPanel")
 );
-const AuditLogPage = lazy(() =>
-  import("./pages/AuditLogPage").then((m) => ({ default: m.AuditLogPage }))
-);
 const NotFound = lazy(() =>
   import("./pages/NotFound").then((m) => ({ default: m.NotFound }))
 );
@@ -196,7 +193,7 @@ export default function App() {
             <Route path="/reviews" element={<ReviewCommentsPage />} />
             {/* P7: Genre-Prompt matrix with drag-drop */}
             <Route path="/prompts-matrix" element={<GenrePromptMatrixPage />} />
-            <Route path="/audit-logs" element={<AuditLogPage />} />
+            <Route path="/audit-logs" element={<Navigate to="/audit" replace />} />
             {/* NF2: 读者Agent编辑中心 */}
             <Route path="/reader-agents" element={<ReaderAgentsPage />} />
             <Route path="/reader-agents/:readerKey" element={<ReaderAgentDetailPage />} />

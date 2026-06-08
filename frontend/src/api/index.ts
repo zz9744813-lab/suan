@@ -103,7 +103,11 @@ export interface LaunchResult {
   characters_created?: number;
   bible_updated?: boolean;
   first_task_id?: number;
+  first_chapter_id?: number;
+  first_task_type?: string;
   bootstrap_task_id?: number;
+  queued_job_id?: string | null;
+  queue_error?: string | null;
   message?: string;
 }
 export const launchProject = (

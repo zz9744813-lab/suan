@@ -216,9 +216,11 @@ class ReaderReviewRunCreate(BaseModel):
     """POST /api/reviews/runs — 内部触发读者评审.
 
     P1: 只创建 ReaderReviewRun row (status=pending), 实际 5 reader 跑
-    推到 P2 (AgentRoleRunner)."""
+    推到 P2 (AgentRoleRunner).
+
+    chapter_id 可选: 为空时 quick-generate 会自动创建测试章节。"""
     project_id: int = Field(..., ge=1)
-    chapter_id: int = Field(..., ge=1)
+    chapter_id: int | None = None
     chapter_version_id: int | None = None
     trigger: RunTrigger = "manual_test"
 

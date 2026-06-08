@@ -43,7 +43,7 @@ import { ProviderModelPicker } from "./ProviderModelPicker";
 
 type BindingMode = "auto" | "manual_with_fallback" | "locked";
 
-const CATEGORIES: AgentCategory[] = ["writing", "memory", "study", "discussion", "custom"];
+const CATEGORIES: AgentCategory[] = ["writing", "memory", "study", "discussion", "review", "custom"];
 const RUN_MODES: string[] = ["manual", "pipeline", "scheduled", "event"];
 const TABS = ["基础信息", "模型绑定", "Prompt 绑定"] as const;
 type TabKey = (typeof TABS)[number];

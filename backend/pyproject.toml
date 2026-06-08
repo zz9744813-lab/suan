@@ -10,6 +10,15 @@ dependencies = [
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",
     "httpx>=0.27.0",
+    # 阶段 3.1: 升级到 PostgreSQL + Redis 队列.
+    # - asyncpg 是 SQLAlchemy 异步 PG 驱动.
+    # - aiosqlite 暂时保留, 等数据迁移完成后再移除.
+    # - psycopg2-binary 给 Alembic 同步迁移脚本用.
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.0",
+    "alembic>=1.13.0",
+    "redis>=5.0.0",
+    "arq>=0.25.0",
     "aiosqlite>=0.20.0",
     "python-multipart>=0.0.12",
     "sse-starlette>=2.1.3",

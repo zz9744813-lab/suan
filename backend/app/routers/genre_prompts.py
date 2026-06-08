@@ -39,17 +39,17 @@ async def get_matrix(db: AsyncSession = Depends(get_db)):
     )).scalars().all()
 
     template_rows = (await db.execute(
-        select(PromptTemplate.id, PromptTemplate.template_key, PromptTemplate.name, PromptTemplate.genre)
+        select(PromptTemplate.id, PromptTemplate.template_key, PromptTemplate.name, PromptTemplate.genre, PromptTemplate.role)
     )).all()
 
-    tpl_map = {r[0]: {"key": r[1], "name": r[2], "genre": r[3]} for r in template_rows}
+    tpl_map = {r[0]: {"key": r[1], "name": r[2], "genre": r[3], "role": r[4]} for r in template_rows}
 
     genres = sorted(set(m.genre for m in mapping_rows if m.genre) | set(r[3] for r in template_rows if r[3]))
     agent_keys = sorted(set(m.agent_role_key for m in mapping_rows))
 
     # If no mappings yet, still show agent roles from prompt templates
     if not agent_keys:
-        agent_keys = sorted(set(r[2] for r in template_rows if r[2]))
+        agent_keys = sorted(set(r[4] for r in template_rows if r[4]))
 
     # Build cells
     cells: list[MatrixCell] = []

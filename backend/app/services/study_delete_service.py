@@ -10,9 +10,22 @@
 - memory_foreshadows (source_material_id SET NULL → 主动删除)
 - evolution_nodes (无 FK, 按 material_id 清理)
 - study 子表 (chapters, characters — CASCADE 自动删)
+
+设计原则:
+- 每一步都记 rowcount，并允许该步失败时只记录日志 (不 throw),
+  这样调用方拿到的 ``deleted`` 字典能反映真实清理范围, 而不
+  会出现"前 5 步抛异常, 后 8 步根本没执行" 的半成功状态.
+- 真正阻断"删除"语义的是 material 本身删除失败: 这一步会
+  把 ``RuntimeError`` 重新抛给调用方 (router 会 500), 但
+  之前已经清理掉的 rowcount 不回滚, 调用方会看到 500 + 错
+  误信息, 而非 silent 漏删.
+- ``force=False`` 时只在仍有 queued/running/paused 状态的 run
+  时返回 400, 不会去碰其它表; ``force=True`` 才会把 run 标
+  ``cancelled`` 后继续深度清理.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -23,6 +36,7 @@ from app.core.errors import bad_request, not_found
 from app.models.deepstudy import (
     BehaviorPatternEvidence,
     ChapterAnalysis,
+    DeepStudyStageResult,
     Entity,
     EntityMention,
     ForeshadowChain,
@@ -37,6 +51,8 @@ from app.models.study import (
     StudyCharacter,
     StudyMaterial,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -198,8 +214,28 @@ class StudyDeleteService:
                 )
             )
             deleted["memory_foreshadows"] = res.rowcount  # type: ignore
-        except Exception:
-            pass  # Model might not be available
+        except Exception as exc:  # pragma: no cover - 兼容缺表的旧库
+            # 模型可能不存在 / 表可能还没建; 不影响主流程, 但要
+            # 留下明确日志便于排查孤儿 memory 行.
+            logger.warning(
+                "MemoryForeshadow 跳过 (model/table unavailable) material_id=%s err=%s",
+                material_id, exc,
+            )
+            deleted["memory_foreshadows"] = 0
+
+        # Evolution nodes (无 FK, 显式按 material_id 清理)
+        try:
+            from app.models.evolution import EvolutionNode
+            res = await db.execute(
+                sa_delete(EvolutionNode).where(EvolutionNode.material_id == material_id)
+            )
+            deleted["evolution_nodes"] = res.rowcount  # type: ignore
+        except Exception as exc:  # pragma: no cover - 兼容缺表的旧库
+            logger.warning(
+                "EvolutionNode 跳过 (model/table unavailable) material_id=%s err=%s",
+                material_id, exc,
+            )
+            deleted["evolution_nodes"] = 0
 
         # 4. Delete study sub-tables (chapters, characters have CASCADE but count first)
         res = await db.execute(

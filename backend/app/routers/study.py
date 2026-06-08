@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
@@ -144,17 +147,31 @@ async def _chapterize_and_queue_deepstudy(
             await db.flush()
 
         if auto_start_worker and run_id is not None:
-            try:
-                from app.workers.worker import get_worker
+            # 阶段 3.4: 走 Redis 队列 (worker_run_in_process=False) 时, 直接入队
+            # ``study_deepstudy_dispatch`` (per-run 调度), 由 dispatch job 决定下个 stage.
+            from app.core.config import settings
+            if not settings.worker_run_in_process:
+                try:
+                    from app.workers.deepstudy_pipeline import enqueue_dispatch
+                    await enqueue_dispatch(int(run_id))
+                except Exception as exc:
+                    row.extra = {
+                        **(row.extra or {}),
+                        "automation_warning": f"enqueue_failed: {exc}",
+                    }
+                    await db.flush()
+            else:
+                try:
+                    from app.workers.worker import get_worker
 
-                await get_worker().start()
-            except Exception as exc:
-                row.extra = {
-                    **(row.extra or {}),
-                    "automation_warning": f"worker_start_failed: {exc}",
-                }
-                await db.flush()
-                return created, run_id, str(exc)
+                    await get_worker().start()
+                except Exception as exc:
+                    row.extra = {
+                        **(row.extra or {}),
+                        "automation_warning": f"worker_start_failed: {exc}",
+                    }
+                    await db.flush()
+                    return created, run_id, str(exc)
 
         return created, run_id, None
     except Exception as exc:
@@ -597,18 +614,37 @@ async def upload_materials_batch(
                 "error": f"{exc.__class__.__name__}: {exc}".strip(),
             })
     if auto_start_worker and queued_run_ids:
-        async def _start_worker_after_response() -> None:
-            await asyncio.sleep(0.5)
-            try:
-                from app.workers.worker import get_worker
+        from app.core.config import settings
+        if not settings.worker_run_in_process:
+            # 阶段 3.6: 走 Redis 队列, 一 run 一个 dispatch job
+            async def _enqueue_all_runs() -> None:
+                await asyncio.sleep(0.1)
+                try:
+                    from app.workers.deepstudy_pipeline import enqueue_dispatch
+                    for rid in queued_run_ids:
+                        try:
+                            await enqueue_dispatch(int(rid))
+                        except Exception as exc:
+                            logger.warning(
+                                "batch upload enqueue failed run_id=%s err=%s", rid, exc,
+                            )
+                except Exception as exc:
+                    logger.warning("batch upload enqueue loop failed: %s", exc)
 
-                await get_worker().start()
-            except Exception:
-                # The upload already succeeded; worker status APIs will
-                # expose any later startup failure.
-                return
+            asyncio.create_task(_enqueue_all_runs())
+        else:
+            async def _start_worker_after_response() -> None:
+                await asyncio.sleep(0.5)
+                try:
+                    from app.workers.worker import get_worker
 
-        asyncio.create_task(_start_worker_after_response())
+                    await get_worker().start()
+                except Exception:
+                    # The upload already succeeded; worker status APIs will
+                    # expose any later startup failure.
+                    return
+
+            asyncio.create_task(_start_worker_after_response())
     return {"ok": True, "data": results}
 
 
@@ -969,11 +1005,32 @@ async def delete_material(
     force: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> APIResponse[dict]:
-    """P0-拆书书架: 深度删除材料及其所有衍生产物."""
+    """P0-拆书书架: 深度删除材料及其所有衍生产物.
+
+    错误处理:
+    - 找不到材料: 404 not_found (APIResponse.ok=false)
+    - 仍有运行中的 run 且未传 force: 400 bad_request
+    - 删除过程中 ORM 失败: 500 (FastAPI 默认), 但 service 内部已记录
+      每步 rowcount, 失败步骤的 traceback 会进 server.log
+    """
     from app.services.study_delete_service import StudyDeleteService
-    result = await StudyDeleteService().delete_material_deep(
-        db, material_id, force=force,
-    )
+    try:
+        result = await StudyDeleteService().delete_material_deep(
+            db, material_id, force=force,
+        )
+    except HTTPException:
+        # 业务异常 (404 / 400) 让 FastAPI 走标准响应.
+        raise
+    except Exception as exc:
+        # 真实异常: 记录 traceback + 显式 500, 便于调用方 / 前端看到错误.
+        logger.exception(
+            "StudyDeleteService 失败 material_id=%s force=%s", material_id, force,
+        )
+        # 退避: 让上层看到 500 而非 200, 避免前端误以为成功.
+        raise HTTPException(
+            status_code=500,
+            detail=f"删除失败 (material_id={material_id}): {type(exc).__name__}: {exc}",
+        ) from exc
     return {"ok": True, "data": result}
 
 

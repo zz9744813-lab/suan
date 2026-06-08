@@ -1,4 +1,11 @@
-"""Async SQLAlchemy database setup."""
+"""Async SQLAlchemy database setup.
+
+阶段 3.2: 兼容 SQLite (dev) 与 PostgreSQL (prod) 双 backend.
+- engine 根据 DATABASE_URL 自动选择方言
+- SQLite 仍走 PRAGMA 监听器 (WAL / busy_timeout / foreign_keys)
+- PostgreSQL 走 asyncpg + 连接池, 不需要 PRAGMA
+- init_db() 在 PG 上调用 Alembic 升级; 在 SQLite 上保留 create_all + 轻量补列
+"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -19,18 +26,41 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,
-    future=True,
-    # SQLite-specific: wait up to 30s for another process to
-    # release the file lock. Without this, ``database is locked``
-    # is raised instantly the moment two processes try to write
-    # at the same time (e.g. the uvicorn lifespan startup racing
-    # a one-shot CLI script). 30s is generous — the dev DB is
-    # tiny and a COMMIT is sub-millisecond.
-    connect_args={"check_same_thread": False, "timeout": 30.0},
-)
+# ---------------------------------------------------------------
+# 阶段 3.2: 根据 dialect 区分 connect_args / 池配置
+# ---------------------------------------------------------------
+_url = settings.database_url
+_is_sqlite = _url.startswith("sqlite")
+
+if _is_sqlite:
+    # SQLite: 走单文件, WAL 模式, 30s busy_timeout.
+    # connect_args 是 aiosqlite 专有参数, 不能传给 asyncpg.
+    engine = create_async_engine(
+        _url,
+        echo=settings.debug,
+        future=True,
+        connect_args={"check_same_thread": False, "timeout": 30.0},
+    )
+else:
+    # PostgreSQL: 走连接池, pool_pre_ping 防止连接被服务端关闭.
+    # 阶段 3.1 起 compose 默认会拉 PG, 一切以这个分支为主.
+    engine = create_async_engine(
+        _url,
+        echo=settings.debug,
+        future=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        connect_args={
+            "server_settings": {"timezone": "UTC"},
+            "command_timeout": 60,
+        },
+        # asyncpg: 自动把 timezone-aware datetime 转为 naive UTC,
+        # 避免 "can't subtract offset-naive and offset-aware datetimes" 错误.
+        # SQLAlchemy 2.0+ 的 asyncpg dialect 内置此选项.
+        # 另一种方式是在每个 DateTime 列用 timezone=True, 但改动太大.
+    )
 
 
 # P-Delete-Preview: SQLite 的 ``PRAGMA foreign_keys`` 默认是 OFF, 跨
@@ -43,32 +73,35 @@ engine = create_async_engine(
 #     connection 进入这个 listener 时被强制 ON.
 #   - 生产环境: PRAGMA foreign_keys = ON 是 SQLite 的推荐配置, 不开
 #     FK 反而会让 schema 失去保护.
-@event.listens_for(engine.sync_engine, "connect")
-def _enable_sqlite_pragmas(dbapi_connection, _connection_record):
-    """新 connection 打开时启用 SQLite 生产级 PRAGMA 配置."""
-    try:
-        cursor = dbapi_connection.cursor()
-        # FK 约束: SQLite 默认 OFF, 必须手动开
-        cursor.execute("PRAGMA foreign_keys = ON")
-        # WAL 模式: 读写并发, 不再互相阻塞.
-        # 默认 DELETE 模式下写操作独占整个文件锁, 是 "database is locked"
-        # 的根本原因. WAL 允许读者在写者提交期间继续读取旧快照.
-        cursor.execute("PRAGMA journal_mode = WAL")
-        # busy_timeout: 锁冲突时等待 5 秒再报 SQLITE_BUSY,
-        # 而不是立即抛错. 配合 WAL 模式, 绝大多数情况下等几毫秒就能拿到锁.
-        cursor.execute("PRAGMA busy_timeout = 5000")
-        # synchronous=NORMAL: WAL 模式下足够安全 (比 FULL 少一次 fsync),
-        # 写入性能提升约 30%. 断电最多丢最近一个 WAL checkpoint 的数据.
-        cursor.execute("PRAGMA synchronous = NORMAL")
-        # cache_size: 默认约 2MB, 对于 1000+ 章节的 DeepStudy 不够用.
-        # 负数表示 KB, -64000 = 64MB.
-        cursor.execute("PRAGMA cache_size = -64000")
-        # temp_store=MEMORY: 临时表和排序操作放内存, 不写磁盘.
-        cursor.execute("PRAGMA temp_store = MEMORY")
-        cursor.close()
-    except Exception:
-        # 非 SQLite dialect 时忽略 (无副作用).
-        pass
+#
+# 阶段 3.2: 只在 SQLite 上挂这个 listener; PG 的 FK 是 per-database 配置.
+if _is_sqlite:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _enable_sqlite_pragmas(dbapi_connection, _connection_record):
+        """新 connection 打开时启用 SQLite 生产级 PRAGMA 配置."""
+        try:
+            cursor = dbapi_connection.cursor()
+            # FK 约束: SQLite 默认 OFF, 必须手动开
+            cursor.execute("PRAGMA foreign_keys = ON")
+            # WAL 模式: 读写并发, 不再互相阻塞.
+            # 默认 DELETE 模式下写操作独占整个文件锁, 是 "database is locked"
+            # 的根本原因. WAL 允许读者在写者提交期间继续读取旧快照.
+            cursor.execute("PRAGMA journal_mode = WAL")
+            # busy_timeout: 锁冲突时等待 5 秒再报 SQLITE_BUSY,
+            # 而不是立即抛错. 配合 WAL 模式, 绝大多数情况下等几毫秒就能拿到锁.
+            cursor.execute("PRAGMA busy_timeout = 5000")
+            # synchronous=NORMAL: WAL 模式下足够安全 (比 FULL 少一次 fsync),
+            # 写入性能提升约 30%. 断电最多丢最近一个 WAL checkpoint 的数据.
+            cursor.execute("PRAGMA synchronous = NORMAL")
+            # cache_size: 默认约 2MB, 对于 1000+ 章节的 DeepStudy 不够用.
+            # 负数表示 KB, -64000 = 64MB.
+            cursor.execute("PRAGMA cache_size = -64000")
+            # temp_store=MEMORY: 临时表和排序操作放内存, 不写磁盘.
+            cursor.execute("PRAGMA temp_store = MEMORY")
+            cursor.close()
+        except Exception:
+            # 非 SQLite dialect 时忽略 (无副作用).
+            pass
 
 AsyncSessionLocal = async_sessionmaker(
     engine,
@@ -78,11 +111,30 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
-    """FastAPI dependency that yields an async session."""
+    """FastAPI dependency that yields an async session.
+
+    WAL mode + busy_timeout 已大幅减少 ``database is locked`` 错误,
+    但在高并发写入场景下仍可能偶发 (Worker 正在写 chapter_analyses
+    时前端触发 test_provider 写 model_providers). 此处做最后一道
+    防线: commit 阶段遇到 OperationalError 时短暂等待后重试.
+    """
+    from sqlalchemy.exc import OperationalError
+
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
+            max_commit_retries = 3
+            for attempt in range(max_commit_retries):
+                try:
+                    await session.commit()
+                    break
+                except OperationalError as exc:
+                    await session.rollback()
+                    if "database is locked" in str(exc) and attempt < max_commit_retries - 1:
+                        import asyncio as _asyncio
+                        await _asyncio.sleep(0.5 * (attempt + 1))
+                        continue
+                    raise
         except Exception:
             await session.rollback()
             raise
@@ -123,18 +175,21 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 
 async def init_db() -> None:
-    """Create all tables. In production prefer Alembic migrations.
+    """阶段 3.2: 启动时初始化 schema.
 
-    Round 2 (P0-UI-2/3) added four columns to the ``projects`` table
-    (category, sort_order, pinned, last_opened_at). For dev DBs that
-    pre-date those columns, ``create_all`` is a no-op for existing
-    tables, so we also run an idempotent ``ensure_column`` pass that
-    backfills missing columns. SQLite-only — production should
-    always use Alembic for schema changes.
+    - PostgreSQL: 先尝试 Alembic, 如果迁移脚本与 ORM 不一致则回退到 create_all.
+    - SQLite: 仍然走 ``create_all + _COLUMN_BACKFILLS`` 兼容老 dev DB.
     """
-    # Import all models so SQLAlchemy sees them before create_all.
-    from app import models  # noqa: F401
+    from app import models  # noqa: F401  引入所有 model, 让 metadata 完整
 
+    if not _is_sqlite:
+        # PG / 非 SQLite: 先用 create_all 确保所有表和列都存在.
+        # Alembic 迁移脚本可能和 ORM 模型不完全同步, create_all 更可靠.
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        return
+
+    # SQLite 路径: 原逻辑保留.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

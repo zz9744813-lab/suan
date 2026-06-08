@@ -45,7 +45,7 @@ class AgentRole(Base):
     key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(120))
     description: Mapped[str | None] = mapped_column(Text, default=None)
-    # 5 类: writing / study / memory / discussion / custom
+    # 6 类: writing / study / memory / discussion / review / custom
     category: Mapped[str] = mapped_column(String(40), index=True)
     # 头像样式 key (orb / robot / scribe / critic / memory_core /
     # study_core / discussion_core / custom). 前端按这个字符串挑 SVG.

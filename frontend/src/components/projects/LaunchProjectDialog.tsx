@@ -5,7 +5,7 @@
  * 模式二 (全自动): 系统全自动 → LLM 生成一切 → 启动写作
  */
 import { useState } from "react";
-import { launchProject, type LaunchMode } from "../../api";
+import { launchProject, type LaunchMode, type LaunchResult } from "../../api";
 
 type Mode = "semi_auto" | "full_auto";
 
@@ -34,6 +34,7 @@ export function LaunchProjectDialog(props: {
   const [bibleText, setBibleText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<LaunchResult | null>(null);
 
   if (!open) return null;
 
@@ -41,22 +42,23 @@ export function LaunchProjectDialog(props: {
     setBusy(true);
     setError(null);
     try {
+      let launchResult: LaunchResult;
       if (mode === "semi_auto") {
         if (!outlineText.trim() && !characterText.trim() && !bibleText.trim()) {
           setError("半自动模式需要至少提供一项素材（大纲/人物/设定）。");
           setBusy(false);
           return;
         }
-        await launchProject(projectId, "semi_auto", {
+        launchResult = await launchProject(projectId, "semi_auto", {
           outline_text: outlineText.trim() || undefined,
           character_text: characterText.trim() || undefined,
           bible_text: bibleText.trim() || undefined,
         });
       } else {
-        await launchProject(projectId, "full_auto");
+        launchResult = await launchProject(projectId, "full_auto");
       }
+      setResult(launchResult);
       onLaunched();
-      onClose();
     } catch (e: any) {
       setError(e?.message ?? String(e));
     } finally {
@@ -193,6 +195,32 @@ export function LaunchProjectDialog(props: {
             <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: 12 }}>
               提示：全自动模式会消耗较多 Token，建议确保模型配置正确后再启动。
             </p>
+          </div>
+        )}
+
+        {/* 启动结果 */}
+        {result && (
+          <div role="status" style={{
+            padding: "10px 12px",
+            background: result.queue_error ? "rgba(255,152,0,0.12)" : "rgba(76,175,80,0.12)",
+            color: result.queue_error ? "#ffb74d" : "#81c784",
+            border: result.queue_error ? "1px solid rgba(255,152,0,0.35)" : "1px solid rgba(76,175,80,0.35)",
+            borderRadius: 6,
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+              {result.queue_error ? "项目已启动，但队列未接管" : "项目已启动"}
+            </div>
+            <div>
+              {result.mode === "semi_auto" && <>已创建大纲 {result.outlines_created ?? 0} 条，章节 #{result.first_chapter_id ?? "—"}，任务 #{result.first_task_id ?? "—"}。</>}
+              {result.mode === "full_auto" && <>已创建全自动任务 #{result.bootstrap_task_id ?? result.first_task_id ?? "—"}。</>}
+            </div>
+            {result.queued_job_id && <div>队列任务：{result.queued_job_id}</div>}
+            {result.queue_error && <div>队列错误：{result.queue_error}。请先启动 Worker 或安装/配置队列依赖。</div>}
+            <div style={{ marginTop: 6 }}>
+              <button type="button" onClick={onClose}>关闭</button>
+            </div>
           </div>
         )}
 

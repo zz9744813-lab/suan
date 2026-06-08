@@ -6,6 +6,7 @@ const items = [
   { to: "/projects", label: "项目", icon: "\u25A6" },
   { to: "/tasks", label: "任务", icon: "\u25A4" },
   { to: "/models", label: "模型", icon: "\u25C8" },
+  { to: "/prompts", label: "提示词", icon: "\u270E" },
 ];
 
 export function MobileBottomNav() {

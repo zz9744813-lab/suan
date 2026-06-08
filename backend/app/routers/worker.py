@@ -77,6 +77,32 @@ async def stop() -> APIResponse[dict]:
     return {"ok": True, "data": {"stopped": True, "status": await get_worker().status()}}
 
 
+# ----------------------------------------------------------------
+# 阶段 3.3: Redis 队列 (arq) 概览 / DLQ 读路径
+# ----------------------------------------------------------------
+@router.get("/queue-summary", response_model=APIResponse[dict])
+async def queue_summary() -> APIResponse[dict]:
+    """每个 domain 的 pending / running / result 数量, 用于前端展示."""
+    from app.queue.dlq import _queue_depth_sync
+
+    summary: dict[str, dict[str, int]] = {}
+    for domain in ("writing", "review", "discussion", "memory", "model"):
+        try:
+            summary[domain] = _queue_depth_sync(domain)
+        except Exception as exc:
+            summary[domain] = {"pending": 0, "running": 0, "result": 0, "error": str(exc)[:120]}
+    return {"ok": True, "data": summary}
+
+
+@router.get("/dlq", response_model=APIResponse[list])
+async def dlq(domain: str = "writing", limit: int = 50) -> APIResponse[list]:
+    """读 DLQ. 任务在 arq 跑满重试次数后被 queue_handlers.on_job_max_retries 写进来."""
+    from app.queue.dlq import list_dlq
+
+    items = list_dlq(domain=domain, limit=limit)
+    return {"ok": True, "data": items}
+
+
 @router.get("/policy", response_model=APIResponse[WorkerPolicyRead])
 async def get_default_policy(db: AsyncSession = Depends(get_db)) -> APIResponse[WorkerPolicyRead]:
     # first project's policy as global default

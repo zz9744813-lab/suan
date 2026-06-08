@@ -37,6 +37,11 @@ AGENT_KEY_TO_TEMPLATE_PREFIX: dict[str, list[str]] = {
     "memory_updater": ["memory", "memory_updater"],
     "learner": ["learner", "learn"],
     "study": ["study", "study_agent"],
+    "reader_hook": ["reader_hook", "hook"],
+    "reader_emotion": ["reader_emotion", "emotion"],
+    "reader_logic": ["reader_logic", "logic"],
+    "reader_commercial": ["reader_commercial", "commercial"],
+    "reader_toxic": ["reader_toxic", "toxic"],
 }
 
 # genre 关键词 → 风格 hint (用于模板名匹配打分)

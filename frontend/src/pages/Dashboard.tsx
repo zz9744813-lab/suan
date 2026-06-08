@@ -208,6 +208,8 @@ function WorkbenchCommandStrip({
         )}
         <Link to="/study/library" className="button">拆书书架</Link>
         <Link to="/models" className="button">模型配置</Link>
+        <Link to="/prompts" className="button">提示词配置</Link>
+        <Link to="/prompts-matrix" className="button">提示词矩阵</Link>
       </div>
     </section>
   );

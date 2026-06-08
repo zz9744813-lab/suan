@@ -14,27 +14,33 @@ type AuditLog = {
   id: number;
   event_type: string;
   actor_type: string;
-  actor_role: string | null;
+  actor_key: string | null;
   project_id: number | null;
   chapter_id: number | null;
-  summary: string;
-  payload: Record<string, unknown> | null;
+  action: string;
+  details: Record<string, unknown> | null;
   created_at: string;
 };
 
 const EVENT_TYPES = [
   { key: "", label: "全部" },
-  { key: "model_select", label: "模型选择" },
-  { key: "prompt_fill", label: "Prompt填充" },
-  { key: "reader_review", label: "评论评审" },
-  { key: "discussion_decision", label: "讨论裁决" },
+  { key: "model_switch", label: "模型切换" },
+  { key: "prompt_binding_change", label: "Prompt绑定" },
+  { key: "review_action", label: "评论评审" },
+  { key: "discussion_created", label: "讨论创建" },
+  { key: "settings_change", label: "设置变更" },
+  { key: "agent_task_completed", label: "任务完成" },
+  { key: "agent_task_failed", label: "任务失败" },
 ];
 
 const EVENT_COLORS: Record<string, string> = {
-  model_select: "#2196f3",
-  prompt_fill: "#9c27b0",
-  reader_review: "#ff9800",
-  discussion_decision: "#4caf50",
+  model_switch: "#2196f3",
+  prompt_binding_change: "#9c27b0",
+  review_action: "#ff9800",
+  discussion_created: "#4caf50",
+  settings_change: "#607d8b",
+  agent_task_completed: "#43a047",
+  agent_task_failed: "#e53935",
 };
 
 function normalizeStats(raw: any): Record<string, number> {
@@ -175,15 +181,15 @@ export function AutomationAuditPage() {
                     <span style={{ fontWeight: 600, color: eventColor(log.event_type) }}>
                       {log.event_type}
                     </span>
-                    {log.actor_role && (
-                      <span className="pill" style={{ fontSize: 10 }}>{log.actor_role}</span>
+                    {log.actor_key && (
+                      <span className="pill" style={{ fontSize: 10 }}>{log.actor_key}</span>
                     )}
                     <span className="muted" style={{ fontSize: 10, marginLeft: "auto" }}>
                       {log.created_at ? new Date(log.created_at).toLocaleString("zh-CN") : ""}
                     </span>
                   </div>
                   <div style={{ color: "var(--text-secondary, #666)", lineHeight: 1.4 }}>
-                    {log.summary || "—"}
+                    {log.action || "—"}
                   </div>
                   {(log.project_id || log.chapter_id) && (
                     <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>

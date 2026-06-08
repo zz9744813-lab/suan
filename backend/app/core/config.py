@@ -35,8 +35,28 @@ class Settings(BaseSettings):
     )
 
     # --- database ---
-    # SQLite is the default for local dev; switch to postgresql+psycopg later
-    database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'novelforge.db'}"
+    # 阶段 3.1: 默认数据库已切换为 PostgreSQL.
+    # - 生产: postgresql+asyncpg://user:pass@host:5432/db
+    # - dev 仍可用 SQLite 回归: sqlite+aiosqlite:///./data/novelforge.db
+    # 真正在 engine 上挂 SQLite 兼容逻辑在 3.2 阶段处理, 3.1 仅改默认.
+    default_database_url: str = f"sqlite+aiosqlite:///{DATA_DIR / 'novelforge.db'}"
+    database_url: str = default_database_url
+    # 切换提示: 部署前请覆盖 database_url 为 postgresql+asyncpg://...
+
+    # --- redis / queue (阶段 3.1) ---
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    # Worker 进程并发数, 与 arq 的 max_jobs 不同: 这是同一进程内可同时
+    # 领取的任务数; max_jobs 是单进程总上限. 一般 max_jobs = concurrency * 2.
+    worker_concurrency: int = 4
+    worker_max_jobs: int = 8
+    # 任务在队列里最多存活多久 (秒). 超过会被 DLQ 接管.
+    task_default_ttl_seconds: int = 3600
+    # 单任务最大重试次数, 写回 agent_tasks.max_retries.
+    task_max_retries: int = 3
+    # 是否在 API 进程内继续跑 Worker.
+    # 阶段 3.6 起: 默认 False. API 只入队, 由独立 backend-worker (arq) 消费.
+    # 仍允许通过 .env 覆盖到 True (仅用于本地 SQLite 回归, 不要用于生产).
+    worker_run_in_process: bool = False
 
     # --- auth ---
     api_key: str = "novelforge-local-dev-key"  # set NOVELFORGE_API_KEY in prod
