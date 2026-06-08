@@ -1,0 +1,224 @@
+.domain-workbench-page {
+  min-height: 100%;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background:
+    radial-gradient(circle at top left, rgba(63, 124, 255, 0.10), transparent 34%),
+    var(--bg-base);
+}
+
+.domain-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.domain-breadcrumb a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.domain-breadcrumb a:hover {
+  color: var(--accent-gold);
+}
+
+.domain-breadcrumb-links {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.domain-breadcrumb-links a {
+  padding: 4px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+}
+
+.domain-hero {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  padding: 24px;
+  border: 1px solid var(--accent-line);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(63,124,255,0.06));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+}
+
+.domain-hero-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+  background: var(--grad-primary);
+  font-size: 28px;
+}
+
+.domain-hero-eyebrow {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--accent-gold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.domain-hero h1,
+.domain-section-title h2,
+.domain-panel h2 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.domain-hero h1 {
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.domain-hero p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.domain-metric-strip,
+.domain-workbench-grid,
+.domain-drilldown-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.domain-metric-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.domain-metric-card,
+.domain-panel,
+.domain-drilldown-card {
+  border: 1px solid var(--accent-line);
+  border-radius: 14px;
+  background: var(--bg-panel);
+}
+
+.domain-metric-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.domain-metric-card span,
+.domain-metric-card small,
+.domain-panel-head span,
+.domain-section-title span,
+.domain-drilldown-card em {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.domain-metric-card strong {
+  color: var(--text-primary);
+  font-size: 24px;
+}
+
+.domain-workbench-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.domain-panel {
+  padding: 16px;
+}
+
+.domain-panel-head,
+.domain-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.domain-list,
+.domain-action-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.domain-drilldowns {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.domain-drilldown-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.domain-drilldown-card {
+  min-height: 132px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-decoration: none;
+  transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.domain-drilldown-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(63, 124, 255, 0.45);
+  background: rgba(63, 124, 255, 0.08);
+}
+
+.domain-drilldown-card strong {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.domain-drilldown-card span {
+  flex: 1;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.domain-drilldown-primary {
+  border-color: rgba(63, 124, 255, 0.40);
+}
+
+.domain-drilldown-warn {
+  border-color: rgba(214, 166, 78, 0.40);
+}
+
+@media (max-width: 900px) {
+  .domain-metric-strip,
+  .domain-workbench-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .domain-hero {
+    align-items: flex-start;
+  }
+
+  .domain-breadcrumb {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .domain-breadcrumb-links {
+    width: 100%;
+    margin-left: 0;
+  }
+}

@@ -23,7 +23,7 @@ export function useBackendHealth(intervalMs = 15_000) {
       const base = apiBase || "";
       const res = await fetch(`${base}/health`, {
         method: "GET",
-        signal: AbortSignal.timeout(5_000),
+        cache: "no-store",
       });
       if (!mountedRef.current) return;
       const json = await res.json();

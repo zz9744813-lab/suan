@@ -1,5 +1,17 @@
 """Pydantic schema package."""
 from app.schemas.common import APIError, APIResponse, Page
+from app.schemas.workbench import (
+    WorkbenchAction,
+    WorkbenchDomainCard,
+    WorkbenchMetric,
+    WorkbenchModelSummary,
+    WorkbenchOverviewRead,
+    WorkbenchPrimaryTask,
+    WorkbenchRecentOutput,
+    WorkbenchRisk,
+    WorkbenchScope,
+    WorkbenchWorkerSummary,
+)
 from app.schemas.project import (
     BibleRead,
     BibleUpdate,

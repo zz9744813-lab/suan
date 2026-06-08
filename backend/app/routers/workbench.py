@@ -22,9 +22,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.task import AgentTask, WorkerStatus
 from app.schemas import APIResponse
+from app.schemas.common import ok_response
+from app.schemas.workbench import DomainKey, WorkbenchOverviewRead
 from app.services.llm.client import LLMClient
+from app.services.workbench_overview import WorkbenchOverviewService
 
 router = APIRouter(prefix="/workbench", tags=["workbench"])
+
+
+@router.get("/overview", response_model=APIResponse[WorkbenchOverviewRead])
+async def overview(
+    project_id: int | None = None,
+    domain: DomainKey | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[WorkbenchOverviewRead]:
+    service = WorkbenchOverviewService(db)
+    data = await service.build(project_id=project_id, domain=domain)
+    return ok_response(data)
 
 
 # 域定义 — 与 P0 返工方案 §0 一致

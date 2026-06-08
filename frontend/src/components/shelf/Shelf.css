@@ -265,19 +265,29 @@
 .shelf-layout-right {
   overflow-y: auto;
   min-width: 0;
+  position: relative;
+  z-index: 1;
 }
 .shelf-layout-center {
   overflow-y: auto;
   min-width: 0;
   padding-right: 4px;
+  position: relative;
+  z-index: 2;
 }
 @media (max-width: 1100px) {
   .shelf-layout-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
   .shelf-layout-left, .shelf-layout-right {
-    max-height: 240px;
+    max-height: none;
+    overflow: visible;
+  }
+  .shelf-layout-center {
+    overflow: visible;
   }
 }
 

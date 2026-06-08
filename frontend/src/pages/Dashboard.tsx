@@ -26,8 +26,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useProjectStore } from "../stores/projectStore";
+import { useWorkbenchOverview } from "../hooks/useWorkbenchOverview";
 import { listTasks, multiWorkerStatus } from "../api";
 import type { AgentTask, MultiWorkerStatus } from "../types";
+import type { WorkbenchOverview } from "../types/workbench";
 import { DashboardStatusBar } from "../components/dashboard/DashboardStatusBar";
 import { CurrentPipelinePanel } from "../components/dashboard/CurrentPipelinePanel";
 import { FailureDiagnosisCard } from "../components/dashboard/FailureDiagnosisCard";
@@ -40,6 +42,7 @@ import { MemoryLayerCard } from "../components/dashboard/MemoryLayerCard";
 import { ReaderFeedbackPanel } from "../components/dashboard/ReaderFeedbackPanel";
 import { DiscussionLoopCard } from "../components/dashboard/DiscussionLoopCard";
 import { SkillGeneratedCard } from "../components/dashboard/SkillGeneratedCard";
+import { AgentWorkLivePanel } from "../components/dashboard/AgentWorkLivePanel";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import "./Dashboard.css";
@@ -50,6 +53,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [multiStatus, setMultiStatus] = useState<MultiWorkerStatus | null>(null);
+  const { data: overview, error: overviewError } = useWorkbenchOverview({ projectId: currentProjectId, refreshMs: 8000 });
 
   useEffect(() => {
     setLoading(true);
@@ -112,12 +116,18 @@ export function Dashboard() {
         {multiStatus && <DomainWorkersCompact ms={multiStatus} />}
 
         <WorkbenchCommandStrip
-          projectName={currentProject?.name ?? null}
+          projectName={overview?.scope.project_name ?? currentProject?.name ?? null}
           projectId={currentProjectId}
           stats={taskStats}
+          overview={overview}
+          overviewError={overviewError}
         />
 
         <DashboardKpiCards projectId={currentProjectId} />
+
+        <div className="dashboard-row dashboard-row-full">
+          <AgentWorkLivePanel tasks={tasks} />
+        </div>
 
         <div className="dashboard-row">
           <AgentPipelineVisualization />
@@ -179,26 +189,56 @@ function WorkbenchCommandStrip({
   projectName,
   projectId,
   stats,
+  overview,
+  overviewError,
 }: {
   projectName: string | null;
   projectId: number | null;
   stats: { pending: number; running: number; failed: number; deepstudy: number; cost: number };
+  overview: WorkbenchOverview | null;
+  overviewError: string | null;
 }) {
+  const metrics = overview?.top_stats?.length ? overview.top_stats : [
+    { key: "pending", label: "排队", value: stats.pending, unit: null, tone: "neutral" as const },
+    { key: "running", label: "运行", value: stats.running, unit: null, tone: "ok" as const },
+    { key: "failed", label: "失败", value: stats.failed, unit: null, tone: stats.failed > 0 ? "warning" as const : "ok" as const },
+    { key: "deepstudy", label: "拆书", value: stats.deepstudy, unit: null, tone: "neutral" as const },
+    { key: "cost", label: "成本", value: `$${stats.cost.toFixed(3)}`, unit: null, tone: "neutral" as const },
+  ];
+  const primaryTask = overview?.primary_task;
   return (
     <section className="workbench-command">
       <div className="workbench-command-main">
         <div className="workbench-command-kicker">当前工作台</div>
         <div className="workbench-command-title">{projectName ?? "未选择项目"}</div>
         <div className="workbench-command-sub">
-          {projectId ? "生产线、拆书、模型和记忆状态集中在这里。" : "先选择一个项目，系统才知道要把产能投到哪里。"}
+          {overviewError
+            ? `Overview 暂不可用：${overviewError}`
+            : primaryTask?.title
+              ? `主任务：${primaryTask.title} · ${primaryTask.status ?? "—"}`
+              : projectId
+                ? "生产线、拆书、模型和记忆状态集中在这里。"
+                : "先选择一个项目，系统才知道要把产能投到哪里。"}
         </div>
+        {overview?.domains?.length ? (
+          <div className="workbench-domain-chips">
+            {overview.domains.map((domain) => (
+              <Link key={domain.key} to={domain.route} className={`workbench-domain-chip workbench-domain-chip-${domain.status}`}>
+                {domain.title}<span>{domain.status}</span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="workbench-command-metrics">
-        <Metric label="排队" value={stats.pending} />
-        <Metric label="运行" value={stats.running} />
-        <Metric label="失败" value={stats.failed} tone={stats.failed > 0 ? "warn" : "ok"} />
-        <Metric label="拆书" value={stats.deepstudy} />
-        <Metric label="成本" value={`$${stats.cost.toFixed(3)}`} />
+        {metrics.slice(0, 6).map((metric) => (
+          <Metric
+            key={metric.key}
+            label={metric.label}
+            value={`${metric.unit === "$" ? "$" : ""}${metric.value ?? "—"}${metric.unit && metric.unit !== "$" ? metric.unit : ""}`}
+            tone={metric.tone === "danger" || metric.tone === "warning" ? "warn" : metric.tone === "ok" ? "ok" : undefined}
+          />
+        ))}
       </div>
       <div className="workbench-command-actions">
         {projectId ? (

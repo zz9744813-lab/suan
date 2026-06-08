@@ -78,6 +78,21 @@ const ReaderAgentDetailPage = lazy(() =>
 const AutomationAuditPage = lazy(() =>
   import("./pages/AutomationAuditPage").then((m) => ({ default: m.AutomationAuditPage }))
 );
+const GovernanceWorkbenchPage = lazy(() =>
+  import("./pages/workbench/GovernanceWorkbenchPage").then((m) => ({ default: m.GovernanceWorkbenchPage }))
+);
+const WritingWorkbenchPage = lazy(() =>
+  import("./pages/workbench/WritingWorkbenchPage").then((m) => ({ default: m.WritingWorkbenchPage }))
+);
+const StudyWorkbenchPage = lazy(() =>
+  import("./pages/workbench/StudyWorkbenchPage").then((m) => ({ default: m.StudyWorkbenchPage }))
+);
+const FeedbackWorkbenchPage = lazy(() =>
+  import("./pages/workbench/FeedbackWorkbenchPage").then((m) => ({ default: m.FeedbackWorkbenchPage }))
+);
+const MemoryWorkbenchPage = lazy(() =>
+  import("./pages/workbench/MemoryWorkbenchPage").then((m) => ({ default: m.MemoryWorkbenchPage }))
+);
 const GenrePromptMatrixPage = lazy(() =>
   import("./pages/GenrePromptMatrixPage").then((m) => ({ default: m.GenrePromptMatrixPage }))
 );
@@ -162,6 +177,12 @@ export default function App() {
           <Routes location={location} key={location.pathname}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/workbench" element={<Navigate to="/workbench/writing" replace />} />
+            <Route path="/workbench/writing" element={<WritingWorkbenchPage />} />
+            <Route path="/workbench/study" element={<StudyWorkbenchPage />} />
+            <Route path="/workbench/feedback" element={<FeedbackWorkbenchPage />} />
+            <Route path="/workbench/memory" element={<MemoryWorkbenchPage />} />
+            <Route path="/workbench/governance" element={<GovernanceWorkbenchPage />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:pid" element={<ProjectPage />} />
             <Route path="/projects/:pid/chapters/:cid" element={<ChapterDetail />} />

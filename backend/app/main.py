@@ -40,6 +40,7 @@ from app.routers import (
     study,
     tasks,
     worker,
+    workbench,
 )
 from app.seed import seed
 
@@ -138,5 +139,6 @@ for r in (projects.router, chapters.router, tasks.router, prompts.router,
           agent_memory.router, agent_memory.change_router,
           model_observability.router,
           audit.router,
+          workbench.router,
           graphs_router.router):
     app.include_router(r, prefix=PREFIX)

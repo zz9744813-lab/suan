@@ -494,7 +494,7 @@ export function ProjectsPage() {
                       progressLabel={`${formatNumber(p.total_words)} / ${formatNumber(p.target_word_count)} 字`}
                       colorType={colorOf(p)}
                       selected={selectedId === p.id}
-                      onClick={() => { setSelectedId(p.id); select(p.id); }}
+                      onClick={() => openProject(p)}
                       hoverHint={buildHoverText(
                         p,
                         todayTasks.find((t) => t.project_id === p.id) ?? null,

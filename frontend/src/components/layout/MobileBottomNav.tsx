@@ -1,31 +1,41 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
+import { WORKBENCH_DOMAINS } from "../../lib/domainMap";
 import "./MobileBottomNav.css";
 
-const items = [
-  { to: "/dashboard", label: "工作台", icon: "\u25C7" },
-  { to: "/projects", label: "项目", icon: "\u25A6" },
-  { to: "/tasks", label: "任务", icon: "\u25A4" },
-  { to: "/models", label: "模型", icon: "\u25C8" },
-  { to: "/prompts", label: "提示词", icon: "\u270E" },
-];
+const legacyRoutePrefixes: Record<string, string[]> = {
+  writing: ["/projects", "/tasks", "/worker"],
+  study: ["/study", "/graphs", "/graph", "/behavior"],
+  feedback: ["/reviews", "/discussion", "/reader-agents"],
+  memory: ["/memory", "/memory-shelf"],
+  governance: ["/models", "/prompts", "/prompts-matrix", "/model-observability", "/audit"],
+};
 
 export function MobileBottomNav() {
+  const location = useLocation();
   return (
     <nav className="mobile-bottom-nav" aria-label="移动端主导航">
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          className={({ isActive }) =>
-            `mobile-bottom-nav__item${isActive ? " active" : ""}`
-          }
-        >
-          <span className="mobile-bottom-nav__icon" aria-hidden="true">
-            {item.icon}
-          </span>
-          <span className="mobile-bottom-nav__label">{item.label}</span>
-        </NavLink>
-      ))}
+      <NavLink
+        to="/dashboard"
+        className={({ isActive }) => `mobile-bottom-nav__item${isActive ? " active" : ""}`}
+      >
+        <span className="mobile-bottom-nav__icon" aria-hidden="true">⌂</span>
+        <span className="mobile-bottom-nav__label">首页</span>
+      </NavLink>
+      {WORKBENCH_DOMAINS.map((domain) => {
+        const active = location.pathname.startsWith(domain.path) || legacyRoutePrefixes[domain.key]?.some((prefix) => location.pathname.startsWith(prefix));
+        return (
+          <NavLink
+            key={domain.key}
+            to={domain.path}
+            className={() => `mobile-bottom-nav__item${active ? " active" : ""}`}
+          >
+            <span className="mobile-bottom-nav__icon" aria-hidden="true">
+              {domain.navIcon}
+            </span>
+            <span className="mobile-bottom-nav__label">{domain.shortLabel}</span>
+          </NavLink>
+        );
+      })}
     </nav>
   );
 }

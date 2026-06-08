@@ -1,49 +1,27 @@
 /**
  * RailNav — leftmost 56px dark vertical nav.
  *
- * Renders:
- *   1. Brand badge (top)
- *   2. Core nav group (Dashboard, Projects, Tasks, Worker)
- *   3. Sub-divider
- *   4. Learning group (Prompts, Models, Study)
- *   5. Recover button (only when project library is fully hidden)
- *   6. Worker state dot at the bottom
- *
- * The 8 routes match the plan section 1.2 ("Rail 导航"), with the
- * Phase-2 deferred items (writing / memory / export / settings) not
- * yet rendered.
+ * M1: 收束为总编工作台的一级信息架构：
+ * 首页 / 创作 / 研读 / 反馈 / 知识 / 治理。
+ * 旧业务页不删除，改由各域工作台下钻进入。
  */
 import { NavLink } from "react-router-dom";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorkerStore } from "../../stores/workerStore";
 import { useLayoutStore } from "../../stores/layoutStore";
+import { WORKBENCH_DOMAINS } from "../../lib/domainMap";
 import { stateColor } from "../../lib/stateColor";
 import "./RailNav.css";
 
-type Item = { to: string; label: string; icon: string };
+type Item = { to: string; label: string; icon: string; end?: boolean };
 
-const CORE_ITEMS: Item[] = [
-  { to: "/dashboard", label: "工作台", icon: "◧" },
-  { to: "/projects",  label: "项目",   icon: "≡" },
-  { to: "/tasks",     label: "任务",   icon: "▤" },
-  { to: "/worker",    label: "Worker", icon: "▶" },
-];
-
-const LEARN_ITEMS: Item[] = [
-  { to: "/prompts",    label: "提示词",   icon: "✎" },
-  { to: "/prompts-matrix", label: "提示词矩阵", icon: "▦" },
-  { to: "/models",     label: "模型配置",     icon: "◈" },
-  { to: "/model-observability", label: "可观测性", icon: "◉" },
-  { to: "/study",      label: "拆书",     icon: "☷" },
-  { to: "/behavior",   label: "行为模式", icon: "✺" },
-  { to: "/graphs",     label: "图谱",     icon: "◉" },
-  { to: "/discussion", label: "讨论室",   icon: "☕" },
-  { to: "/memory",     label: "记忆库",   icon: "❖" },
-  // P6 P5: 评论区驱动的模拟读者 Agent 评审系统 (F:\07_P6 spec §7)
-  { to: "/reviews",    label: "评论评审", icon: "✦" },
-  // NF2: 读者Agent + 审计
-  { to: "/reader-agents", label: "读者", icon: "👥" },
-  { to: "/audit",      label: "审计",   icon: "⚖" },
+const NAV_ITEMS: Item[] = [
+  { to: "/dashboard", label: "首页", icon: "◧", end: true },
+  ...WORKBENCH_DOMAINS.map((domain) => ({
+    to: domain.path,
+    label: domain.shortLabel,
+    icon: domain.navIcon,
+  })),
 ];
 
 export function RailNav() {
@@ -73,11 +51,7 @@ export function RailNav() {
       </button>
 
       <div className="rail-nav-scroll">
-        <RailGroup items={CORE_ITEMS} />
-
-        <div className="rail-divider" />
-
-        <RailGroup items={LEARN_ITEMS} />
+        <RailGroup items={NAV_ITEMS} />
       </div>
 
       <div
@@ -98,10 +72,11 @@ function RailGroup({ items }: { items: Item[] }) {
   );
 }
 
-function RailItem({ to, label, icon }: Item) {
+function RailItem({ to, label, icon, end }: Item) {
   return (
     <NavLink
       to={to}
+      end={end}
       className={({ isActive }) => `rail-item ${isActive ? "active" : ""}`}
       title={label}
     >
