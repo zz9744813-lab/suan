@@ -468,34 +468,39 @@ function BannerStat({
 }
 
 function ModelsTab({
-  models, probeOne, probeResults, deleteModel, deletingModel,
+  models, probeOne, probeResults, deleteModel, deletingModel, toggleModelDisabled, togglingModel,
 }: {
   models: ModelItem[];
   probeOne: (name: string) => void;
   probeResults: Record<string, string>;
   deleteModel: (name: string) => void;
   deletingModel: string | null;
+  toggleModelDisabled: (name: string, disabled: boolean) => void;
+  togglingModel: string | null;
 }) {
   if (models.length === 0) {
     return <div style={{ color: "#64748b", fontSize: 13, padding: "20px 0" }}>暂无模型数据，请先「拉取模型列表」</div>;
   }
   return (
     <div>
-      {models.map((m) => (
+      {models.map((m) => {
+        const disabled = m.status === "disabled";
+        return (
         <div key={m.model_name} style={{
-          background: "#1e293b", borderRadius: 8, padding: "12px 16px",
-          marginBottom: 8, border: "1px solid #334155",
+          background: disabled ? "rgba(30,41,59,0.55)" : "#1e293b", borderRadius: 8, padding: "12px 16px",
+          marginBottom: 8, border: disabled ? "1px solid rgba(148,163,184,0.35)" : "1px solid #334155",
           display: "flex", justifyContent: "space-between", alignItems: "center",
+          opacity: disabled ? 0.72 : 1,
         }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontWeight: 600, color: "#f1f5f9", fontSize: 13 }}>{m.model_name}</span>
               <span style={{
                 fontSize: 10, padding: "1px 6px", borderRadius: 4,
-                color: STATUS_COLORS[m.status] || "#94a3b8",
-                background: (STATUS_COLORS[m.status] || "#94a3b8") + "18",
+                color: disabled ? "#fbbf24" : (STATUS_COLORS[m.status] || "#94a3b8"),
+                background: (disabled ? "#fbbf24" : (STATUS_COLORS[m.status] || "#94a3b8")) + "18",
               }}>
-                {STATUS_LABELS[m.status] || m.status}
+                {disabled ? "已禁用" : (STATUS_LABELS[m.status] || m.status)}
               </span>
               {m.supports_json && <span style={{ fontSize: 9, color: "#22c55e", background: "#064e3b", padding: "1px 4px", borderRadius: 3 }}>JSON</span>}
               {!m.supports_text && <span style={{ fontSize: 9, color: "#f59e0b", background: "#422006", padding: "1px 4px", borderRadius: 3 }}>非文本</span>}
@@ -521,12 +526,26 @@ function ModelsTab({
             <div style={{ fontSize: 9, color: "#64748b" }}>健康分</div>
             <button
               onClick={() => probeOne(m.model_name)}
+              disabled={disabled}
               style={{
                 marginTop: 4, padding: "3px 10px", borderRadius: 4,
                 border: "1px solid #475569", background: "#0f172a",
-                color: "#e2e8f0", cursor: "pointer", fontSize: 11,
+                color: "#e2e8f0", cursor: disabled ? "not-allowed" : "pointer", fontSize: 11,
               }}
             >测试</button>
+            <button
+              onClick={() => toggleModelDisabled(m.model_name, disabled)}
+              disabled={togglingModel === m.model_name}
+              style={{
+                marginRight: 8, padding: "4px 10px", borderRadius: 4,
+                border: disabled ? "1px solid #22c55e" : "1px solid #f59e0b",
+                background: disabled ? "rgba(34,197,94,0.12)" : "rgba(245,158,11,0.12)",
+                color: disabled ? "#86efac" : "#fbbf24",
+                cursor: "pointer", fontSize: 12,
+              }}
+            >
+              {togglingModel === m.model_name ? "处理中..." : disabled ? "启用" : "禁用"}
+            </button>
             <button
               onClick={() => deleteModel(m.model_name)}
               disabled={deletingModel === m.model_name}
@@ -542,7 +561,8 @@ function ModelsTab({
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
