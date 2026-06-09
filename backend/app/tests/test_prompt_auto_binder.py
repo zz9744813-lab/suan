@@ -82,7 +82,7 @@ class TestPromptAutoBinder:
         mock_db.execute = AsyncMock(side_effect=mock_execute)
 
         result = await binder.auto_fill_for_agent_genre(
-            mock_db, "unknown_agent", "玄幻",
+            mock_db, "unknown_agent", "玄幻", allow_generate=False,
         )
 
         assert result["action"] == "no_template"
@@ -272,4 +272,51 @@ class TestPromptAutoBinder:
         assert "batch_id" in result
         assert result["total"] == 2
         assert result["created"] == 2
+
+    @pytest.mark.asyncio
+    async def test_auto_fill_all_reuses_apply_batch_id(self):
+        """apply 阶段必须沿用 preview 的 batch_key，保证保存/回滚能绑定到同一批次."""
+        binder = PromptAutoBinder()
+        seen = []
+
+        async def mock_auto_fill(db, agent_key, genre, **kwargs):
+            seen.append(kwargs)
+            return {
+                "agent_role_key": agent_key,
+                "genre": genre,
+                "action": "updated",
+                "confidence_score": 0.8,
+            }
+
+        with patch.object(binder, "auto_fill_for_agent_genre", side_effect=mock_auto_fill):
+            result = await binder.auto_fill_all(
+                AsyncMock(),
+                genres=["玄幻"],
+                agent_role_keys=["planner"],
+                dry_run=False,
+                project_id=7,
+                batch_id="preview-batch-01",
+            )
+
+        assert result["batch_id"] == "preview-batch-01"
+        assert seen[0]["batch_id"] == "preview-batch-01"
+        assert seen[0]["project_id"] == 7
+
+    @pytest.mark.asyncio
+    async def test_reason_contains_project_context(self):
+        """推荐说明应包含题材、内容、记忆依据，供说明/变更记录保存."""
+        binder = PromptAutoBinder()
+        reason = binder._build_reason(
+            "题材关键词匹配",
+            {
+                "genre": "科幻",
+                "description": "太空歌剧",
+                "content_samples": ["第一章"],
+                "memory_samples": ["主角硬事实"],
+            },
+        )
+
+        assert "题材=科幻" in reason
+        assert "参考内容样本1条" in reason
+        assert "参考记忆1条" in reason
 

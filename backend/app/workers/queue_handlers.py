@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import session_scope
 from app.models.task import AgentTask, WorkerStatus
+from app.workers.retry import apply_task_failure, rescue_retryable_failed_tasks
 from app.workers.worker import get_worker
 
 logger = logging.getLogger(__name__)
@@ -53,14 +54,23 @@ async def _mark_terminal(task_id: int, *, ok: bool, error: str | None) -> None:
         task = await db.get(AgentTask, task_id)
         if task is None:
             return
-        task.status = "succeeded" if ok else "failed"
-        task.finished_at = datetime.utcnow()
-        task.lease_owner = None
-        task.lease_expires_at = None
-        if not ok and error:
-            task.error = (task.error or "")[:1500] + "\n" + error
         ws = await _get_or_create_status(db)
-        ws.current_task_id = None
+        if ok:
+            if task.status == "running":
+                task.status = "succeeded"
+                task.finished_at = datetime.utcnow()
+                task.lease_owner = None
+                task.lease_expires_at = None
+                ws.current_task_id = None
+            return
+        result = await apply_task_failure(
+            db,
+            task,
+            error or "arq task failed",
+            stage="arq_handler",
+            worker_status=ws,
+        )
+        logger.info("arq terminal failure handled task_id=%s result=%s", task_id, result)
 
 
 async def _get_or_create_status(db) -> WorkerStatus:
@@ -170,6 +180,10 @@ async def on_startup(ctx: dict[str, Any]) -> None:
     worker = get_worker()
     try:
         await worker.recover_stale_tasks(reason="arq_startup")
+        async with session_scope() as db:
+            rescue_result = await rescue_retryable_failed_tasks(db, reason="arq_startup")
+            if rescue_result.get("rescued"):
+                logger.info("arq startup rescued failed tasks: %s", rescue_result)
     except Exception as exc:  # pragma: no cover
         logger.warning("recover_stale_tasks failed at startup: %s", exc)
     try:

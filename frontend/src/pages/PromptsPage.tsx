@@ -6,6 +6,8 @@ import {
 } from "../api";
 import type { PromptTemplate, PromptVersion } from "../types";
 import { PromptVersionViewer } from "../components/prompts/PromptVersionViewer";
+import { DomainBreadcrumb } from "../components/layout/DomainBreadcrumb";
+import { getWorkbenchDomain } from "../lib/domainMap";
 
 export function PromptsPage() {
   const navigate = useNavigate();
@@ -69,9 +71,15 @@ export function PromptsPage() {
 
   const selectedVersion = versions.find((v) => v.id === selectedVersionId) ?? null;
   const activeVersion = versions.find((v) => v.status === "active") ?? null;
+  const latestVersion = versions[0] ?? null;
+  const governanceDomain = getWorkbenchDomain("governance");
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", height: "100%", minHeight: 0 }}>
+    <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div className="legacy-domain-breadcrumb">
+        <DomainBreadcrumb current="治理 / 提示词配置" links={governanceDomain.drilldowns} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", minHeight: 0, flex: 1 }}>
       <aside className="card" style={{ margin: 16, overflow: "auto", borderRadius: 6 }}>
         <h3 style={{ margin: "0 0 12px" }}>Prompt 模板</h3>
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -134,8 +142,22 @@ export function PromptsPage() {
 
             {active.description && (
               <div className="card">
-                <h3>说明</h3>
+                <h3>生成说明与变更</h3>
                 <div className="muted">{active.description}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
+                  <div className="card dense" style={{ margin: 0 }}>
+                    <div className="muted tiny">当前激活</div>
+                    <b>{activeVersion ? `v${activeVersion.version}` : "未激活"}</b>
+                  </div>
+                  <div className="card dense" style={{ margin: 0 }}>
+                    <div className="muted tiny">最近变更</div>
+                    <b>{latestVersion?.change_note || "暂无说明"}</b>
+                  </div>
+                  <div className="card dense" style={{ margin: 0 }}>
+                    <div className="muted tiny">输出约束</div>
+                    <b>{active.output_schema ? "有结构化 schema" : active.hard_rules.length > 0 ? `${active.hard_rules.length} 条硬规则` : "未声明"}</b>
+                  </div>
+                </div>
                 {active.hard_rules.length > 0 && (
                   <div style={{ marginTop: 8 }}>
                     <div className="muted tiny" style={{ marginBottom: 4 }}>硬规则：</div>
@@ -239,6 +261,7 @@ export function PromptsPage() {
           </div>
         )}
       </main>
+      </div>
 
       {/* P7: New template creation dialog */}
       {showCreate && (

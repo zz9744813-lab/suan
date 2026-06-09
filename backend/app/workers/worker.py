@@ -31,9 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import session_scope
 from app.core.errors import bad_request
 from app.core.events import Event, event_bus
-from app.models.project import Chapter
+from app.models.project import Chapter, Outline, Project
 from app.models.task import AgentTask, WorkerPolicy, WorkerStatus
 from app.workers.pipeline import ChapterPipeline
+from app.workers.retry import apply_task_failure, rescue_retryable_failed_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -399,6 +400,9 @@ class WorkerController:
             self._provider_health_task = self._spawn_background_loop(
                 self._provider_health_worker_loop(), "model", "novelforge-provider-health"
             )
+            self._failed_rescue_task = self._spawn_background_loop(
+                self._failed_task_rescue_loop(), "writing", "novelforge-failed-task-rescue"
+            )
             # P0-DeepStudy: 启动 DeepStudy worker
             self._deepstudy_task = self._spawn_background_loop(
                 self._deepstudy_worker_loop(), "deepstudy", "novelforge-deepstudy"
@@ -428,7 +432,7 @@ class WorkerController:
                 logging.getLogger(__name__).warning("Failed to recover stale tasks after crash: %s", recover_exc)
         finally:
             # cancel background tasks
-            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None), getattr(self, '_deepstudy_task', None), getattr(self, '_memory_consolidation_task', None)]:
+            for t in [getattr(self, '_discussion_task', None), getattr(self, '_recycle_task', None), getattr(self, '_provider_health_task', None), getattr(self, '_deepstudy_task', None), getattr(self, '_memory_consolidation_task', None), getattr(self, '_failed_rescue_task', None)]:
                 if t and not t.done():
                     t.cancel()
 
@@ -440,6 +444,7 @@ class WorkerController:
             ("_recycle_task", "discussion", "novelforge-recycle-worker", self._recycle_worker_loop),
             ("_memory_consolidation_task", "memory", "novelforge-memory-consolidation", self._memory_consolidation_worker_loop),
             ("_provider_health_task", "model", "novelforge-provider-health", self._provider_health_worker_loop),
+            ("_failed_rescue_task", "writing", "novelforge-failed-task-rescue", self._failed_task_rescue_loop),
             ("_deepstudy_task", "deepstudy", "novelforge-deepstudy", self._deepstudy_worker_loop),
         ]
         for attr, domain, name, factory in specs:
@@ -511,6 +516,26 @@ class WorkerController:
             finally:
                 self.domain_statuses["memory"].running = False
                 self._sync_domain_to_global()
+
+    async def _failed_task_rescue_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=45.0)
+                return
+            except asyncio.TimeoutError:
+                pass
+            if not self._pause_event.is_set():
+                continue
+            try:
+                async with session_scope() as db:
+                    result = await rescue_retryable_failed_tasks(db, reason="worker_rescue_loop")
+                    if result.get("rescued"):
+                        await event_bus.publish(Event(
+                            event_type="task.auto_rescue_scheduled",
+                            payload=result,
+                        ))
+            except Exception as exc:
+                logger.warning("Failed-task rescue tick error: %s", exc)
 
     async def _provider_health_worker_loop(self) -> None:
         """P3-Model-Failover: 每 300 秒轻量健康检查 + half_open 恢复."""
@@ -636,8 +661,9 @@ class WorkerController:
             ]
             task_row = eligible_tasks[0] if eligible_tasks else None
             if task_row is None:
+                continuation = await self._auto_continue_idle_projects(db)
                 await self._heartbeat(db, ws)
-                return False
+                return bool(continuation)
 
             # resolve the project policy now that we know the task
             policy = await self._active_policy(db, task_row.project_id)
@@ -725,22 +751,156 @@ class WorkerController:
             err_text = str(exc)
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
-                t.status = "failed"
-                t.error = err_text
-                t.finished_at = datetime.utcnow()
                 ws3 = await self._get_or_create_status(db)
-                ws3.consecutive_failures += 0  # event 失败不算 worker 失败
-                ws3.last_error = err_text
-                ws3.current_task_id = None
+                result = await apply_task_failure(
+                    db,
+                    t,
+                    err_text,
+                    stage=f"event_task:{task_row.task_type}",
+                    worker_status=ws3,
+                )
+                ws3.consecutive_failures = max(0, int(ws3.consecutive_failures or 0) - 1)
             await event_bus.publish(
-                Event(event_type="task.failed", payload={
+                Event(event_type="task.retry_scheduled" if result.get("action") == "retry_scheduled" else "task.failed", payload={
                     "task_id": target_task_id,
                     "error": err_text,
                     "task_type": task_row.task_type,
+                    **result,
                 })
             )
             self._clear_domain_task(task_domain)
             return False
+
+    async def _auto_continue_idle_projects(self, db: AsyncSession) -> dict[str, Any] | None:
+        active_projects = (await db.execute(
+            select(Project).where(Project.status == "active").order_by(Project.updated_at.desc()).limit(10)
+        )).scalars().all()
+        for project in active_projects:
+            pending = (await db.execute(
+                select(AgentTask).where(
+                    AgentTask.project_id == project.id,
+                    AgentTask.status.in_(["pending", "running"]),
+                    AgentTask.task_type.in_(["chapter_pipeline", "reader_review", "rewrite_from_discussion"]),
+                ).limit(1)
+            )).scalar_one_or_none()
+            if pending is not None:
+                continue
+            latest = (await db.execute(
+                select(Chapter)
+                .where(Chapter.project_id == project.id)
+                .order_by(Chapter.chapter_no.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if latest is None:
+                continue
+            if latest.status in {"needs_review", "done"}:
+                return await self._enqueue_next_chapter_after_review(
+                    db,
+                    project_id=project.id,
+                    chapter_id=latest.id,
+                    current_score=latest.current_score,
+                )
+        return None
+
+    async def _enqueue_next_chapter_after_review(
+        self,
+        db: AsyncSession,
+        *,
+        project_id: int,
+        chapter_id: int | None,
+        current_score: int | None,
+    ) -> dict[str, Any] | None:
+        if chapter_id is None:
+            return None
+        chapter = await db.get(Chapter, chapter_id)
+        project = await db.get(Project, project_id)
+        if chapter is None or project is None:
+            return None
+        if current_score is not None and current_score < 75:
+            existing_rewrite = (await db.execute(
+                select(AgentTask).where(
+                    AgentTask.project_id == project_id,
+                    AgentTask.chapter_id == chapter_id,
+                    AgentTask.task_type == "rewrite_from_discussion",
+                    AgentTask.status.in_(["pending", "running"]),
+                ).limit(1)
+            )).scalar_one_or_none()
+            if existing_rewrite is None:
+                chapter.status = "rewriting"
+                task = AgentTask(
+                    project_id=project_id,
+                    chapter_id=chapter_id,
+                    task_type="rewrite_from_discussion",
+                    status="pending",
+                    priority=95,
+                    domain="writing",
+                    payload={"trigger": "reader_review", "score": current_score, "auto_continue": True},
+                    not_before_at=datetime.utcnow(),
+                    display_title=f"自动修订: 第 {chapter.chapter_no} 章 {chapter.title}",
+                )
+                db.add(task)
+                await db.flush()
+                return {"action": "rewrite_enqueued", "task_id": task.id}
+            return {"action": "rewrite_exists", "task_id": existing_rewrite.id}
+
+        next_no = int(chapter.chapter_no or 0) + 1
+        max_chapters = min(int(project.target_chapter_count or 1), 30)
+        if next_no > max_chapters:
+            chapter.status = "done"
+            return {"action": "project_limit_reached"}
+        existing = (await db.execute(
+            select(Chapter).where(Chapter.project_id == project_id, Chapter.chapter_no == next_no).limit(1)
+        )).scalar_one_or_none()
+        if existing is None:
+            outline = (await db.execute(
+                select(Outline).where(Outline.project_id == project_id, Outline.chapter_no == next_no).limit(1)
+            )).scalar_one_or_none()
+            if outline is None:
+                outline = Outline(
+                    project_id=project_id,
+                    chapter_no=next_no,
+                    title=f"第 {next_no} 章",
+                    summary=f"《{project.name}》第 {next_no} 章保底大纲：承接上一章结果，继续推进主线冲突。",
+                    importance=50,
+                    target_word_count=3000,
+                )
+                db.add(outline)
+                await db.flush()
+            existing = Chapter(
+                project_id=project_id,
+                outline_id=outline.id,
+                chapter_no=next_no,
+                title=outline.title,
+                target_word_count=outline.target_word_count,
+                status="queued",
+            )
+            db.add(existing)
+            await db.flush()
+        existing_task = (await db.execute(
+            select(AgentTask).where(
+                AgentTask.project_id == project_id,
+                AgentTask.chapter_id == existing.id,
+                AgentTask.task_type == "chapter_pipeline",
+                AgentTask.status.in_(["pending", "running"]),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if existing_task is None:
+            task = AgentTask(
+                project_id=project_id,
+                chapter_id=existing.id,
+                task_type="chapter_pipeline",
+                status="pending",
+                priority=100,
+                domain="writing",
+                payload={"mode": "full", "auto_continue": True, "previous_chapter_id": chapter_id},
+                not_before_at=datetime.utcnow(),
+                display_title=f"写作: 第 {existing.chapter_no} 章 {existing.title}",
+            )
+            db.add(task)
+            await db.flush()
+            chapter.status = "done"
+            return {"action": "next_chapter_enqueued", "chapter_id": existing.id, "task_id": task.id}
+        return {"action": "next_task_exists", "chapter_id": existing.id, "task_id": existing_task.id}
 
     async def _run_reader_review(
         self,
@@ -768,6 +928,12 @@ class WorkerController:
             t.cost_usd = outcome.total_cost_usd
             t.input_tokens = outcome.total_input_tokens
             t.output_tokens = outcome.total_output_tokens
+            continuation = await self._enqueue_next_chapter_after_review(
+                db,
+                project_id=task_row.project_id,
+                chapter_id=task_row.chapter_id,
+                current_score=(await db.get(Chapter, task_row.chapter_id)).current_score if task_row.chapter_id else None,
+            )
             t.payload = {
                 **payload,
                 "run_id": outcome.run_id,
@@ -775,6 +941,7 @@ class WorkerController:
                 "comment_ids": outcome.comment_ids,
                 "succeeded_readers": outcome.reader_keys_succeeded,
                 "failed_readers": outcome.reader_keys_failed,
+                "continuation": continuation,
             }
             await self._set_state_in_session(db, "running")
             ws2 = await self._get_or_create_status(db)
@@ -1006,6 +1173,18 @@ class WorkerController:
                 outline_items = outline_data.get("outlines") or outline_data.get("items") or []
                 if not isinstance(outline_items, list):
                     outline_items = []
+                if not outline_items:
+                    target_count = int((task.payload or {}).get("target_chapter_count") or project.target_chapter_count or 30)
+                    outline_items = [
+                        {
+                            "chapter_no": idx,
+                            "title": f"第 {idx} 章",
+                            "summary": f"《{project.name}》第 {idx} 章保底大纲：承接主线推进冲突，并为后续章节留下悬念。",
+                            "importance": 60 if idx == 1 else 50,
+                            "target_word_count": 3000,
+                        }
+                        for idx in range(1, min(target_count, 30) + 1)
+                    ]
 
                 existing_outlines = (await db.execute(
                     select(Outline).where(Outline.project_id == project.id)
@@ -1536,15 +1715,19 @@ class WorkerController:
             self._clear_domain_task(task_domain)
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
-                t.status = "failed"
-                t.error = f"Pipeline exceeded {PIPELINE_TIMEOUT_S}s timeout"
-                t.finished_at = datetime.utcnow()
                 ws3 = await self._get_or_create_status(db)
-                ws3.consecutive_failures += 1
-                ws3.last_error = t.error
-                ws3.current_task_id = None
+                result = await apply_task_failure(
+                    db,
+                    t,
+                    f"Pipeline exceeded {PIPELINE_TIMEOUT_S}s timeout",
+                    stage="chapter_pipeline_timeout",
+                    worker_status=ws3,
+                )
             await event_bus.publish(
-                Event(event_type="task.failed", payload={"task_id": target_task_id, "error": "pipeline timeout"})
+                Event(
+                    event_type="task.retry_scheduled" if result.get("action") == "retry_scheduled" else "task.failed",
+                    payload={"task_id": target_task_id, "error": "pipeline timeout", **result},
+                )
             )
         except Exception as exc:
             err_text = str(exc)
@@ -1563,22 +1746,27 @@ class WorkerController:
                 return False
             async with session_scope() as db:
                 t = await db.get(AgentTask, target_task_id)
-                t.status = "failed"
-                t.error = err_text
-                t.finished_at = datetime.utcnow()
                 ws3 = await self._get_or_create_status(db)
-                ws3.consecutive_failures += 1
-                ws3.last_error = err_text
-                ws3.current_task_id = None
+                result = await apply_task_failure(
+                    db,
+                    t,
+                    err_text,
+                    stage="chapter_pipeline",
+                    worker_status=ws3,
+                )
                 policy2 = await self._active_policy(db, project_id)
                 if (
-                    policy2
+                    result.get("action") == "failed_final"
+                    and policy2
                     and ws3.consecutive_failures >= policy2.consecutive_fail_stop
                 ):
                     await self._set_state_in_session(db, "error", error="consecutive_fail_stop reached")
                     self._stop.set()
             await event_bus.publish(
-                Event(event_type="task.failed", payload={"task_id": target_task_id, "error": err_text})
+                Event(
+                    event_type="task.retry_scheduled" if result.get("action") == "retry_scheduled" else "task.failed",
+                    payload={"task_id": target_task_id, "error": err_text, **result},
+                )
             )
         self._clear_domain_task(task_domain)
         return True
@@ -1586,44 +1774,11 @@ class WorkerController:
     async def _mark_task_failed(self, task_id: int, error: str) -> None:
         async with session_scope() as db:
             t = await db.get(AgentTask, task_id)
-            if t is None:
-                return
-            t.retry_count = (t.retry_count or 0) + 1
-            t.error = error
-
-            # BUG-3 fix: 当 retry_count < max_retries 时,
-            # 将任务重置为 pending 并设置指数退避延迟, 而非直接标 failed.
-            # 退避: 2^(retry-1) * 30s = 30s / 60s / 120s / ...
-            if t.retry_count < (t.max_retries or 3):
-                from datetime import timedelta
-                delay_s = min(30 * (2 ** (t.retry_count - 1)), 300)  # 最大 5min
-                t.status = "pending"
-                t.lease_owner = None
-                t.lease_expires_at = None
-                t.last_heartbeat_at = None
-                t.not_before_at = datetime.utcnow() + timedelta(seconds=delay_s)
-                t.started_at = None
-                logger.info(
-                    "Task %d failed (attempt %d/%d), retry in %ds: %s",
-                    task_id, t.retry_count, t.max_retries, delay_s, error[:120],
-                )
-                ws2 = await self._get_or_create_status(db)
-                ws2.current_task_id = None
-                # 重试不算作 consecutive_failures
-                return
-
-            # 耗尽重试次数, 最终失败
-            t.status = "failed"
-            t.lease_owner = None
-            t.lease_expires_at = None
-            t.last_heartbeat_at = None
-            t.finished_at = datetime.utcnow()
             ws2 = await self._get_or_create_status(db)
-            ws2.consecutive_failures += 1
-            ws2.last_error = error
-            ws2.current_task_id = None
+            result = await apply_task_failure(db, t, error, stage="worker", worker_status=ws2)
         await event_bus.publish(Event(
-            event_type="task.failed", payload={"task_id": task_id, "error": error},
+            event_type="task.retry_scheduled" if result.get("action") == "retry_scheduled" else "task.failed",
+            payload={"task_id": task_id, "error": error, **result},
         ))
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:

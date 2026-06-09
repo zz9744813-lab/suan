@@ -22,6 +22,7 @@ from app.agents.planner import PlannerAgent
 from app.agents.rewriter import RewriterAgent
 from app.core.errors import bad_request
 from app.core.events import Event, event_bus
+from app.core.sanitize import sanitize_for_storage, sanitize_text
 from app.models.genre_prompt_map import ProjectPromptSnapshot
 from app.models.project import Chapter, ChapterVersion, Project
 from app.models.study import BehaviorPattern
@@ -613,6 +614,18 @@ class ChapterPipeline:
 
         # 9) Learning reflection
         await self._ensure_not_cancelled(db, task)
+        final_text = sanitize_text(final_text)
+        min_final_chars = max(min(int(chapter.target_word_count or 3000), 3000), 1800)
+        if len(final_text.strip()) < min_final_chars:
+            chapter.status = "needs_review"
+            chapter.actual_word_count = len(final_text.strip())
+            await self._save_version(db, chapter, "short_failed", final_text, current_score, notes={
+                "reason": "short_output_rejected",
+                "min_final_chars": min_final_chars,
+            })
+            raise RuntimeError(
+                f"章节正文过短: {len(final_text.strip())} < {min_final_chars}，拒绝保存为成功章节"
+            )
         chapter.current_score = current_score
         chapter.actual_word_count = len(final_text)
         chapter.status = "done" if current_score >= policy.pass_score else "needs_review"
@@ -737,6 +750,8 @@ class ChapterPipeline:
                 # still saved and we can debug from the raw blob.
                 import json as _json
                 content = _json.dumps(content, ensure_ascii=False, indent=2)
+        content = sanitize_text(content)
+        notes = sanitize_for_storage(notes) if notes is not None else None
         existing = (
             await db.execute(
                 select(ChapterVersion)
@@ -768,6 +783,7 @@ class ChapterPipeline:
     ) -> None:
         from app.models.task import AgentEvent
 
+        message = sanitize_text(message)
         evt = AgentEvent(
             project_id=chapter.project_id,
             chapter_id=chapter.id,

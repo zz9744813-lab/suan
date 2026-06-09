@@ -16,6 +16,8 @@ import type {
   ProviderDeletePreview,
 } from "../types";
 import { AgentRoleEditorModal, AutoConfigureModal, ConfirmDialog } from "../components/models";
+import { DomainBreadcrumb } from "../components/layout/DomainBreadcrumb";
+import { getWorkbenchDomain } from "../lib/domainMap";
 
 interface ProviderSummary {
   id: number;
@@ -303,8 +305,13 @@ export default function ModelConfigPage() {
   if (loading) return <div style={{ padding: 24 }} className="muted">加载中...</div>;
   if (!data) return null;
 
+  const governanceDomain = getWorkbenchDomain("governance");
+
   return (
     <div style={{ padding: "24px 32px", maxWidth: 1180, margin: "0 auto" }}>
+      <div className="legacy-domain-breadcrumb">
+        <DomainBreadcrumb current="治理 / 模型配置" links={governanceDomain.drilldowns} />
+      </div>
       <div className="page-header" style={{ marginBottom: 18 }}>
         <div>
           <h1>模型配置</h1>

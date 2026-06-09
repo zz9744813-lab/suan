@@ -40,7 +40,7 @@ from app.services.model_selector import ModelCandidate, get_model_selector
 logger = logging.getLogger(__name__)
 
 # 单次 Agent 调用内最多 fallback 次数
-MAX_FALLBACK_ATTEMPTS = 2
+MAX_FALLBACK_ATTEMPTS = 5
 DEFAULT_TASK_RPM = 5
 
 
@@ -499,6 +499,8 @@ class LLMRouter:
                 db, resolved.provider.id, resolved.model,
                 LEGACY_ROLE_TO_AGENT_KEY.get(role),
                 failure_type, str(exc)[:2000],
+                task_id=task_id,
+                project_id=project_id,
             )
 
             # ── 尝试 fallback ──
@@ -762,6 +764,8 @@ class LLMRouter:
                     await CircuitBreakerService().record_failure(
                         db, cand.provider_id, cand.model_name, agent_key,
                         classify_llm_exception(exc2), str(exc2)[:2000],
+                        task_id=task_id,
+                        project_id=project_id,
                     )
                 except Exception:
                     pass

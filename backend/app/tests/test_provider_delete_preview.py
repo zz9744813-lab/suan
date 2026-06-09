@@ -144,6 +144,20 @@ async def test_delete_preview_danger_when_role_bound(db):
 
 
 @pytest.mark.asyncio
+async def test_disable_preview_danger_when_role_bound(db):
+    p = await _make_provider(db, name="disable-danger", base_url="https://disable.example/v1")
+    await _make_role(db, role="Drafter", provider_id=p.id, model="gpt-4o")
+    async with await _new_client() as c:
+        r = await c.get(f"/api/models/providers/{p.id}/disable-preview")
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["provider_id"] == p.id
+    assert data["danger_level"] == "danger"
+    assert len(data["affected_role_bindings"]) == 1
+    assert "角色绑定不可用" in data["summary"]
+
+
+@pytest.mark.asyncio
 async def test_delete_preview_not_found(db):
     """不存在的 provider_id 返回 404 + APIError envelope."""
     async with await _new_client() as c:
@@ -186,6 +200,9 @@ async def test_delete_provider_cascades_role_assignments(db):
     assert body["ok"] is True
     assert body["data"]["deleted"] == p.id
     assert body["data"]["provider_name"] == "cascade-test"
+    assert body["data"]["deleted_role_bindings_count"] == 2
+    assert body["data"]["cleared_call_events_count"] == 0
+    assert sorted(b["role"] for b in body["data"]["deleted_role_bindings"]) == ["Critic", "Drafter"]
 
     # provider 行没了 (用 fresh session)
     async with AsyncSessionLocal() as s2:

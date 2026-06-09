@@ -31,6 +31,7 @@ from app.routers import (
     model_observability,
     model_control,
     models,
+    project_materials,
     project_memory,
     projects,
     prompt_matrix,
@@ -50,6 +51,11 @@ async def lifespan(app: FastAPI):
     # startup
     await init_db()
     await seed()
+    try:
+        from app.workers.worker import get_worker
+        await get_worker().start()
+    except Exception as exc:
+        await event_bus.publish(Event(event_type="worker.startup_warning", payload={"error": str(exc)}))
     await event_bus.publish(Event(event_type="app.ready", payload={
         "app": settings.app_name, "version": settings.app_version,
     }))
@@ -86,6 +92,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -127,7 +134,7 @@ async def health() -> dict:
 
 # ----- Mount routers under /api -----
 PREFIX = settings.api_prefix
-for r in (projects.router, chapters.router, tasks.router, prompts.router,
+for r in (projects.router, project_materials.router, chapters.router, tasks.router, prompts.router,
           models.router, model_control.router, worker.router, chief_agent.router, memory.router,
           events.router, study.router, behavior.router, graph.router,
           discussion.router, search.router, deepstudy.router,

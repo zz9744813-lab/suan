@@ -5,7 +5,7 @@
  * 首页 / 创作 / 研读 / 反馈 / 知识 / 治理。
  * 旧业务页不删除，改由各域工作台下钻进入。
  */
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useProjectStore } from "../../stores/projectStore";
 import { useWorkerStore } from "../../stores/workerStore";
 import { useLayoutStore } from "../../stores/layoutStore";
@@ -13,7 +13,15 @@ import { WORKBENCH_DOMAINS } from "../../lib/domainMap";
 import { stateColor } from "../../lib/stateColor";
 import "./RailNav.css";
 
-type Item = { to: string; label: string; icon: string; end?: boolean };
+type Item = { to: string; label: string; icon: string; end?: boolean; legacyPrefixes?: string[] };
+
+const legacyRoutePrefixes: Record<string, string[]> = {
+  writing: ["/projects", "/tasks", "/worker"],
+  study: ["/study", "/graphs", "/graph", "/behavior"],
+  feedback: ["/reviews", "/discussion", "/reader-agents"],
+  memory: ["/memory", "/memory-shelf"],
+  governance: ["/models", "/prompts", "/prompts-matrix", "/model-observability", "/audit"],
+};
 
 const NAV_ITEMS: Item[] = [
   { to: "/dashboard", label: "首页", icon: "◧", end: true },
@@ -21,6 +29,7 @@ const NAV_ITEMS: Item[] = [
     to: domain.path,
     label: domain.shortLabel,
     icon: domain.navIcon,
+    legacyPrefixes: legacyRoutePrefixes[domain.key],
   })),
 ];
 
@@ -72,12 +81,14 @@ function RailGroup({ items }: { items: Item[] }) {
   );
 }
 
-function RailItem({ to, label, icon, end }: Item) {
+function RailItem({ to, label, icon, end, legacyPrefixes }: Item) {
+  const location = useLocation();
+  const legacyActive = legacyPrefixes?.some((prefix) => location.pathname.startsWith(prefix));
   return (
     <NavLink
       to={to}
       end={end}
-      className={({ isActive }) => `rail-item ${isActive ? "active" : ""}`}
+      className={({ isActive }) => `rail-item ${isActive || legacyActive ? "active" : ""}`}
       title={label}
     >
       <span className="rail-item-icon">{icon}</span>

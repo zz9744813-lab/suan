@@ -26,6 +26,8 @@ import type {
   ReviewSettingsRead,
 } from "../types";
 import { useProjectStore } from "../stores/projectStore";
+import { DomainBreadcrumb } from "../components/layout/DomainBreadcrumb";
+import { getWorkbenchDomain } from "../lib/domainMap";
 import "./ReviewCommentsPage.css";
 
 type AuthorFilter = "all" | "user" | "reader_agent" | "chief_agent" | "system";
@@ -63,6 +65,7 @@ export function ReviewCommentsPage() {
     () => projects.find((p) => p.id === currentProjectId) ?? null,
     [projects, currentProjectId],
   );
+  const feedbackDomain = getWorkbenchDomain("feedback");
 
   // 数据
   const [comments, setComments] = useState<ReviewCommentRead[]>([]);
@@ -210,6 +213,9 @@ export function ReviewCommentsPage() {
   if (!currentProjectId) {
     return (
       <div className="review-page">
+        <div className="legacy-domain-breadcrumb">
+          <DomainBreadcrumb current="反馈 / 评论评审" links={feedbackDomain.drilldowns} />
+        </div>
         <div className="review-detail-empty">
           <div style={{ marginBottom: 16, fontSize: 18, fontWeight: 600 }}>
             请先选择一个项目
@@ -258,6 +264,9 @@ export function ReviewCommentsPage() {
 
   return (
     <div className="review-page">
+      <div className="legacy-domain-breadcrumb">
+        <DomainBreadcrumb current="反馈 / 评论评审" links={feedbackDomain.drilldowns} />
+      </div>
       <div className="review-topbar">
         <span className="review-topbar-title">📋 评论评审</span>
         <span className="review-topbar-stat">

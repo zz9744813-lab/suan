@@ -65,7 +65,12 @@ async def auto_fill_preview(
     """调用 PromptAutoBinder.auto_fill_all(dry_run=True)，创建
     PromptAutoFillBatch(status="preview") + PromptRecommendationLog 记录。"""
     binder = get_prompt_auto_binder()
-    result = await binder.auto_fill_all(db, dry_run=True)
+    result = await binder.auto_fill_all(
+        db,
+        dry_run=True,
+        project_id=body.project_id,
+        allow_generate=True,
+    )
 
     batch_key = result.get("batch_id", str(uuid.uuid4())[:12])
 
@@ -126,7 +131,8 @@ async def auto_fill_preview(
             score=score,
             confidence=confidence,
             action=action,
-            reason_json=[d.get("reason", "")],
+            reason_json=[d.get("reason", ""), d.get("reason_json", {})],
+            candidate_scores_json=d.get("candidate_scores", []),
             applied=False,
         )
         db.add(log)
@@ -186,9 +192,20 @@ async def auto_fill_apply(
         log.applied = True
         applied_count += 1
 
-    # 调 binder 真写入映射 (dry_run=False)
+    # 调 binder 真写入映射 (dry_run=False)。必须使用预览批次里的 cell，
+    # 并沿用同一个 batch_key，否则 apply 后 rollback / 日志会找不到实际绑定。
     binder = get_prompt_auto_binder()
-    result = await binder.auto_fill_all(db, dry_run=False)
+    agent_keys = sorted({log.agent_role_key for log in logs})
+    genres = sorted({log.genre for log in logs})
+    result = await binder.auto_fill_all(
+        db,
+        genres=genres,
+        agent_role_keys=agent_keys,
+        dry_run=False,
+        project_id=batch.project_id,
+        batch_id=body.batch_key,
+        allow_generate=True,
+    )
 
     # 更新 batch 状态
     batch.status = "applied"

@@ -199,6 +199,7 @@ def _usable_runtime_stat(stats: Any) -> bool:
 
 _MODEL_LOCAL_FAILURE_TYPES = {"model_not_found", "timeout", "empty_response", "json_parse_failed"}
 _PROVIDER_WIDE_FAILURE_TYPES = {"auth_error", "rate_limited", "budget_exhausted", "connection_error", "server_error"}
+_SELECTOR_SKIP_FAILURE_TYPES = _MODEL_LOCAL_FAILURE_TYPES | _PROVIDER_WIDE_FAILURE_TYPES
 
 
 def _should_skip_open_provider(provider: ModelProvider) -> bool:
@@ -224,7 +225,7 @@ async def _recent_model_failure(
             and_(
                 ModelCallEvent.provider_id == provider_id,
                 ModelCallEvent.model_name == model_name,
-                ModelCallEvent.failure_type.in_(_MODEL_LOCAL_FAILURE_TYPES),
+                ModelCallEvent.failure_type.in_(_SELECTOR_SKIP_FAILURE_TYPES),
             )
         ).order_by(ModelCallEvent.created_at.desc()).limit(1)
     )).scalar_one_or_none()
@@ -397,6 +398,16 @@ class ModelSelectorService:
             if provider.circuit_open_until and provider.circuit_open_until > datetime.utcnow():
                 return False
         model = binding.model_name or provider.default_model or ""
+        if model:
+            disabled_snapshot = (await db.execute(
+                select(ModelHealthSnapshot).where(
+                    ModelHealthSnapshot.provider_id == provider.id,
+                    ModelHealthSnapshot.model_name == model,
+                    ModelHealthSnapshot.status == "disabled",
+                )
+            )).scalar_one_or_none()
+            if disabled_snapshot is not None:
+                return False
         if model and not is_text_role_model_compatible("", model):
             return False
         return True
@@ -418,7 +429,11 @@ class ModelSelectorService:
             allowed_provider_ids = binding.candidate_provider_ids
 
         # 查询可用 Provider
-        q = select(ModelProvider).where(ModelProvider.enabled == True)  # noqa: E712
+        q = select(ModelProvider).where(
+            ModelProvider.enabled == True,  # noqa: E712
+            ModelProvider.base_url.notlike("mock://%"),
+            ModelProvider.name.notin_(["stub", "mock"]),
+        )
         if allowed_provider_ids:
             q = q.where(ModelProvider.id.in_(allowed_provider_ids))
         providers = (await db.execute(q)).scalars().all()
@@ -458,7 +473,17 @@ class ModelSelectorService:
                 if p.default_model and p.default_model not in models_to_score:
                     models_to_score.insert(0, p.default_model)
 
+            disabled_models = {
+                row.model_name for row in (await db.execute(
+                    select(ModelHealthSnapshot).where(
+                        ModelHealthSnapshot.provider_id == p.id,
+                        ModelHealthSnapshot.status == "disabled",
+                    )
+                )).scalars().all()
+            }
             for model_name in models_to_score:
+                if model_name in disabled_models:
+                    continue
                 if not is_text_role_model_compatible(role_key, model_name):
                     continue
                 if await _recent_model_failure(db, p.id, model_name):
@@ -632,20 +657,16 @@ class ModelSelectorService:
     async def _fallback_any_enabled(
         self, db: AsyncSession, role_key: str, role: AgentRole | None,
     ) -> SelectedModel:
-        """最终兜底: 选第一个 enabled 的真实 Provider."""
+        """最终兜底: 只允许真实 Provider；没有真实模型就显式失败。"""
         providers = (await db.execute(
             select(ModelProvider).where(
-                and_(
-                    ModelProvider.enabled == True,  # noqa: E712
-                    ModelProvider.base_url != "mock://",
-                )
+                ModelProvider.enabled == True,  # noqa: E712
+                ModelProvider.base_url != "mock://local",
             )
         )).scalars().all()
 
         providers = sorted(providers, key=provider_priority_score, reverse=True)
         for provider in providers:
-            if provider_priority_score(provider) < 0.5:
-                continue
             if _should_skip_open_provider(provider):
                 continue
             models = list(provider.model_list or [])

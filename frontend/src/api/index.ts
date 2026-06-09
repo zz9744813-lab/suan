@@ -120,6 +120,44 @@ export const launchProject = (
     ...data,
   });
 
+export interface ProjectMaterial {
+  id: number;
+  project_id: number;
+  title: string;
+  filename: string;
+  material_type: string;
+  mime_type?: string | null;
+  word_count: number;
+  status: string;
+  ingest_summary?: string;
+  ingest_result?: Record<string, unknown>;
+}
+
+export interface ProjectMaterialIngestionRun {
+  id: number;
+  project_id: number;
+  material_id: number;
+  status: string;
+  summary: string;
+  result: Record<string, unknown>;
+  created_counts: Record<string, number>;
+  error_message?: string | null;
+}
+
+export async function uploadProjectMaterial(projectId: number, file: File, materialType = "other") {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("material_type", materialType);
+  form.append("title", file.name);
+  return api.post<ProjectMaterial>(`/api/projects/${projectId}/materials/upload`, form);
+}
+
+export const ingestProjectMaterial = (projectId: number, materialId: number) =>
+  api.post<ProjectMaterialIngestionRun>(`/api/projects/${projectId}/materials/${materialId}/ingest`, {});
+
+export const retrieveProjectMemory = (projectId: number, chapterId?: number) =>
+  api.get<Record<string, unknown>>(`/api/projects/${projectId}/materials/memory/retrieve${chapterId ? `?chapter_id=${chapterId}` : ""}`);
+
 export type ProjectExportFormat = "markdown" | "txt" | "json" | "html";
 function filenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback;

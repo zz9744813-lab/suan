@@ -67,6 +67,8 @@ export default function ModelProviderDetailPage() {
   const [tab, setTab] = useState<Tab>("models");
   const [probing, setProbing] = useState(false);
   const [pullingModels, setPullingModels] = useState(false);
+  const [deletingModel, setDeletingModel] = useState<string | null>(null);
+  const [togglingModel, setTogglingModel] = useState<string | null>(null);
   const [probeResults, setProbeResults] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   // P-Monitor: 详情页实时监测. 15s 拉一次 (详情页比列表页更需要
@@ -167,6 +169,51 @@ export default function ModelProviderDetailPage() {
     }
   };
 
+  const deleteModel = async (modelName: string) => {
+    if (!data?.provider || !providerId) return;
+    if (!confirm(`从「${data.provider.name}」移除模型「${modelName}」？\n\n这会隐藏该模型、禁用它的健康快照，并从 Provider 模型列表移除；不会删除远端供应商模型。`)) return;
+    setDeletingModel(modelName);
+    setError("");
+    setNotice("");
+    try {
+      await api.delete(`/api/model-control/providers/${providerId}/models/${encodeURIComponent(modelName)}`);
+      setData((prev) => prev ? {
+        ...prev,
+        provider: {
+          ...prev.provider,
+          model_count: Math.max(0, prev.provider.model_count - 1),
+          default_model: prev.provider.default_model === modelName ? "" : prev.provider.default_model,
+        },
+        models: prev.models.filter((model) => model.model_name !== modelName),
+        bound_agents: prev.bound_agents.filter((agent) => agent.model_name !== modelName),
+      } : prev);
+      setNotice(`已从模型列表移除 ${modelName}`);
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message || "删除模型失败");
+    } finally {
+      setDeletingModel(null);
+    }
+  };
+
+  const toggleModelDisabled = async (modelName: string, disabled: boolean) => {
+    if (!providerId) return;
+    const action = disabled ? "enable" : "disable";
+    if (!disabled && !confirm(`禁用模型「${modelName}」？\n\n禁用后它会保留在列表里，但不会再被自动选模或 Agent 绑定使用。`)) return;
+    setTogglingModel(modelName);
+    setError("");
+    setNotice("");
+    try {
+      await api.post(`/api/model-control/providers/${providerId}/models/${encodeURIComponent(modelName)}/${action}`);
+      setNotice(disabled ? `已启用 ${modelName}` : `已禁用 ${modelName}`);
+      await fetchDetail();
+    } catch (e: any) {
+      setError(e?.message || (disabled ? "启用模型失败" : "禁用模型失败"));
+    } finally {
+      setTogglingModel(null);
+    }
+  };
+
   if (loading) return <div style={{ padding: 24, color: "#94a3b8" }}>加载中...</div>;
   if (error) return <div style={{ padding: 24, color: "#ef4444" }}>{error}</div>;
   if (!data) return null;
@@ -261,7 +308,15 @@ export default function ModelProviderDetailPage() {
 
       {/* Tab content */}
       {tab === "models" && (
-        <ModelsTab models={data.models} probeOne={probeOne} probeResults={probeResults} />
+        <ModelsTab
+          models={data.models}
+          probeOne={probeOne}
+          probeResults={probeResults}
+          deleteModel={deleteModel}
+          deletingModel={deletingModel}
+          toggleModelDisabled={toggleModelDisabled}
+          togglingModel={togglingModel}
+        />
       )}
       {tab === "records" && (
         <RecordsTab events={data.route_events} />
@@ -413,11 +468,13 @@ function BannerStat({
 }
 
 function ModelsTab({
-  models, probeOne, probeResults,
+  models, probeOne, probeResults, deleteModel, deletingModel,
 }: {
   models: ModelItem[];
   probeOne: (name: string) => void;
   probeResults: Record<string, string>;
+  deleteModel: (name: string) => void;
+  deletingModel: string | null;
 }) {
   if (models.length === 0) {
     return <div style={{ color: "#64748b", fontSize: 13, padding: "20px 0" }}>暂无模型数据，请先「拉取模型列表」</div>;
@@ -470,6 +527,16 @@ function ModelsTab({
                 color: "#e2e8f0", cursor: "pointer", fontSize: 11,
               }}
             >测试</button>
+            <button
+              onClick={() => deleteModel(m.model_name)}
+              disabled={deletingModel === m.model_name}
+              title="从当前 Provider 模型列表移除"
+              style={{
+                marginTop: 4, marginLeft: 6, padding: "3px 10px", borderRadius: 4,
+                border: "1px solid rgba(239,68,68,0.55)", background: "rgba(127,29,29,0.35)",
+                color: "#fecaca", cursor: deletingModel === m.model_name ? "not-allowed" : "pointer", fontSize: 11,
+              }}
+            >{deletingModel === m.model_name ? "删除中..." : "删除"}</button>
             {probeResults[m.model_name] && (
               <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>{probeResults[m.model_name]}</div>
             )}

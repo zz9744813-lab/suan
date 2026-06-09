@@ -17,7 +17,10 @@ router = APIRouter(prefix="/worker", tags=["worker"])
 
 @router.get("/status", response_model=APIResponse[dict])
 async def status() -> APIResponse[dict]:
-    return {"ok": True, "data": await get_worker().status()}
+    worker = get_worker()
+    if not worker.is_running:
+        await worker.start()
+    return {"ok": True, "data": await worker.status()}
 
 
 @router.get("/multi-status")

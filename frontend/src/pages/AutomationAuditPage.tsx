@@ -8,6 +8,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { PageTopbar } from "../components/layout/PageTopbar";
+import { DomainBreadcrumb } from "../components/layout/DomainBreadcrumb";
+import { getWorkbenchDomain } from "../lib/domainMap";
 import { listAuditLogs, getAuditStatsByEvent } from "../api";
 
 type AuditLog = {
@@ -90,9 +92,15 @@ export function AutomationAuditPage() {
   useEffect(() => { load(); }, [load]);
 
   const eventColor = (et: string) => EVENT_COLORS[et] || "#bdbdbd";
+  const governanceDomain = getWorkbenchDomain("governance");
 
   return (
     <div>
+      <div style={{ padding: "16px 24px 0" }}>
+        <div className="legacy-domain-breadcrumb">
+          <DomainBreadcrumb current="治理 / 自动化审计" links={governanceDomain.drilldowns} />
+        </div>
+      </div>
       <PageTopbar
         title="自动化审计"
         icon="🔍"

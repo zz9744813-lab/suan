@@ -32,9 +32,12 @@ router = APIRouter(prefix="/model-control", tags=["model-control"])
 @router.get("/overview")
 async def get_overview(db: AsyncSession = Depends(get_db)):
     """第一层总览：Provider 列表 + Agent 状态 + 健康摘要."""
-    providers_raw = (await db.execute(
-        select(ModelProvider).order_by(ModelProvider.id.asc())
-    )).scalars().all()
+    providers_raw = [
+        p for p in (await db.execute(
+            select(ModelProvider).order_by(ModelProvider.id.asc())
+        )).scalars().all()
+        if not ((p.base_url or "").startswith("mock://") or (p.name or "").lower() in {"stub", "mock"})
+    ]
 
     providers_list = []
     for p in providers_raw:
@@ -45,8 +48,10 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
             )
         )).scalars().all()
 
-        healthy = sum(1 for s in snapshots if s.status == "healthy")
-        failing = sum(1 for s in snapshots if s.status == "failing")
+        snapshots = [s for s in snapshots if s.status != "disabled"]
+        provider_open = (p.circuit_state or "closed") == "open"
+        healthy = 0 if provider_open else sum(1 for s in snapshots if s.status == "healthy")
+        failing = len(snapshots) if provider_open else sum(1 for s in snapshots if s.status == "failing")
 
         providers_list.append({
             "id": p.id,
@@ -132,6 +137,8 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
         select(ModelHealthSnapshot)
     )).scalars().all()
 
+    all_snapshots = [s for s in all_snapshots if s.status != "disabled"]
+
     return {
         "ok": True,
         "data": {
@@ -175,9 +182,33 @@ async def get_provider_detail(
     )).scalars().all()
 
     models_list = []
-    snapshot_names = set()
+    snapshots_by_name = {s.model_name: s for s in snapshots}
+    ordered_names: list[str] = []
+    for name in provider.model_list or []:
+        if name not in ordered_names:
+            ordered_names.append(name)
     for s in snapshots:
-        snapshot_names.add(s.model_name)
+        if s.status != "disabled" and s.model_name not in ordered_names:
+            ordered_names.append(s.model_name)
+
+    for model_name in ordered_names:
+        s = snapshots_by_name.get(model_name)
+        if s is None:
+            models_list.append({
+                "model_name": model_name,
+                "status": "unknown",
+                "health_score": 0.0,
+                "success_rate": 0.0,
+                "avg_latency_ms": 0,
+                "supports_json": False,
+                "supports_text": True,
+                "last_error_message": None,
+                "probe_count": 0,
+                "consecutive_failures": 0,
+                "input_price_per_million": None,
+                "output_price_per_million": None,
+            })
+            continue
         models_list.append({
             "model_name": s.model_name,
             "status": s.status,
@@ -192,25 +223,6 @@ async def get_provider_detail(
             "input_price_per_million": s.input_price_per_million,
             "output_price_per_million": s.output_price_per_million,
         })
-
-    # Add models from model_list that don't have snapshots yet
-    if provider.model_list:
-        for m in provider.model_list:
-            if m not in snapshot_names:
-                models_list.append({
-                    "model_name": m,
-                    "status": "unknown",
-                    "health_score": 0.0,
-                    "success_rate": 0.0,
-                    "avg_latency_ms": 0,
-                    "supports_json": False,
-                    "supports_text": True,
-                    "last_error_message": None,
-                    "probe_count": 0,
-                    "consecutive_failures": 0,
-                    "input_price_per_million": None,
-                    "output_price_per_million": None,
-                })
 
     # Route events (最近 50 条)
     route_events = (await db.execute(
@@ -278,6 +290,171 @@ async def get_provider_detail(
             "models": models_list,
             "route_events": events_list,
             "bound_agents": bound_agents,
+        },
+        "error": None,
+    }
+
+
+
+@router.delete("/providers/{provider_id}/models/{model_name:path}")
+async def delete_provider_model(
+    provider_id: int,
+    model_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    provider = (await db.execute(
+        select(ModelProvider).where(ModelProvider.id == provider_id)
+    )).scalar_one_or_none()
+    if not provider:
+        return {"ok": False, "data": None, "error": "Provider not found"}
+
+    next_models = [name for name in (provider.model_list or []) if name != model_name]
+    provider.model_list = next_models
+    if provider.default_model == model_name:
+        provider.default_model = next_models[0] if next_models else ""
+
+    snapshots = (await db.execute(
+        select(ModelHealthSnapshot).where(
+            ModelHealthSnapshot.provider_id == provider_id,
+            ModelHealthSnapshot.model_name == model_name,
+        )
+    )).scalars().all()
+    for snapshot in snapshots:
+        snapshot.status = "disabled"
+        snapshot.health_score = 0.0
+        snapshot.last_error_message = "用户已从 Provider 模型列表删除"
+
+    await db.commit()
+    return {
+        "ok": True,
+        "data": {
+            "provider_id": provider_id,
+            "model_name": model_name,
+            "remaining_models": next_models,
+            "disabled_snapshots": len(snapshots),
+            "default_model": provider.default_model,
+        },
+        "error": None,
+    }
+
+
+@router.post("/providers/{provider_id}/models/{model_name:path}/disable")
+async def disable_provider_model(
+    provider_id: int,
+    model_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    provider = (await db.execute(
+        select(ModelProvider).where(ModelProvider.id == provider_id)
+    )).scalar_one_or_none()
+    if not provider:
+        return {"ok": False, "data": None, "error": "Provider not found"}
+
+    snapshot = (await db.execute(
+        select(ModelHealthSnapshot).where(
+            ModelHealthSnapshot.provider_id == provider_id,
+            ModelHealthSnapshot.model_name == model_name,
+        )
+    )).scalar_one_or_none()
+    if snapshot is None:
+        snapshot = ModelHealthSnapshot(provider_id=provider_id, model_name=model_name)
+        db.add(snapshot)
+        await db.flush()
+    snapshot.status = "disabled"
+    snapshot.health_score = 0.0
+    snapshot.last_error_code = "disabled_by_user"
+    snapshot.last_error_message = "用户已禁用该模型"
+    snapshot.updated_at = datetime.utcnow()
+
+    if provider.default_model == model_name:
+        provider.default_model = next((m for m in (provider.model_list or []) if m != model_name), "")
+
+    touched_bindings = 0
+    bindings = (await db.execute(select(AgentModelBinding))).scalars().all()
+    for binding in bindings:
+        changed = False
+        if binding.provider_id == provider_id and binding.model_name == model_name:
+            binding.provider_id = None
+            binding.model_name = None
+            binding.binding_mode = "auto"
+            binding.selection_mode = "auto"
+            changed = True
+        if binding.locked_provider_id == provider_id and binding.locked_model_name == model_name:
+            binding.locked_provider_id = None
+            binding.locked_model_name = None
+            binding.locked_by_user = False
+            binding.lock_reason = None
+            binding.binding_mode = "auto"
+            changed = True
+        for attr in ("candidate_models_json", "fallback_candidates_json"):
+            items = getattr(binding, attr) or []
+            next_items = [
+                item for item in items
+                if not (item.get("provider_id") == provider_id and item.get("model") == model_name)
+            ]
+            if len(next_items) != len(items):
+                setattr(binding, attr, next_items)
+                changed = True
+        if changed:
+            touched_bindings += 1
+
+    await db.commit()
+    return {
+        "ok": True,
+        "data": {
+            "provider_id": provider_id,
+            "model_name": model_name,
+            "status": "disabled",
+            "default_model": provider.default_model,
+            "touched_bindings": touched_bindings,
+        },
+        "error": None,
+    }
+
+
+@router.post("/providers/{provider_id}/models/{model_name:path}/enable")
+async def enable_provider_model(
+    provider_id: int,
+    model_name: str,
+    db: AsyncSession = Depends(get_db),
+):
+    provider = (await db.execute(
+        select(ModelProvider).where(ModelProvider.id == provider_id)
+    )).scalar_one_or_none()
+    if not provider:
+        return {"ok": False, "data": None, "error": "Provider not found"}
+
+    models = list(provider.model_list or [])
+    if model_name not in models:
+        models.append(model_name)
+        provider.model_list = models
+    if not provider.default_model:
+        provider.default_model = model_name
+
+    snapshot = (await db.execute(
+        select(ModelHealthSnapshot).where(
+            ModelHealthSnapshot.provider_id == provider_id,
+            ModelHealthSnapshot.model_name == model_name,
+        )
+    )).scalar_one_or_none()
+    if snapshot is None:
+        snapshot = ModelHealthSnapshot(provider_id=provider_id, model_name=model_name)
+        db.add(snapshot)
+        await db.flush()
+    snapshot.status = "unknown"
+    snapshot.health_score = 0.0
+    snapshot.last_error_code = None
+    snapshot.last_error_message = None
+    snapshot.updated_at = datetime.utcnow()
+
+    await db.commit()
+    return {
+        "ok": True,
+        "data": {
+            "provider_id": provider_id,
+            "model_name": model_name,
+            "status": "unknown",
+            "default_model": provider.default_model,
         },
         "error": None,
     }

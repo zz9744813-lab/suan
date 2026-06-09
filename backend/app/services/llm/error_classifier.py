@@ -40,7 +40,7 @@ def classify_llm_exception(exc: Exception) -> str:
         return "empty_response"
     if "json" in text or "无法解析" in text or "parse" in exc_type:
         return "json_parse_failed"
-    if "budget" in text or "预算" in text:
+    if "budget" in text or "预算" in text or "usage limit" in text or "quota" in text or "insufficient balance" in text:
         return "budget_exhausted"
 
     return "unknown"

@@ -27,6 +27,7 @@ from app.schemas import (
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
     ProviderDeletePreview,
+    ProviderDisablePreview,
     ProviderPreviewModelsRequest,
     ProviderPreviewModelsResponse,
     ProviderRoleBindingImpact,
@@ -45,6 +46,67 @@ from app.services.model_selector import is_text_role_model_compatible
 
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+
+async def _provider_binding_impacts(
+    db: AsyncSession,
+    provider_id: int,
+) -> list[ProviderRoleBindingImpact]:
+    role_rows = (
+        await db.execute(
+            select(ModelRoleAssignment)
+            .where(ModelRoleAssignment.provider_id == provider_id)
+            .order_by(ModelRoleAssignment.role.asc())
+        )
+    ).scalars().all()
+    return [ProviderRoleBindingImpact(id=r.id, role=r.role, model=r.model) for r in role_rows]
+
+
+async def _provider_call_event_stats(
+    db: AsyncSession,
+    provider_id: int,
+) -> tuple[int, datetime | None]:
+    from sqlalchemy import func
+    from app.models.model_call_event import ModelCallEvent
+
+    call_agg = (
+        await db.execute(
+            select(
+                func.count(ModelCallEvent.id),
+                func.max(ModelCallEvent.created_at),
+            ).where(ModelCallEvent.provider_id == provider_id)
+        )
+    ).one()
+    return int(call_agg[0] or 0), call_agg[1]
+
+
+async def _build_disable_preview(
+    db: AsyncSession,
+    row: ModelProvider,
+) -> ProviderDisablePreview:
+    bindings = await _provider_binding_impacts(db, row.id)
+    call_count, _ = await _provider_call_event_stats(db, row.id)
+    if bindings:
+        danger_level = "danger"
+        summary = (
+            f"禁用 Provider「{row.name}」会让 {len(bindings)} 个角色绑定不可用"
+            f"（{', '.join(b.role for b in bindings[:3])}{' 等' if len(bindings) > 3 else ''}）。"
+        )
+    elif call_count:
+        danger_level = "caution"
+        summary = f"禁用 Provider「{row.name}」不会删除配置，但会停止后续调度；已有 {call_count} 条调用记录保留。"
+    else:
+        danger_level = "safe"
+        summary = f"禁用 Provider「{row.name}」当前不影响角色绑定。"
+    return ProviderDisablePreview(
+        provider_id=row.id,
+        provider_name=row.name,
+        enabled=row.enabled,
+        affected_role_bindings=bindings,
+        active_call_events_count=call_count,
+        summary=summary,
+        danger_level=danger_level,
+    )
 
 
 @router.get("/providers", response_model=APIResponse[list[ModelProviderRead]])
@@ -159,6 +221,17 @@ async def get_provider_recent_calls(
     }
 
 
+@router.get("/providers/{provider_id}/disable-preview", response_model=APIResponse[ProviderDisablePreview])
+async def get_provider_disable_preview(
+    provider_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> APIResponse[ProviderDisablePreview]:
+    row = await db.get(ModelProvider, provider_id)
+    if row is None:
+        raise not_found("ModelProvider", provider_id)
+    return {"ok": True, "data": await _build_disable_preview(db, row)}
+
+
 @router.put("/providers/{provider_id}", response_model=APIResponse[ModelProviderRead])
 async def update_provider(
     provider_id: int, body: ModelProviderUpdate, db: AsyncSession = Depends(get_db)
@@ -174,6 +247,8 @@ async def update_provider(
     if row is None:
         raise not_found("ModelProvider", provider_id)
     data = body.model_dump()
+    disabling = data.get("enabled") is False and row.enabled is True
+    disable_preview = await _build_disable_preview(db, row) if disabling else None
     new_key = data.pop("api_key", "")
     if new_key:
         row.api_key = new_key
@@ -181,6 +256,10 @@ async def update_provider(
     for k, v in data.items():
         if v is not None:
             setattr(row, k, v)
+    if disable_preview is not None:
+        extra = dict(row.extra or {})
+        extra["last_disable_impact"] = disable_preview.model_dump(mode="json")
+        row.extra = extra
     await db.flush()
     return {"ok": True, "data": ModelProviderRead.from_orm_masked(row)}
 
@@ -206,6 +285,8 @@ async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)) 
     if row is None:
         raise not_found("ModelProvider", provider_id)
     name = row.name
+    bindings = await _provider_binding_impacts(db, provider_id)
+    call_count, _ = await _provider_call_event_stats(db, provider_id)
     # 部分 SQLite 测试库/既有库可能没有落到最新 FK 约束，先显式置空
     # 调用事件的 provider_id，再删除 Provider，确保审计事件保留。
     from app.models.model_call_event import ModelCallEvent
@@ -228,6 +309,9 @@ async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db)) 
         "data": {
             "deleted": provider_id,
             "provider_name": name,
+            "deleted_role_bindings_count": len(bindings),
+            "cleared_call_events_count": call_count,
+            "deleted_role_bindings": [b.model_dump() for b in bindings],
         },
     }
 
@@ -251,40 +335,16 @@ async def get_provider_delete_preview(
     ``model_role_assignments`` and a COUNT/MAX on
     ``model_call_events``), both indexed on ``provider_id``.
     """
-    from sqlalchemy import func
-
-    from app.models.model_call_event import ModelCallEvent
-
     row = await db.get(ModelProvider, provider_id)
     if row is None:
         raise not_found("ModelProvider", provider_id)
 
     # 1) Role bindings that will cascade-delete with this provider.
-    role_rows = (
-        await db.execute(
-            select(ModelRoleAssignment)
-            .where(ModelRoleAssignment.provider_id == provider_id)
-            .order_by(ModelRoleAssignment.role.asc())
-        )
-    ).scalars().all()
-    bindings = [
-        ProviderRoleBindingImpact(id=r.id, role=r.role, model=r.model)
-        for r in role_rows
-    ]
+    bindings = await _provider_binding_impacts(db, provider_id)
 
     # 2) Call event stats. The rows themselves are kept; we just
-    # clear their provider_id. We use a single aggregate query to
-    # avoid pulling every row.
-    call_agg = (
-        await db.execute(
-            select(
-                func.count(ModelCallEvent.id),
-                func.max(ModelCallEvent.created_at),
-            ).where(ModelCallEvent.provider_id == provider_id)
-        )
-    ).one()
-    call_count = int(call_agg[0] or 0)
-    last_called_at = call_agg[1]
+    # clear their provider_id.
+    call_count, last_called_at = await _provider_call_event_stats(db, provider_id)
 
     # 3) Danger level drives the dialog style. Bound roles = danger;
     #    any history = caution; otherwise safe.

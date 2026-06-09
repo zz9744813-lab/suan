@@ -49,6 +49,18 @@ export function MemoryPage() {
         <h2 className="serif">记忆库 (旧版)</h2>
         <span className="muted small">当前项目 #{projectId} · 旧 MemoryUpdate Agent 写入 (Round 9) · 推荐用 <a href="/memory">项目记忆库</a> (P3)</span>
       </div>
+      <div className="memory-explain-card">
+        <div>
+          <div className="muted tiny">生成说明</div>
+          <b>MemoryUpdate Agent 会把章节结果沉淀为人物、伏笔和硬事实。</b>
+          <p>这里展示的是已写入项目记忆库的结构化结果；人工新建、编辑、删除会立即影响后续章节规划可读取的上下文。</p>
+        </div>
+        <div className="memory-change-strip">
+          <span>人物档案：{tab === "characters" ? "正在查看" : "可切换"}</span>
+          <span>伏笔状态：{tab === "foreshadows" ? "正在查看" : "可切换"}</span>
+          <span>硬事实：{tab === "facts" ? "正在查看" : "可切换"}</span>
+        </div>
+      </div>
       <div className="tabs" style={{ padding: "0 24px" }}>
         <button className={`tab ${tab === "characters" ? "active" : ""}`} onClick={() => setTab("characters")}>人物</button>
         <button className={`tab ${tab === "foreshadows" ? "active" : ""}`} onClick={() => setTab("foreshadows")}>伏笔</button>

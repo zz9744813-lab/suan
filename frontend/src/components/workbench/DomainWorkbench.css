@@ -26,6 +26,14 @@
   color: var(--accent-gold);
 }
 
+.legacy-domain-breadcrumb {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line-soft);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+
 .domain-breadcrumb-links {
   margin-left: auto;
   display: flex;

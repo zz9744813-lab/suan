@@ -305,6 +305,16 @@ class ProviderCallEventImpact(BaseModel):
     last_called_at: datetime | None = None
 
 
+class ProviderDisablePreview(BaseModel):
+    provider_id: int
+    provider_name: str
+    enabled: bool
+    affected_role_bindings: list[ProviderRoleBindingImpact] = Field(default_factory=list)
+    active_call_events_count: int = 0
+    summary: str
+    danger_level: Literal["safe", "caution", "danger"]
+
+
 class ProviderDeletePreview(BaseModel):
     """P-Delete-Preview: preflight summary for DELETE /providers/{id}.
 

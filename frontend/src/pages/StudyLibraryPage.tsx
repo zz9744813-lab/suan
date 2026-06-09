@@ -416,7 +416,9 @@ export function StudyLibraryPage() {
     <ShelfLayout
       title="拆书书架"
       subtitle="参考书 → 单书知识网络 → 7 类 Agent 深拆, 沉淀行为模式 + 写作技巧。"
-      breadcrumb={[{ label: "拆书书架" }]}
+      breadcrumb={[{ label: "研读", to: "/workbench/study" }, { label: "拆书书架" }]}
+      backTo="/workbench/study"
+      backLabel="返回研读"
       left={
         <>
           <ShelfToolbar>

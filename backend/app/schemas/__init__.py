@@ -58,6 +58,7 @@ from app.schemas.model_provider import (
     ModelRoleAssignmentRead,
     ModelRoleAssignmentUpdate,
     ProviderDeletePreview,
+    ProviderDisablePreview,
     ProviderPreviewModelsRequest,
     ProviderPreviewModelsResponse,
     ProviderRoleBindingImpact,

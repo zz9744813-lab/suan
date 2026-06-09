@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import bad_request
+from app.core.sanitize import sanitize_for_storage
 from app.models.task import AgentStep, AgentTask
 from app.services.llm.client import LLMMessage
 from app.services.llm.router import LLMRouter, ResolvedCall
@@ -90,14 +91,15 @@ class BaseAgent(ABC):
         if rendered is None:
             # No genre mapping — fall back to hardcoded prompt_key
             rendered = await self.engine.render(ctx.db, self.prompt_key, ctx.inputs)
-        step.input_prompt = rendered.body
+        rendered_body = sanitize_for_storage(rendered.body)
+        step.input_prompt = rendered_body
         step.prompt_template_id = rendered.template_id
         step.prompt_version = rendered.version
         step.provider_name = ""  # filled after the call
         await ctx.db.flush()
 
         # 3. invoke the LLM
-        messages = [LLMMessage(role="user", content=rendered.body)]
+        messages = [LLMMessage(role="user", content=rendered_body)]
         try:
             resolved, result = await self.router.chat(
                 ctx.db,
@@ -116,13 +118,13 @@ class BaseAgent(ABC):
             )
         except Exception as exc:
             step.status = "failed"
-            step.error_message = str(exc)
+            step.error_message = sanitize_for_storage(str(exc))
             step.finished_at = datetime.utcnow()
             await ctx.db.flush()
             raise
 
-        # 4. persist step result
-        step.raw_output = result.content
+        result_content = sanitize_for_storage(result.content)
+        step.raw_output = result_content
         step.model_name = result.model
         step.provider_name = resolved.provider.name
         step.is_mock = (result.model or "").startswith("mock-")
@@ -134,7 +136,7 @@ class BaseAgent(ABC):
 
         parsed: dict[str, Any] | None = None
         if self.uses_json_output:
-            parsed = _safe_json_loads(result.content)
+            parsed = _safe_json_loads(result_content)
             if parsed is None:
                 if self.allow_json_fallback:
                     # P0-4 fix: don't blow up the whole chapter over a
@@ -142,7 +144,7 @@ class BaseAgent(ABC):
                     # that the rewriter / continuity / memory steps
                     # can still consume, and tag it so the UI can show
                     # "degraded" instead of "400 BadRequest".
-                    parsed = self._build_json_fallback(result.content)
+                    parsed = self._build_json_fallback(result_content)
                     step.parsed_output = parsed
                     step.error_message = (
                         "模型返回内容无法解析为 JSON，已使用 fallback 评分"
@@ -153,11 +155,12 @@ class BaseAgent(ABC):
                     step.error_message = "模型返回内容无法解析为 JSON"
                     await ctx.db.flush()
                     raise bad_request(
-                        f"{self.name} 返回非 JSON: {result.content[:800]}",
+                        f"{self.name} 返回非 JSON: {result_content[:800]}",
                         suggestion="请尝试更换模型或在 prompt 中强调返回 JSON。",
                     )
         else:
-            parsed = {"content": result.content}
+            parsed = {"content": result_content}
+        parsed = sanitize_for_storage(parsed)
         if step.parsed_output is None:
             step.parsed_output = parsed
         if step.status not in ("failed",):
@@ -165,13 +168,13 @@ class BaseAgent(ABC):
         await ctx.db.flush()
 
         # 5. record post-hooks (e.g. memory update) defined by subclasses
-        await self.after_run(ctx, parsed, result.content)
+        await self.after_run(ctx, parsed, result_content)
 
         return AgentRunResult(
             step_id=step.id,
             agent_name=self.name,
             parsed=parsed,
-            raw=result.content,
+            raw=result_content,
             resolved=resolved,
             duration_ms=result.duration_ms,
             cost_usd=result.cost_usd,

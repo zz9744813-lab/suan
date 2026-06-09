@@ -101,6 +101,7 @@ from app.models.model_runtime import ModelRuntimeStat
 from app.models.model_call_event import ModelCallEvent
 from app.models.llm_cache import LLMCacheEntry
 from app.models.project_study_link import ProjectStudyMaterialLink
+from app.models.project_material import ProjectMaterial, ProjectMaterialIngestionRun
 from app.models.prompt_auto_fill import (
     PromptAutoFillBatch,
     PromptRecommendationLog,
@@ -203,5 +204,7 @@ __all__ = [
     "PromptTemplatePerformance",
     # Project-Study boundary
     "ProjectStudyMaterialLink",
+    "ProjectMaterial",
+    "ProjectMaterialIngestionRun",
 ]
 from app.models.evolution import (EvolutionPatch,EvolutionRun,ModelQualityStat,SkillCard,SkillUsageEvent,SkillVersion)

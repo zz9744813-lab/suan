@@ -692,7 +692,14 @@ async def list_chapters(
     stmt = select(Chapter).where(Chapter.project_id == project_id)
     if status:
         stmt = stmt.where(Chapter.status == status)
-    rows = (await db.execute(stmt.order_by(Chapter.chapter_no.asc()))).scalars().all()
+    rows = (await db.execute(
+        stmt.order_by(
+            Chapter.chapter_no.asc(),
+            Chapter.actual_word_count.desc(),
+            Chapter.updated_at.desc(),
+            Chapter.id.desc(),
+        )
+    )).scalars().all()
     return {"ok": True, "data": [ChapterRead.model_validate(r) for r in rows]}
 
 

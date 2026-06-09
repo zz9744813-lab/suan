@@ -37,7 +37,7 @@ if _is_sqlite:
     # connect_args 是 aiosqlite 专有参数, 不能传给 asyncpg.
     engine = create_async_engine(
         _url,
-        echo=settings.debug,
+        echo=False,
         future=True,
         connect_args={"check_same_thread": False, "timeout": 30.0},
     )
@@ -46,7 +46,7 @@ else:
     # 阶段 3.1 起 compose 默认会拉 PG, 一切以这个分支为主.
     engine = create_async_engine(
         _url,
-        echo=settings.debug,
+        echo=False,
         future=True,
         pool_size=10,
         max_overflow=20,

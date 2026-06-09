@@ -5,7 +5,7 @@
  * 模式二 (全自动): 系统全自动 → LLM 生成一切 → 启动写作
  */
 import { useState } from "react";
-import { launchProject, type LaunchMode, type LaunchResult } from "../../api";
+import { launchProject, uploadProjectMaterial, ingestProjectMaterial, type LaunchMode, type LaunchResult, type ProjectMaterialIngestionRun } from "../../api";
 
 type Mode = "semi_auto" | "full_auto";
 
@@ -35,6 +35,9 @@ export function LaunchProjectDialog(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<LaunchResult | null>(null);
+  const [materialType, setMaterialType] = useState("bible");
+  const [uploadedRuns, setUploadedRuns] = useState<ProjectMaterialIngestionRun[]>([]);
+  const [uploadingMaterials, setUploadingMaterials] = useState(false);
 
   if (!open) return null;
 
@@ -44,8 +47,8 @@ export function LaunchProjectDialog(props: {
     try {
       let launchResult: LaunchResult;
       if (mode === "semi_auto") {
-        if (!outlineText.trim() && !characterText.trim() && !bibleText.trim()) {
-          setError("半自动模式需要至少提供一项素材（大纲/人物/设定）。");
+        if (!outlineText.trim() && !characterText.trim() && !bibleText.trim() && uploadedRuns.length === 0) {
+          setError("半自动模式需要至少提供一项素材（上传资料 / 大纲 / 人物 / 设定）。");
           setBusy(false);
           return;
         }
@@ -63,6 +66,25 @@ export function LaunchProjectDialog(props: {
       setError(e?.message ?? String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleUploadMaterials = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setUploadingMaterials(true);
+    setError(null);
+    try {
+      const runs: ProjectMaterialIngestionRun[] = [];
+      for (const file of Array.from(files)) {
+        const material = await uploadProjectMaterial(projectId, file, materialType);
+        const run = await ingestProjectMaterial(projectId, material.id);
+        runs.push(run);
+      }
+      setUploadedRuns((prev) => [...runs, ...prev]);
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setUploadingMaterials(false);
     }
   };
 
@@ -126,6 +148,47 @@ export function LaunchProjectDialog(props: {
         {/* 模式一: 素材输入 */}
         {mode === "semi_auto" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ border: "1px solid var(--border-color, #333)", borderRadius: 10, padding: 12, background: "var(--bg-elevated, #252525)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>上传设定 / 大纲 / 人物 / 世界观文件</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: 12 }}>上传后会先由 LLM 拆解，再写入项目记忆；写作前 Agent 会检索这些记忆。</div>
+                </div>
+                <select className="input" value={materialType} onChange={(e) => setMaterialType(e.target.value)} disabled={busy || uploadingMaterials} style={{ width: 150 }}>
+                  <option value="bible">作品 Bible</option>
+                  <option value="outline">大纲</option>
+                  <option value="characters">人物</option>
+                  <option value="worldbuilding">世界观</option>
+                  <option value="style">文风</option>
+                  <option value="constraints">禁忌约束</option>
+                  <option value="foreshadowing">伏笔</option>
+                  <option value="reader_promise">读者爽点</option>
+                  <option value="other">其他</option>
+                </select>
+              </div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: busy || uploadingMaterials ? "not-allowed" : "pointer" }}>
+                <input
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.docx,.pdf"
+                  disabled={busy || uploadingMaterials}
+                  onChange={(e) => handleUploadMaterials(e.target.files)}
+                  style={{ display: "none" }}
+                />
+                <span className="primary" style={{ padding: "8px 12px", borderRadius: 8 }}>{uploadingMaterials ? "拆解写入中…" : "上传并写入记忆"}</span>
+                <span style={{ color: "var(--text-muted)", fontSize: 12 }}>支持 txt / md / docx / pdf</span>
+              </label>
+              {uploadedRuns.length > 0 && (
+                <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                  {uploadedRuns.map((run) => (
+                    <div key={run.id} style={{ fontSize: 12, color: run.status === "succeeded" ? "#81c784" : "#ffb74d" }}>
+                      资料 #{run.material_id}：{run.status} · 人物 {run.created_counts?.characters ?? 0} / 伏笔 {run.created_counts?.foreshadows ?? 0} / 硬设定 {run.created_counts?.hard_facts ?? 0}
+                      {run.summary ? ` · ${run.summary}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div>
               <label style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, fontSize: 13 }}>
                 <span style={{ fontWeight: 600 }}>大纲</span>

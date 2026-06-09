@@ -134,6 +134,11 @@ const GROUPS: Group[] = [
     match: (p) => !p.pinned && MODERN_GENRES.has(p.genre),
   },
   {
+    key: "other",    title: "其他 / 未分类",
+    hint: "— 暂无其他类型项目 —",
+    match: (p) => !p.pinned && !["draft", "planning", "archived", "completed", "done", "finished"].includes(p.status) && !isTestProject(p),
+  },
+  {
     key: "draft",    title: "草稿 / 企划",
     hint: "— 这一格还没有草稿 / 企划中项目 (status = draft/planning) —",
     match: (p) => !p.pinned && (p.status === "draft" || p.status === "planning"),
@@ -355,6 +360,9 @@ export function ProjectsPage() {
   return (
     <>
     <ShelfLayout
+      breadcrumb={[{ label: "创作", to: "/workbench/writing" }, { label: "项目书架" }]}
+      backTo="/workbench/writing"
+      backLabel="返回创作"
       left={
         <>
           <ShelfToolbar>

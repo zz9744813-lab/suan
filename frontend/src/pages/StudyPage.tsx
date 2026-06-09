@@ -67,8 +67,7 @@ export function StudyPage() {
         <div>
           <h1>拆书 · 行为模式</h1>
           <div className="sub">
-            上传或粘贴参考小说 → 自动分章 → 抽取人物 → 沉淀可复用的行为模式卡。
-            模式卡会被 PlannerAgent 注入章节规划 prompt。
+            半自动入口支持上传或粘贴参考小说；系统随后自动拆章、抽取人物、沉淀行为模式与记忆候选，用户只负责确认资料和查看结果。
           </div>
         </div>
       </div>
@@ -356,6 +355,22 @@ function BookLibrary() {
         </div>
       )}
 
+      <div className="card study-ingest-guide">
+        <div>
+          <div className="muted tiny">半自动上传资料入口</div>
+          <h3>导入后自动排队拆解，页面持续展示写入状态</h3>
+          <p>
+            支持单本或批量上传，也可以粘贴正文。上传成功后会自动展开第一本资料，并通过分章、人物抽取、DeepStudy 产物和记忆沉淀指标反馈进度。
+          </p>
+        </div>
+        <div className="study-ingest-steps" aria-label="资料处理流程">
+          <span>1 上传/粘贴</span>
+          <span>2 自动分章</span>
+          <span>3 拆解抽取</span>
+          <span>4 记忆写入</span>
+        </div>
+      </div>
+
       <div className="card study-toolbar">
         <input
           className="study-search"
@@ -535,6 +550,9 @@ function BookCard({
             </button>
           </div>
 
+          {/* 拆解 / 记忆写入状态 */}
+          <StudyWriteStatus material={material} overview={overview} deepstudyRun={deepstudyRun} />
+
           {/* P0 DeepStudy: 自动进度展示 */}
           {deepstudyRun && (
             <DeepStudyProgressCard run={deepstudyRun} material={material} overview={overview} />
@@ -592,6 +610,51 @@ function BookCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function StudyWriteStatus({
+  material,
+  overview,
+  deepstudyRun,
+}: {
+  material: StudyMaterial;
+  overview: StudyMaterialOverview | null;
+  deepstudyRun: any | null;
+}) {
+  const runStatus = deepstudyRun?.status as string | undefined;
+  const hasChapters = material.chapter_count > 0;
+  const hasCharacters = material.character_count > 0;
+  const memoryWrites = (overview?.behavior_count ?? 0) + (overview?.foreshadow_count ?? 0) + (overview?.graph_node_count ?? 0);
+  const steps = [
+    { label: "资料入库", done: material.raw_text_length > 0, detail: `${(material.raw_text_length / 1000).toFixed(1)}k 字` },
+    { label: "章节拆解", done: hasChapters, detail: hasChapters ? `${material.chapter_count} 章` : "等待分章" },
+    { label: "人物抽取", done: hasCharacters, detail: hasCharacters ? `${material.character_count} 人物` : "等待抽取" },
+    { label: "记忆写入", done: memoryWrites > 0, detail: memoryWrites > 0 ? `${memoryWrites} 条产物` : "待沉淀" },
+  ];
+  const running = runStatus === "queued" || runStatus === "running";
+  const failed = runStatus === "failed" || runStatus === "cancelled" || material.status === "failed";
+  const completeCount = steps.filter((s) => s.done).length;
+
+  return (
+    <div className={`study-write-status ${running ? "running" : failed ? "failed" : ""}`}>
+      <div className="study-write-status-head">
+        <span className="muted tiny">拆解 / 记忆写入状态</span>
+        <span className={`pill tiny ${failed ? "error" : running ? "warn" : completeCount === steps.length ? "ok" : ""}`}>
+          {failed ? "需处理" : running ? "写入中" : completeCount === steps.length ? "已沉淀" : `已完成 ${completeCount}/4`}
+        </span>
+      </div>
+      <div className="study-write-steps">
+        {steps.map((step) => (
+          <div key={step.label} className={`study-write-step ${step.done ? "done" : "pending"}`}>
+            <span className="study-write-dot" />
+            <b>{step.label}</b>
+            <small>{step.detail}</small>
+          </div>
+        ))}
+      </div>
+      {deepstudyRun?.message && <div className="muted tiny">最新说明：{deepstudyRun.message}</div>}
     </div>
   );
 }

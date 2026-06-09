@@ -206,36 +206,32 @@ async def seed() -> None:
                     await db.flush()
                     tpl.active_version_id = ver.id
 
-        # 2. A built-in stub provider so the system works out of the box.
-        #    Uses the in-process mock LLM (`mock://`) so the UI and pipeline
-        #    are runnable without any external API key. Users can later add a
-        #    real provider and rebind roles in the "模型配置" page.
-        stub = (
+        # 2. 默认 Provider: 禁止创建 mock/stub。
+        #    没有真实 Provider 时，Agent 保持未绑定，运行时显式失败并提示配置真实模型。
+        real_provider = (
             await db.execute(
-                select(ModelProvider).where(ModelProvider.name == "stub")
+                select(ModelProvider).where(
+                    ModelProvider.enabled == True,  # noqa: E712
+                    ModelProvider.base_url.notlike("mock://%"),
+                    ModelProvider.name.notin_(["stub", "mock"]),
+                ).order_by(ModelProvider.id)
             )
         ).scalar_one_or_none()
-        if stub is None:
-            stub = ModelProvider(
-                name="stub",
-                base_url="mock://local",
-                api_key="mock",
-                default_model="mock-fast",
-                model_list=["mock-fast", "mock-long", "mock-vision"],
-                enabled=True,
-                extra={"note": "Local mock LLM. Replace with a real OpenAI-compatible provider when ready."},
+        stub_rows = (await db.execute(
+            select(ModelProvider).where(
+                (ModelProvider.base_url.like("mock://%")) | (ModelProvider.name.in_(["stub", "mock"]))
             )
-            db.add(stub)
-            await db.flush()
-        else:
-            # Upgrade old broken stub: switch to mock:// and enable it.
-            if stub.base_url != "mock://local" or not stub.enabled:
-                stub.base_url = "mock://local"
-                stub.api_key = "mock"
-                stub.default_model = stub.default_model or "mock-fast"
-                stub.enabled = True
-        # 3. Default role assignments
+        )).scalars().all()
+        for stub in stub_rows:
+            stub.enabled = False
+            stub.circuit_state = "open"
+            stub.last_failure_type = "disabled_mock_provider"
+            stub.last_failure_message = "mock/stub provider is disabled by production policy"
+
+        # 3. Default role assignments: 只在存在真实 Provider 时补齐旧表默认绑定。
         for role, prov_name, model, temp, maxtok in DEFAULT_ROLE_ASSIGNMENTS:
+            if real_provider is None:
+                break
             existing = (
                 await db.execute(
                     select(ModelRoleAssignment).where(ModelRoleAssignment.role == role)
@@ -243,9 +239,9 @@ async def seed() -> None:
             ).scalar_one_or_none()
             if existing is None:
                 db.add(ModelRoleAssignment(
-                    role=role, provider_id=stub.id, model=model,
+                    role=role, provider_id=real_provider.id, model=real_provider.default_model or (real_provider.model_list or [model])[0],
                     temperature=temp, max_tokens=maxtok,
-                    notes="default seed; please rebind to a real provider",
+                    notes="default seed; bound to first real provider",
                 ))
 
         # 4. WorkerStatus singleton
@@ -264,7 +260,7 @@ async def seed() -> None:
                 row = AgentRole(**spec)
                 db.add(row)
                 await db.flush()
-            # 默认 model binding: 走 stub provider
+            # 默认 model binding: 只绑定真实 Provider；没有真实 Provider 时保持未绑定。
             # Idempotent: AgentModelBinding.agent_role_id UNIQUE, 只在缺时创建
             existing_binding = (await db.execute(
                 select(AgentModelBinding).where(
@@ -274,9 +270,14 @@ async def seed() -> None:
             if existing_binding is None:
                 db.add(AgentModelBinding(
                     agent_role_id=row.id,
-                    provider_id=stub.id,
-                    model_name="mock-fast",
+                    provider_id=real_provider.id if real_provider else None,
+                    model_name=(real_provider.default_model or (real_provider.model_list or [None])[0]) if real_provider else None,
                 ))
+            elif existing_binding.provider_id in [stub.id for stub in stub_rows]:
+                existing_binding.provider_id = real_provider.id if real_provider else None
+                existing_binding.model_name = (real_provider.default_model or (real_provider.model_list or [None])[0]) if real_provider else None
+                existing_binding.binding_mode = "auto"
+                existing_binding.selection_mode = "auto"
 
         # 6. P6: 5 个 ReaderAgentProfile (跟 5 个 reader AgentRole 1:1)
         #    维度跟 reader_key 对应, weight 初始 1.0, enabled=True

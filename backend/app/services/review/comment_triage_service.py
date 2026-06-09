@@ -40,6 +40,7 @@ from app.models.comment_review import (
     ReviewSettings,
 )
 from app.models.project import Project
+from app.models.task import AgentTask
 from app.services.review.agent_role_runner import (
     AgentRoleRunner,
     AgentRoleRunResult,
@@ -280,6 +281,12 @@ class CommentTriageService:
                 else:  # ignore
                     item_out = await self._do_ignore(db, comment, item)
                     outcome.ignore_count += 1
+                if comment.author_type == "user" and comment.chapter_id is not None:
+                    rewrite_task = await self._ensure_rewrite_task_for_feedback(
+                        db, comment=comment, item=item, action=action,
+                    )
+                    if rewrite_task is not None:
+                        item_out.detail = f"{item_out.detail}; rewrite_task_id={rewrite_task.id}"
                 outcome.items.append(item_out)
             except Exception as exc:
                 logger.exception(
@@ -301,6 +308,60 @@ class CommentTriageService:
             outcome.error_count,
         )
         return outcome
+
+    async def _ensure_rewrite_task_for_feedback(
+        self,
+        db: AsyncSession,
+        *,
+        comment: ReviewComment,
+        item: dict[str, Any],
+        action: str,
+    ) -> AgentTask | None:
+        feedback = (comment.content or "").strip()
+        if not feedback:
+            return None
+        if action == ACTION_IGNORE and comment.priority < 70:
+            return None
+        existing = (await db.execute(
+            select(AgentTask).where(
+                AgentTask.project_id == comment.project_id,
+                AgentTask.chapter_id == comment.chapter_id,
+                AgentTask.task_type == "rewrite_from_discussion",
+                AgentTask.status.in_(["pending", "running"]),
+            ).limit(1)
+        )).scalar_one_or_none()
+        instruction = (
+            "用户反馈必须进入主 Agent 改稿闭环。\n"
+            f"反馈评论 #{comment.id}：{feedback}\n"
+            f"主 Agent 分流动作：{action}。\n"
+            f"分流理由：{item.get('reason') or item.get('reply_draft') or '无'}。\n"
+            "请优先修正用户指出的问题，保留章节主线，输出完整修订章节。"
+        )
+        if existing is not None:
+            payload = dict(existing.payload or {})
+            merged = payload.get("rewrite_instruction") or ""
+            payload["rewrite_instruction"] = (merged + "\n\n" + instruction).strip() if merged else instruction
+            payload["feedback_comment_ids"] = sorted(set(list(payload.get("feedback_comment_ids") or []) + [comment.id]))
+            existing.payload = payload
+            return existing
+        task = AgentTask(
+            project_id=comment.project_id,
+            chapter_id=comment.chapter_id,
+            task_type="rewrite_from_discussion",
+            status="pending",
+            priority=max(95, int(comment.priority or 50)),
+            domain="writing",
+            payload={
+                "source": "chief_agent_feedback_triage",
+                "rewrite_instruction": instruction,
+                "feedback_comment_ids": [comment.id],
+                "triage_action": action,
+            },
+            display_title=f"反馈改稿: 评论 #{comment.id}",
+        )
+        db.add(task)
+        await db.flush()
+        return task
 
     # ----- 4 个 action handler -----
 
