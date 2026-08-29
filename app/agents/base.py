@@ -125,11 +125,13 @@ class BaseAgent(ABC):
         messages = self.build_messages(ctx)
 
         provider = get_provider(self.tier)
+        # 注意：不使用 response_format=json_object —— 实测 qiyovo 中转站
+        # 对该参数会挂起超时。改为 prompt 约束 JSON 输出 + 宽容解析
+        # （LLMResponse.json() 容忍 ```json 包裹；parse_output 处理非 JSON）。
         response = provider.complete(
             LLMRequest(
                 messages=messages,
                 temperature=self.temperature,
-                response_format_json=True,
             )
         )
 

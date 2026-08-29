@@ -55,7 +55,7 @@ class MetaphysicalAgent(BaseAgent):
                     f"领域：{ctx.domain}\n"
                     f"时间尺度：{ctx.payload.get('time_scale', 'day')}\n\n"
                     f"# 已排好的盘（由确定性程序计算，你不得自行改算）\n"
-                    f"```json\n{chart}\n```\n\n"
+                    f"```json\n{_summarize_chart(self.source, chart)}\n```\n\n"
                     f"# 输出要求\n"
                     f"严格输出 JSON：\n"
                     f'{{"direction": <-1.0~1.0>, "strength": <0.0~1.0>, '
@@ -294,6 +294,77 @@ def _domain_of(ctx: AgentContext):
         return Domain(ctx.domain)
     except ValueError:
         return Domain.UNEXPECTED_EVENT
+
+
+def _summarize_chart(source: SourceType, chart: dict) -> dict:
+    """精简排盘结果，只保留关键字段给 LLM。
+
+    背景：实测 qiyovo 中转站对 >1k token 的请求会挂起超时（90s+）。
+    全量 chart（八字大运/奇门九宫/紫微 12 宫）太大，必须摘要。
+    排盘的确定性结果已在 Adapter 层转成 Signal；LLM 只做增强解读。
+    """
+    if not chart:
+        return {}
+
+    # 八字：四柱 + 十神（干/支）+ 五行，砍掉大运全量
+    if source in (SourceType.BAZI,):
+        return {
+            k: chart.get(k)
+            for k in ("bazi", "shishen", "shishen_zhi", "bazi_wuxing", "ming_gong", "liunian")
+            if k in chart
+        }
+
+    # 六爻/梅花：本卦/变卦/体用/动爻
+    if source in (SourceType.LIUYAO, SourceType.MEIHUA):
+        out = {k: chart.get(k) for k in (
+            "ben_gua", "bian_gua", "ti_gua", "yong_gua",
+            "ti_wuxing", "yong_wuxing", "relation", "moving_yao",
+            "xunkong", "shi_yao_index", "ying_yao_index",
+        ) if k in chart}
+        # 六爻逐爻只保留关键列
+        if "yao_details" in chart:
+            out["yao_details"] = [
+                {k: y.get(k) for k in ("position", "liuqin", "branch", "wuxing", "moving", "score")}
+                for y in chart["yao_details"]
+            ]
+        return out
+
+    # 奇门：遁局/值符/门星（九宫只留非中宫的关键列）
+    if source is SourceType.QIMEN:
+        out = {k: chart.get(k) for k in (
+            "dun_type", "ju_number", "yuan", "zhifu", "active_jie",
+            "time_stem_visible", "detected_patterns",
+        ) if k in chart}
+        out["palaces"] = [
+            {k: p.get(k) for k in ("palace", "name", "door", "star", "sky_stem", "god")}
+            for p in (chart.get("palaces") or []) if not p.get("is_center")
+        ]
+        return out
+
+    # 紫微：命宫 + 目标宫主星（12 宫全量太大）
+    if source is SourceType.ZIWEI:
+        return {
+            "soul_palace": chart.get("soul_palace"),
+            "soul_major_stars": chart.get("soul_major_stars"),
+            "palaces": [
+                {"name": p.get("name"), "stars": [
+                    {k: s.get(k) for k in ("name", "label", "brightness", "mutagen")}
+                    for s in (p.get("major_stars") or [])
+                ]}
+                for p in (chart.get("palaces") or [])
+            ],
+        }
+
+    # 兜底：截断到 1500 字符
+    import json as _json
+
+    text = _json.dumps(chart, ensure_ascii=False)
+    if len(text) > 1500:
+        import json as _json2
+
+        keys = list(chart.keys())[:6]
+        return {k: chart[k] for k in keys}
+    return chart
 
 
 def _source_from_query(query: AdapterQuery) -> SourceType:

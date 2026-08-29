@@ -118,6 +118,30 @@ class LLMProvider(ABC):
         """执行一次补全调用。"""
 
 
+def _parse_sse(text: str) -> str:
+    """解析 SSE（text/event-stream）响应，累积 content 字段。
+
+    部分中转站（如 qiyovo）即使请求 stream=false 仍返回
+    `data: {...chunk...}` 流。逐行解析 data: 载荷，拼出完整内容。
+    """
+    parts: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        try:
+            obj = json.loads(line[5:].strip())
+            choices = obj.get("choices") or []
+            if choices:
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    parts.append(str(content))
+        except (json.JSONDecodeError, IndexError, TypeError):
+            continue
+    return "".join(parts)
+
+
 class MockProvider(LLMProvider):
     """无 API Key 时的占位 Provider。
 
@@ -149,9 +173,9 @@ class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, settings: ProviderSettings, tier: Tier = "reasoning") -> None:
         self.settings = settings
         self.tier = tier
-        # 端点实测 ~5s 响应；30s 足够且不会无限挂起
-        self._timeout = 30.0
-        self.max_retries = 3
+        # 端点实测：首次长请求可达 44s。90s 足够且不会无限挂起。
+        self._timeout = 90.0
+        self.max_retries = 2
 
     @property
     def configured(self) -> bool:
@@ -204,7 +228,15 @@ class OpenAICompatibleProvider(LLMProvider):
                         continue
 
                 resp.raise_for_status()
-                data = resp.json()
+                content_type = resp.headers.get("content-type", "")
+                if "event-stream" in content_type:
+                    # 中转站仍返回 SSE 流：解析 data: 行拼出内容
+                    data = {
+                        "choices": [{"message": {"content": _parse_sse(resp.text)}}],
+                        "usage": {},
+                    }
+                else:
+                    data = resp.json()
                 break
             except (httpx.HTTPError, ValueError) as exc:
                 last_error = str(exc)
