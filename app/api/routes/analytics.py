@@ -198,6 +198,71 @@ def counterfactual(
 
 
 # ======================================================================
+# Obsidian 导出（第 62 节）
+# ======================================================================
+@router.get("/export/obsidian")
+def export_obsidian(
+    user_id: int = Query(...),
+    base_dir: str = Query("./data/obsidian", description="导出目录"),
+    session: Session = Depends(get_session),
+):
+    """数据库 → Obsidian 目录结构（数据库是权威源，Obsidian 是展示层）。"""
+    from app.services.exports import export_obsidian_vault
+
+    return export_obsidian_vault(session, user_id=user_id, base_dir=base_dir)
+
+
+@router.get("/export/daily")
+def export_daily(
+    user_id: int = Query(...),
+    target_date: date | None = None,
+    session: Session = Depends(get_session),
+):
+    """第 63 节：Markdown Daily Forecast。"""
+    from app.services.exports import daily_forecast_markdown
+
+    return {
+        "markdown": daily_forecast_markdown(
+            session, user_id=user_id, target_date=target_date
+        )
+    }
+
+
+# ======================================================================
+# 周报 / 月报 / 审计（第 30 / 31 / 32 节）
+# ======================================================================
+@router.get("/reports/weekly")
+def report_weekly(
+    user_id: int = Query(...),
+    session: Session = Depends(get_session),
+):
+    from app.services.reports import weekly_report
+
+    return {"markdown": weekly_report(session, user_id=user_id)}
+
+
+@router.get("/reports/monthly")
+def report_monthly(
+    user_id: int = Query(...),
+    session: Session = Depends(get_session),
+):
+    from app.services.reports import monthly_report
+
+    return {"markdown": monthly_report(session, user_id=user_id)}
+
+
+@router.get("/reports/audit")
+def report_audit(
+    user_id: int = Query(...),
+    session: Session = Depends(get_session),
+):
+    """第 32 节：第一性原理审计（10 问）。"""
+    from app.services.reports import audit_report
+
+    return audit_report(session, user_id=user_id)
+
+
+# ======================================================================
 def _load_rows(
     session: Session,
     *,
