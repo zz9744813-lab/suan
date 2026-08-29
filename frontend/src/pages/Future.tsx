@@ -28,6 +28,7 @@ export default function Future() {
   const overall = useAsync(() => api.overall(DEFAULT_USER_ID), []);
   const due = useAsync(() => api.duePredictions(DEFAULT_USER_ID), []);
   const health = useAsync(() => api.health(), []);
+  const tree = useAsync(() => api.futureTree(DEFAULT_USER_ID), []);
 
   const visible = (preds.data?.items ?? []).filter(
     (p) => p.time_scale === scale || scale === 'day',
@@ -195,6 +196,38 @@ export default function Future() {
             </li>
           ))}
         </ul>
+      </Card>
+
+      {/* 第 27 节 Future Tree：人生情景树（每周按新证据重算） */}
+      <Card
+        title="人生情景树"
+        subtitle="第 27 节：Future Tree 每周按新证据重算 P(Scenario | New Evidence)"
+      >
+        {tree.loading && <Loading />}
+        {tree.error && <ErrorBox message={tree.error} />}
+        {!tree.loading && !tree.error && tree.data && (
+          <ul className="space-y-3">
+            {tree.data.scenarios.map((s) => (
+              <li key={s.key} className="rounded border border-ink-800 p-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-6 text-center text-sm font-semibold text-slate-400">
+                    {s.key}
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-200">{s.label}</span>
+                      <span className="text-sm font-semibold tabular text-slate-300">
+                        {pct(s.probability, 0)}
+                      </span>
+                    </div>
+                    <ProbBar p={s.probability} className="mt-1.5 w-full" />
+                    <div className="mt-1.5 text-xs text-slate-600">{s.description}</div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );

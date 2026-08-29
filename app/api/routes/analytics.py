@@ -12,9 +12,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.calibration.scoring import (
@@ -148,6 +150,51 @@ def by_dimension(
         "dimension": dimension,
         "groups": {k: aggregate(v).to_dict() for k, v in buckets.items()},
     }
+
+
+# ======================================================================
+# Future Tree（第 27 节）
+# ======================================================================
+@router.get("/future-tree")
+def future_tree(
+    user_id: int = Query(...),
+    as_of: date | None = None,
+    session: Session = Depends(get_session),
+):
+    """人生情景树：当前轨迹继续 / 职业变化 / 新项目重心。
+
+    第 27 节：每周按新证据重算 P(Scenario | New Evidence)。
+    """
+    from app.services.future_tree import FutureTreeBuilder
+
+    return FutureTreeBuilder(session, user_id=user_id).build(as_of=as_of)
+
+
+# ======================================================================
+# Counterfactual（第 28 节）
+# ======================================================================
+class CounterfactualIn(BaseModel):
+    interventions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="[{'label': '每天学习1小时', 'effects': {'study': 0.3}}]",
+    )
+    horizon_days: int = 365
+
+
+@router.post("/counterfactual")
+def counterfactual(
+    user_id: int = Query(...),
+    payload: CounterfactualIn | None = None,
+    session: Session = Depends(get_session),
+):
+    """Baseline vs Intervention 对比（Decision Intelligence，第 28 节）。"""
+    from app.services.counterfactual import CounterfactualEngine
+
+    payload = payload or CounterfactualIn()
+    return CounterfactualEngine(session, user_id=user_id).compare(
+        interventions=payload.interventions,
+        horizon_days=payload.horizon_days,
+    )
 
 
 # ======================================================================

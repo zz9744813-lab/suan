@@ -138,6 +138,19 @@ export const api = {
       `/api/analytics/ablation${userId ? `?user_id=${userId}` : ''}`,
     ),
 
+  futureTree: (userId: number, asOf?: string) =>
+    get<{
+      as_of: string;
+      horizon_days: number;
+      scenarios: { key: string; label: string; probability: number; description: string; evidence: string[] }[];
+    }>(`/api/future-tree?user_id=${userId}${asOf ? `&as_of=${asOf}` : ''}`),
+
+  counterfactual: (userId: number, interventions: { label: string; effects: Record<string, number> }[]) =>
+    post<{
+      as_of: string;
+      scenarios: { key: string; label: string; dimensions: Record<string, number>; description: string }[];
+    }>(`/api/counterfactual?user_id=${userId}`, { interventions }),
+
   gateTest: (payload: Record<string, unknown>) => post<GateTestResponse>('/api/adversarial/gate-test', payload),
 
   calendarSnapshot: (userId: number, targetDate?: string) =>
