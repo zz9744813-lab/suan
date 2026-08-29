@@ -32,7 +32,20 @@ async def lifespan(app: FastAPI):
         settings.MODEL_VERSION,
         settings.FUSION_VERSION,
     )
+
+    # 第 58 节：SCHEDULER_ENABLED=true 时启动每日自动闭环。
+    # 默认关闭，避免开发环境 23:55 自动跑模型烧 token。
+    scheduler = None
+    if settings.SCHEDULER_ENABLED:
+        from app.database import engine as db_engine
+        from app.scheduler import start_scheduler
+
+        scheduler = start_scheduler(db_engine)
+
     yield
+
+    if scheduler is not None and scheduler.running:
+        scheduler.shutdown(wait=False)
     logger.info("玄鉴 XuanMirror 关闭")
 
 

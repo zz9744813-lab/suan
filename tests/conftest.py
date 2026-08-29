@@ -22,6 +22,19 @@ from app.main import app
 importlib.import_module("app.models")
 
 
+@pytest.fixture(autouse=True)
+def _mock_llm(monkeypatch):
+    """测试默认用 MockProvider（ABSTAIN），保证快速、确定性、不依赖外部网络。
+
+    真实 LLM 冒烟测试在 tests/test_live_llm.py（默认跳过，手动运行）。
+    """
+    from app.providers.base import MockProvider
+
+    monkeypatch.setattr(
+        "app.agents.base.get_provider", lambda tier="reasoning": MockProvider()
+    )
+
+
 @pytest.fixture()
 def client():
     """带内存数据库的测试客户端。

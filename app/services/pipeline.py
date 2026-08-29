@@ -259,24 +259,28 @@ class DailyPipeline:
         signals.append(null_signal)
 
         # --- Reality（第 10 节）---
+        # 无现实事件时跳过 LLM 调用（纯 Null 基线即可），
+        # 减少免费模型池的调用量与延迟。
         try:
-            reality_ctx = AgentContext(
-                user_id=self.user_id,
-                session=self.session,
-                target_event=event_type,
-                domain=domain.value,
-                payload={
-                    "window": window,
-                    "time_scale": time_scale,
-                    "reality_state": reality_state,
-                    "engine_version": "reality-0.1.0",
-                },
-            )
-            r = RealityAgent().run(reality_ctx)
-            if r.ok:
-                sig = RealityAgent().to_signal(reality_ctx, r)
-                if not sig.degraded:
-                    signals.append(sig)
+            total_events = reality_state.get("_meta", {}).get("total_events", 0)
+            if total_events > 0:
+                reality_ctx = AgentContext(
+                    user_id=self.user_id,
+                    session=self.session,
+                    target_event=event_type,
+                    domain=domain.value,
+                    payload={
+                        "window": window,
+                        "time_scale": time_scale,
+                        "reality_state": reality_state,
+                        "engine_version": "reality-0.1.0",
+                    },
+                )
+                r = RealityAgent().run(reality_ctx)
+                if r.ok:
+                    sig = RealityAgent().to_signal(reality_ctx, r)
+                    if not sig.degraded:
+                        signals.append(sig)
         except Exception as exc:
             logger.warning("RealityAgent 失败：%s", exc)
 

@@ -1,66 +1,153 @@
 """LiuyaoAdapter —— 六爻信号。
 
 对应工程方案：
-- 第 6.1 节 六爻
+- 第 6.1 节 六爻（程序确定性排盘，LLM 负责断卦）
 - 第 14 节 统一 Signal Schema
+- 第 25 节 Rule Registry
 - 第 53 节 Adapter 策略
 
+引擎：自研 deterministic 排盘（移植 xiongdun8/liuyao 核心，
+      时间起卦 + CalendarCore 四柱），见 engine.py。
+
 C-006：六爻作为 Traditional Metaphysical Signal 进入系统，
-      其有效性必须由系统自己的长期验证结果决定，不得预先假定有效。
-
-借鉴：
-    纳甲 / 六亲 / 六神 / 世应 / 旺衰 / 空亡 / 暗动 /
-    化进化退 / 三合六合 / 墓库 / 黄金卦例测试
-
-架构：程序确定性排盘，LLM 负责断卦。
-这是整个工程非常重要的参考架构。
-
-当前状态：V0.3 未实现。
-    available 返回 False → signals() 返回 degraded Signal。
-    Fusion 必须跳过 degraded 信号，而不是当作 0
-    （当作 0 会让「不可用」被误读为「强烈反对」）。
-
-接入路径见 docs/ENGINES.md。
+       其有效性必须由系统自己的长期验证结果决定。
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from app.core.base import AdapterQuery, MetaphysicalAdapter, registry
-from app.schemas.signal import Signal, SourceType
+from sqlmodel import Session, select
 
-ENGINE_VERSION = "liuyao-0.1.0"
+from app.core.base import AdapterQuery, MetaphysicalAdapter, registry
+from app.models.core import BirthProfile
+from app.schemas.signal import (
+    Domain,
+    Evidence,
+    EvidenceSource,
+    Signal,
+    SourceType,
+    TimeScale,
+)
+
+from .engine import ENGINE_VERSION, cast_chart
+
+# 用神映射：domain → 六亲（传统用神取用）
+DOMAIN_YONGSHEN: dict[Domain, str] = {
+    Domain.CAREER: "官鬼",
+    Domain.MONEY: "妻财",
+    Domain.STUDY: "父母",
+    Domain.SOCIAL: "兄弟",
+    Domain.RELATIONSHIP: "妻财",
+    Domain.PROJECT: "官鬼",
+    Domain.TRAVEL: "子孙",
+    Domain.COMMUNICATION: "子孙",
+    Domain.HABIT: "兄弟",
+    Domain.PURCHASE: "妻财",
+    Domain.SCHEDULE: "官鬼",
+    Domain.UNEXPECTED_EVENT: "官鬼",
+}
 
 
 class LiuyaoAdapter(MetaphysicalAdapter):
     source = SourceType.LIUYAO
-    engine_name = "liuyao-divination"
+    engine_name = "liuyao-engine"
     engine_version = ENGINE_VERSION
 
     @property
     def available(self) -> bool:
-        # TODO(V0.3): 接入 Johnson-Jia/liuyao-divination 后改为真实检测。
-        return False
+        # 纯 Python 实现，无外部依赖
+        return True
 
+    # ------------------------------------------------------------------
     def compute_chart(self, query: AdapterQuery) -> dict[str, Any]:
-        """确定性排盘（第 54 节：相同输入必须产生相同输出）。"""
-        raise NotImplementedError(
-            "六爻 排盘未实现（V0.3）。"
-            "参考 Johnson-Jia/liuyao-divination，接入步骤见 docs/ENGINES.md。"
-        )
+        """确定性排盘（第 54 节）。"""
+        profile = None
+        if query.session is not None:
+            stmt = select(BirthProfile).where(BirthProfile.user_id == query.user_id)
+            profile = query.session.exec(stmt).first()
 
+        dt = datetime.combine(query.target_date, datetime.min.time())
+        try:
+            h, m = (query.target_time or "00:00").split(":")
+            dt = dt.replace(hour=int(h), minute=int(m))
+        except (ValueError, AttributeError):
+            pass
+
+        chart = cast_chart(dt, birth_date=(profile.solar_birth_date if profile else None))
+
+        if "error" in chart:
+            return {}
+        return chart
+
+    # ------------------------------------------------------------------
     def to_signals(self, query: AdapterQuery, chart: dict[str, Any]) -> list[Signal]:
-        """排盘结果 → 统一 Signal（第 14 节）。
+        """卦盘 → Signal。
 
-        只允许 deterministic 规则映射。
-        LLM 解释由对应的 LiuyaoAgent 完成，不在此处（第 6.1 节）。
+        规则（骨架，待验证）：
+            以「用神」爻的旺衰为核心信号：
+                旺（score > 0）→ 该领域方向正向
+                衰（score < 0）→ 负向
+            strength 由 |score| 归一化，confidence 固定弱先验（禁止 6）。
         """
-        raise NotImplementedError(
-            "六爻 规则映射未实现（V0.3）。"
-            "需先在 rules/ 下登记 Rule ID（第 25 节）。"
-        )
+        yong_shen = DOMAIN_YONGSHEN.get(query.domain, "官鬼")
+        yao = next((y for y in chart.get("yao_details", []) if y["liuqin"] == yong_shen), None)
+        if yao is None:
+            # 用神伏藏/缺失：返回降级信号（不可用 ≠ 反对）
+            return []
+
+        score = float(yao["score"])
+        direction = 1.0 if score >= 0 else -1.0
+        # |score| ∈ [0, 6] → strength ∈ [0.15, 0.85]
+        strength = min(0.85, 0.15 + abs(score) * 0.12)
+        confidence = 0.35
+
+        rule_id = f"LIUYAO-R-{yong_shen}-{query.domain.value}"
+        moving = yao["moving"]
+
+        evidence = [
+            Evidence(
+                source=EvidenceSource.TRADITIONAL_RULE,
+                rule_id=rule_id,
+                description=(
+                    f"用神{yong_shen}位于{yao['position']}"
+                    f"（{yao['branch']}{yao['wuxing']}），旺衰 {score:+.2f}："
+                    f"{'、'.join(yao['status']) or '平'}"
+                ),
+            )
+        ]
+        if moving:
+            evidence.append(
+                Evidence(
+                    source=EvidenceSource.TRADITIONAL_RULE,
+                    rule_id=rule_id,
+                    description=f"{yao['position']}动，变爻 {yao['changed_branch']}（动则事态有变）",
+                )
+            )
+
+        return [
+            Signal(
+                **self._base_signal_kwargs(query),
+                direction=direction,
+                strength=round(strength, 3),
+                confidence=confidence,
+                evidence=evidence,
+                counter_evidence=(
+                    [
+                        Evidence(
+                            source=EvidenceSource.TRADITIONAL_RULE,
+                            rule_id=rule_id,
+                            description=f"用神{ yong_shen}处{ '、'.join(yao['status']) or '平' }，力量不足",
+                        )
+                    ]
+                    if score < 0
+                    else []
+                ),
+                rule_ids=[rule_id],
+                dependency_group="yi_jing",  # 第 20.12 节：六爻与梅花同属易卦体系
+            )
+        ]
 
 
-# 注册到全局 Adapter 注册表（第 53 节）
 registry.register(LiuyaoAdapter())

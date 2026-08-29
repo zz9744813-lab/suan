@@ -36,13 +36,17 @@ def test_health_lists_engines(client):
 
 
 def test_bazi_engine_available(client):
-    """八字依赖 lunar-python，应可用；其余未接入应降级。"""
+    """全部术式引擎应已接入；掌纹/面相依赖 cv2（已装）。"""
     r = client.get("/api/system/engines")
     assert r.status_code == 200, r.text
     by_name = {e["source"]: e["available"] for e in r.json()["engines"]}
     assert by_name["bazi"] is True, "lunar-python 已安装，八字应可用"
-    # V0.2-V0.8 的术式尚未接入，必须诚实降级而不是假装可用
-    assert by_name["ziwei"] is False
+    assert by_name["ziwei"] is True, "iztro-py 已接入"
+    assert by_name["liuyao"] is True
+    assert by_name["meihua"] is True
+    assert by_name["qimen"] is True
+    assert by_name["palm"] is True, "opencv 已安装"
+    assert by_name["face"] is True
 
 
 # ======================================================================

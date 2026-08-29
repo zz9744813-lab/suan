@@ -21,7 +21,9 @@ dependencies = [
 # 见 docs/ENGINES.md。
 engines = [
     "lunar-python>=1.3.0",      # 八字 / 历法 Calendar Core
-    "iztro>=1.0.0",             # 紫微斗数
+    "iztro-py>=0.4.0",          # 紫微斗数（纯 Python）
+    "mediapipe>=0.10.0",        # 掌纹/面相 CV（可选，旧版 solutions API）
+    "opencv-python-headless>=4.9.0",  # 掌纹/面相 CV（主实现，不依赖 mediapipe 模型）
 ]
 dev = [
     "pytest>=8.0.0",

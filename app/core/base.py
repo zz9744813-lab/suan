@@ -45,6 +45,10 @@ class AdapterQuery(BaseModel):
     # 由调用方注入（便于测试隔离），为 None 时回退到全局 engine。
     session: Any = Field(default=None, exclude=True)
 
+    # 掌纹/面相照片的本地路径（第 64 节：仅本地，不入库、不上传）。
+    # 只有 PalmAdapter / FaceAdapter 使用。
+    image_path: str | None = Field(default=None, exclude=True)
+
 
 class MetaphysicalAdapter(ABC):
     """术式 Adapter 抽象基类。

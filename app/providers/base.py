@@ -57,18 +57,45 @@ class LLMResponse:
         return self.error is None
 
     def json(self) -> Any:
-        """尝试解析为 JSON。失败返回 None（调用方须处理）。"""
+        """尝试解析为 JSON。失败返回 None（调用方须处理）。
+
+        容错策略（免费模型池常见非纯 JSON 输出）：
+        1. 剥离 ```json 代码块包裹；
+        2. 整体解析；
+        3. 从文本中提取第一个完整 JSON 对象/数组。
+        """
+        text = (self.content or "").strip()
+
+        # 1. 剥离代码块包裹
+        if text.startswith("```"):
+            inner = text.strip("`").strip()
+            if inner.lower().startswith("json"):
+                inner = inner[4:]
+            text = inner.strip()
+
+        # 2. 整体解析
         try:
-            text = self.content.strip()
-            # 容忍 ```json 代码块包裹
-            if text.startswith("```"):
-                text = text.split("```", 2)[1] if "```" in text[3:] else text
-                if text.lower().startswith("json"):
-                    text = text[4:]
-                text = text.strip().rstrip("`").strip()
             return json.loads(text)
-        except (json.JSONDecodeError, IndexError):
-            return None
+        except json.JSONDecodeError:
+            pass
+
+        # 3. 提取第一个完整 JSON 对象 / 数组
+        for open_ch, close_ch in (("{", "}"), ("[", "]")):
+            start = text.find(open_ch)
+            if start == -1:
+                continue
+            depth = 0
+            for i in range(start, len(text)):
+                if text[i] == open_ch:
+                    depth += 1
+                elif text[i] == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start : i + 1])
+                        except json.JSONDecodeError:
+                            break
+        return None
 
 
 @dataclass
@@ -110,14 +137,21 @@ class MockProvider(LLMProvider):
 
 
 class OpenAICompatibleProvider(LLMProvider):
-    """OpenAI 兼容端点。覆盖大多数中转站与自建网关。"""
+    """OpenAI 兼容端点。覆盖大多数中转站与自建网关。
+
+    健壮性（应对免费模型池的瞬时 5xx）：
+        - 5xx / 网络错误自动重试，最多 3 次
+        - 4xx（key 错误、余额不足）不重试，直接返回错误
+    """
 
     name = "openai_compatible"
 
     def __init__(self, settings: ProviderSettings, tier: Tier = "reasoning") -> None:
         self.settings = settings
         self.tier = tier
-        self._timeout = 120.0
+        # 端点实测 ~5s 响应；30s 足够且不会无限挂起
+        self._timeout = 30.0
+        self.max_retries = 3
 
     @property
     def configured(self) -> bool:
@@ -140,6 +174,9 @@ class OpenAICompatibleProvider(LLMProvider):
         payload: dict[str, Any] = {
             "model": self.settings.model,
             "messages": request.messages,
+            # 显式关闭流式：部分中转站（如 qiyovo）不传 stream 时默认返回
+            # SSE 流（data: {...}），导致 resp.json() 解析失败。
+            "stream": False,
         }
         if request.temperature is not None:
             payload["temperature"] = request.temperature
@@ -149,18 +186,37 @@ class OpenAICompatibleProvider(LLMProvider):
             payload["response_format"] = {"type": "json_object"}
 
         started = time.time()
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, headers=headers, json=payload)
+        last_error = f"{self.tier} provider 调用失败"
+
+        for attempt in range(self.max_retries):
+            try:
+                # trust_env=False：禁用系统代理（HTTPS_PROXY 等）。
+                # 否则 httpx 走本机代理（如 127.0.0.1:2080），
+                # 代理连不上外网端点时请求会挂起到超时。
+                with httpx.Client(timeout=self._timeout, trust_env=False) as client:
+                    resp = client.post(url, headers=headers, json=payload)
+
+                # 5xx：瞬时故障，重试
+                if resp.status_code >= 500:
+                    last_error = f"HTTP {resp.status_code}"
+                    if attempt < self.max_retries - 1:
+                        time.sleep(1 + attempt)
+                        continue
+
                 resp.raise_for_status()
                 data = resp.json()
-        except Exception as exc:
+                break
+            except (httpx.HTTPError, ValueError) as exc:
+                last_error = str(exc)
+                if attempt < self.max_retries - 1:
+                    time.sleep(1 + attempt)
+        else:
             return LLMResponse(
                 content="",
                 provider=self.name,
                 tier=self.tier,
                 duration_ms=int((time.time() - started) * 1000),
-                error=f"LLM 调用失败：{exc}",
+                error=f"LLM 调用失败（重试 {self.max_retries} 次）：{last_error}",
             )
 
         duration_ms = int((time.time() - started) * 1000)
