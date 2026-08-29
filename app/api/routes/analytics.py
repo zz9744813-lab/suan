@@ -96,30 +96,23 @@ def ablation(
     user_id: int | None = None,
     session: Session = Depends(get_session),
 ):
-    """第 33 节：判断每个模块价值的消融实验。
+    """第 33 节：判断每个模块价值的消融实验（实时重算 + 落库）。
 
     系统应允许得到「不好听」的结果，例如：
         Reality：强贡献 / Qimen：强贡献 / Liuyao：弱贡献 /
         Ziwei：很弱贡献 / Bazi：当前无贡献
     """
-    from app.models.learning import AblationResult
+    from app.services.ablation import run_ablation
 
-    stmt = select(AblationResult)
-    rows = session.exec(stmt.order_by(AblationResult.computed_at.desc()).limit(60)).all()
-
-    # 按 run_id 分组
-    runs: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
-        runs.setdefault(r.run_id, []).append(
-            {
-                "variant": r.variant,
-                "sample_size": r.sample_size,
-                "brier": r.brier,
-                "log_loss": r.log_loss,
-                "skill_score": r.skill_score,
-            }
-        )
-    return {"runs": runs, "note": "尚无消融实验数据时返回空（V0.9 实现）"}
+    result = run_ablation(session, user_id=user_id)
+    if result.get("status") == "ok":
+        return {
+            "status": "ok",
+            "sample_size": result["sample_size"],
+            "results": result["results"],
+            "note": "相对 Full Model 的 Brier 差异：正值 = 该模块有正贡献",
+        }
+    return result
 
 
 # ======================================================================

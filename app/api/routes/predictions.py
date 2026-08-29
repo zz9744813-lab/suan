@@ -10,11 +10,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
+
+logger = logging.getLogger("xuanmirror.api.predictions")
 
 from app.agents.verification_agents import OutcomeCollectorAgent, OutcomeJudgeAgent
 from app.database import get_session
@@ -359,6 +362,17 @@ def verify_prediction(
     # ---------- 4. 评分（第 19 节）----------
     if not outcome.needs_confirmation:
         _score(session, row, outcome.outcome)
+
+        # 第 22-26 节：预测错误驱动学习 —— 归因 → 假设 → Shadow → 规则统计 → 可靠度回喂
+        try:
+            from app.services.learning import run_learning_after_verify
+
+            learning = run_learning_after_verify(
+                session, prediction_id=prediction_id, user_id=row.user_id
+            )
+        except Exception as exc:
+            learning = {"status": "error", "reason": str(exc)}
+            logger.error("学习闭环失败：%s", exc)
 
     return {
         "prediction_id": prediction_id,
