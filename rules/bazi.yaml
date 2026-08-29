@@ -1,0 +1,150 @@
+# 八字规则注册表
+#
+# 对应工程方案第 25 节 Rule Registry：
+#   每个传统规则必须有唯一 ID。
+#   以后可以统计：
+#       BAZI-R-00427
+#       调用次数：214
+#       平均增益：+0.018
+#       职业预测：有效 / 关系预测：无效
+#       日级：无效 / 月级：有效
+#
+# C-006：八字作为 Traditional Metaphysical Signal 进入系统，
+#        其有效性必须由系统自己的长期验证结果决定。
+# 因此这里的 rule 只是「待验证信号」的注册，不代表已被证实有效。
+#
+# 新增术式规则必须通过独立验证（第 7 节）：
+#   不允许因为「传统上有名」就获得高权重。
+
+rules:
+  # ---------------------------------------------------------------
+  # 职业领域
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-官-career
+    school: bazi
+    description: >
+      流日/流月天干为「官杀」（克日主）且目标领域为职业时，
+      传统上视为压力/变动之象，方向为负向抑制。
+    domains: [career]
+    supported_windows: [day, week, month]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 官
+      direction: -1.0
+      strength: 0.4
+      confidence: 0.35
+      note: 弱先验（禁止 6：初始只允许弱先验，长期由实证数据学习）
+
+  - rule_id: BAZI-R-印-career
+    school: bazi
+    description: >
+      流日天干为「印绶」（生日主）且目标领域为职业时，
+      传统上视为贵人/资质之象，方向为正向。
+    domains: [career, study]
+    supported_windows: [day, week, month]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 印
+      direction: 1.0
+      strength: 0.6
+      confidence: 0.35
+
+  # ---------------------------------------------------------------
+  # 财务领域
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-财-money
+    school: bazi
+    description: >
+      流日天干为「财星」（日主所克）且目标领域为财务时，
+      传统上视为财动之象，方向为正向。
+    domains: [money]
+    supported_windows: [day, week, month]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 财
+      direction: 1.0
+      strength: 0.55
+      confidence: 0.35
+
+  # ---------------------------------------------------------------
+  # 社交 / 沟通
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-食伤-social
+    school: bazi
+    description: >
+      流日天干为「食伤」（日主所生）且目标领域为社交/沟通时，
+      传统上视为表达输出之象，方向为正向。
+    domains: [social, communication]
+    supported_windows: [day, week]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 食伤
+      direction: 1.0
+      strength: 0.5
+      confidence: 0.35
+
+  # ---------------------------------------------------------------
+  # 意外事件 / 日程
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-官-unexpected
+    school: bazi
+    description: >
+      流日天干为「官杀」且目标为意外事件/日程变动时，
+      传统上视为突发压力之象，方向为正向。
+    domains: [unexpected_event, schedule]
+    supported_windows: [day]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 官
+      direction: 1.0
+      strength: 0.45
+      confidence: 0.35
+
+  # ---------------------------------------------------------------
+  # 学习
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-印-study
+    school: bazi
+    description: >
+      流日天干为「印绶」且目标领域为学习时，
+      传统上视为吸收知识之象，方向为正向。
+    domains: [study]
+    supported_windows: [day, week]
+    version: "1.0"
+    status: active
+    definition:
+      mechanism: shishen_category
+      category: 印
+      direction: 1.0
+      strength: 0.6
+      confidence: 0.35
+
+  # ---------------------------------------------------------------
+  # 实验性规则示例（第 7 节：必须通过验证才能获得权重）
+  # ---------------------------------------------------------------
+  - rule_id: BAZI-R-比劫-relationship
+    school: bazi
+    description: >
+      流日天干为「比劫」（与日主同五行）时对关系的传统映射。
+      当前为实验性，无权重，需积累验证样本。
+    domains: [relationship]
+    supported_windows: [day, week]
+    version: "0.1"
+    status: shadow
+    definition:
+      mechanism: shishen_category
+      category: 比劫
+      direction: 0.0
+      strength: 0.0
+      confidence: 0.1
+      note: 第 7 节：新增术式/规则必须通过独立验证才能获得权重

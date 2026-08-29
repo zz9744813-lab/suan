@@ -1,0 +1,115 @@
+"""玄鉴 XuanMirror —— FastAPI 应用入口。
+
+对应工程方案第 44 节：Python / FastAPI / Pydantic / SQLModel / SQLite(V1)。
+
+安全边界（第 65 节）：
+    这是一个传统术数与个人预测实验平台，不是经科学验证的预知系统。
+    系统不得：以术数诊断疾病、预测死亡日期、替代医生/律师/财务专业人士、
+    鼓励高风险下注、因面部特征推断敏感人格事实。
+"""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import get_settings
+from app.database import create_db_and_tables
+
+logger = logging.getLogger("xuanmirror")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    create_db_and_tables()
+    logger.info(
+        "玄鉴 XuanMirror 启动（env=%s, model=%s, fusion=%s）",
+        settings.XUANMIRROR_ENV,
+        settings.MODEL_VERSION,
+        settings.FUSION_VERSION,
+    )
+    yield
+    logger.info("玄鉴 XuanMirror 关闭")
+
+
+app = FastAPI(
+    title="玄鉴 XuanMirror",
+    description=(
+        "个人智能未来预测、验证与自校准系统。\n\n"
+        "核心原则：Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn → Predict Again\n\n"
+        "**安全边界**：这是一个传统术数与个人预测实验平台，"
+        "不是经科学验证的预知系统。不得以术数替代医疗、法律、财务专业判断。"
+    ),
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# 前端 dev server（Vite 默认 5173）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ----------------------------------------------------------------------
+@app.get("/", tags=["meta"])
+def root():
+    settings = get_settings()
+    return {
+        "name": "玄鉴 XuanMirror",
+        "version": "0.1.0",
+        "principle": "Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn",
+        "status": "skeleton",
+        "notice": (
+            "这是一个传统术数与个人预测实验平台，不是经科学验证的预知系统。"
+            "不得以术数替代医疗、法律、财务专业判断（第 65 节）。"
+        ),
+        "versions": {
+            "model": settings.MODEL_VERSION,
+            "fusion": settings.FUSION_VERSION,
+            "prompt": settings.PROMPT_VERSION,
+            "rule": settings.RULE_VERSION,
+            "engine": settings.ENGINE_VERSION,
+        },
+    }
+
+
+@app.get("/health", tags=["meta"])
+def health():
+    from app.core.base import registry
+
+    return {
+        "status": "ok",
+        "engines": {
+            a.source.value: {
+                "engine": a.engine_name,
+                "available": a.available,
+            }
+            for a in registry.all()
+        },
+    }
+
+
+# ----------------------------------------------------------------------
+# 路由注册
+# ----------------------------------------------------------------------
+from app.api.routes import (  # noqa: E402
+    analytics,
+    predictions,
+    system,
+)
+
+app.include_router(predictions.router, prefix="/api", tags=["predictions"])
+app.include_router(analytics.router, prefix="/api", tags=["analytics"])
+app.include_router(system.router, prefix="/api", tags=["system"])

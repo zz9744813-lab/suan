@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# 环境变量 / 密钥（C-007：API Key 只允许后端保存，绝不入库）
+.env
+.env.local
+*.key
+
+# 数据库（本地优先，第 64 节隐私原则）
+*.db
+*.db-shm
+*.db-wal
+data/*.db
+data/*.sqlite3
+
+# 高敏感原始素材：掌纹/面相原图一律本地，禁止入库
+data/raw_palm/
+data/raw_face/
+*.jpg
+*.jpeg
+*.png
+*.webp
+!frontend/public/**/*.png
+!frontend/public/**/*.svg
+
+# 测试 / 覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# 报告产物
+reports/daily/
+reports/weekly/
+reports/monthly/
+reports/audit/
+
+# Node / 前端
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# 日志
+logs/
+*.log

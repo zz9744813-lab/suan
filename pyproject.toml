@@ -1,0 +1,45 @@
+[project]
+name = "xuanmirror"
+version = "0.1.0"
+description = "玄鉴 XuanMirror — 个人智能未来预测、验证与自校准系统"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlmodel>=0.0.21",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.5.0",
+    "httpx>=0.27.0",
+    "python-dateutil>=2.9.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+# 术数确定性引擎。全部为可选项：缺失时对应 Adapter 进入
+# DEGRADED 状态并返回空 Signal，系统其余部分照常运行。
+# 见 docs/ENGINES.md。
+engines = [
+    "lunar-python>=1.3.0",      # 八字 / 历法 Calendar Core
+    "iztro>=1.0.0",             # 紫微斗数
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
