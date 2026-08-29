@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -195,6 +195,74 @@ def counterfactual(
         interventions=payload.interventions,
         horizon_days=payload.horizon_days,
     )
+
+
+# ======================================================================
+# 双盲实验（第 34 节）
+# ======================================================================
+class BlindRunIn(BaseModel):
+    limit: int = Field(default=6, ge=1, le=20)
+    scale: str = Field(default="day", pattern="^(day|week|month|year)$")
+    target_date: date | None = None
+
+
+@router.post("/experiments/run-blind")
+def run_blind_experiment(
+    user_id: int = Query(...),
+    payload: BlindRunIn | None = None,
+    session: Session = Depends(get_session),
+):
+    """第 34 节：三组盲跑对比。
+
+        A：Reality + Null（无术数）
+        B：Metaphysical Only（术数 + Null，无 Reality）
+        C：Fusion（全部）
+    长期比较三组的概率质量，判断术数是否有增量。
+    """
+    from app.models.learning import ExperimentRun
+    from app.services.pipeline import DailyPipeline
+
+    payload = payload or BlindRunIn()
+    import uuid
+
+    arms = [
+        ("A_reality_null", "reality_null"),
+        ("B_metaphysical_only", "metaphysical_only"),
+        ("C_fusion", None),
+    ]
+
+    results = {}
+    for label, arm in arms:
+        pipe = DailyPipeline(session, user_id=user_id)
+        pipe.experiment_arm = arm
+        r = pipe.run(
+            target_date=payload.target_date or (date.today() + timedelta(days=1)),
+            scale=payload.scale,
+            limit=payload.limit,
+        )
+        results[label] = {
+            "frozen": len(r.frozen),
+            "candidates": len(r.candidates),
+            "rejected": len(r.rejected),
+            "notes": r.notes[:3],
+        }
+        session.add(
+            ExperimentRun(
+                run_id=f"BLIND-{uuid.uuid4().hex[:8]}",
+                mode="blind_ab",
+                arm=label,
+                started_at=datetime.utcnow(),
+                sample_size=len(r.frozen),
+                note="三组盲跑（第 34 节）",
+            )
+        )
+    session.commit()
+
+    return {
+        "status": "ok",
+        "arms": results,
+        "note": "三组独立预测，长期比较 Brier/Skill（需验证后统计）",
+    }
 
 
 # ======================================================================

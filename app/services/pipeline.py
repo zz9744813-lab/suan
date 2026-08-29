@@ -101,6 +101,8 @@ class DailyPipeline:
         self.session = session
         self.user_id = user_id
         self.settings = get_settings()
+        # 第 34 节双盲实验：None=正常融合；reality_null / metaphysical_only / fusion
+        self.experiment_arm: str | None = None
 
     # ==================================================================
     # 23:30 更新 Reality State
@@ -166,6 +168,7 @@ class DailyPipeline:
                     time_scale=time_scale,
                     target_date=target_date,
                     reality_state=reality_state,
+                    experiment_arm=self.experiment_arm,
                 )
             except Exception as exc:
                 result.notes.append(f"{event_type} 信号收集失败：{exc}")
@@ -238,15 +241,21 @@ class DailyPipeline:
         time_scale: TimeScale,
         target_date: date,
         reality_state: dict[str, Any],
+        experiment_arm: str | None = None,
     ) -> tuple[list[Signal], float]:
         """Blind 收集各源信号。
 
         第 12 节：每个 Adapter/Agent 只拿到自己的输入，
         不存在任何 agent 读取他人结论的路径。
+
+        第 34 节双盲实验（arm）：
+            reality_null      → 只用 Reality + Null（排除术数）
+            metaphysical_only → 只用术式 + Null（排除 Reality）
+            fusion / None     → 全部信号
         """
         signals: list[Signal] = []
 
-        # --- Null Model（第 11 节，必须提供）---
+        # --- Null Model（第 11 节，所有 arm 都必须提供基线）---
         null_model = NullModel(self.session)
         null_signal = null_model.signal(
             user_id=self.user_id,
@@ -261,28 +270,29 @@ class DailyPipeline:
         # --- Reality（第 10 节）---
         # 无现实事件时跳过 LLM 调用（纯 Null 基线即可），
         # 减少免费模型池的调用量与延迟。
-        try:
-            total_events = reality_state.get("_meta", {}).get("total_events", 0)
-            if total_events > 0:
-                reality_ctx = AgentContext(
-                    user_id=self.user_id,
-                    session=self.session,
-                    target_event=event_type,
-                    domain=domain.value,
-                    payload={
-                        "window": window,
-                        "time_scale": time_scale,
-                        "reality_state": reality_state,
-                        "engine_version": "reality-0.1.0",
-                    },
-                )
-                r = RealityAgent().run(reality_ctx)
-                if r.ok:
-                    sig = RealityAgent().to_signal(reality_ctx, r)
-                    if not sig.degraded:
-                        signals.append(sig)
-        except Exception as exc:
-            logger.warning("RealityAgent 失败：%s", exc)
+        if experiment_arm != "metaphysical_only":
+            try:
+                total_events = reality_state.get("_meta", {}).get("total_events", 0)
+                if total_events > 0:
+                    reality_ctx = AgentContext(
+                        user_id=self.user_id,
+                        session=self.session,
+                        target_event=event_type,
+                        domain=domain.value,
+                        payload={
+                            "window": window,
+                            "time_scale": time_scale,
+                            "reality_state": reality_state,
+                            "engine_version": "reality-0.1.0",
+                        },
+                    )
+                    r = RealityAgent().run(reality_ctx)
+                    if r.ok:
+                        sig = RealityAgent().to_signal(reality_ctx, r)
+                        if not sig.degraded:
+                            signals.append(sig)
+            except Exception as exc:
+                logger.warning("RealityAgent 失败：%s", exc)
 
         # --- 术式 Adapter（deterministic 部分，第 6.1 节）---
         query = AdapterQuery(
@@ -298,6 +308,9 @@ class DailyPipeline:
 
         for adapter in adapter_registry.all():
             if not adapter.available:
+                continue
+            # 第 34 节双盲 A 组：只用 Reality + Null，排除全部术式
+            if experiment_arm == "reality_null":
                 continue
             try:
                 signals.extend(adapter.signals(query))
