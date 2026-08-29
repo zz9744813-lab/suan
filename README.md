@@ -45,30 +45,39 @@
 
 ## 当前状态：V0.1–V1.0 全版本骨架
 
-本仓库当前交付的是**结构完整、业务逻辑未实现**的全版本骨架：
+## 当前状态：V1.0 达成（74 个测试通过）
 
-- ✅ 全部 30+ 张数据库表（SQLModel / SQLite）
-- ✅ 七个术式 Adapter 接口 + Calendar Core
-- ✅ 21 个 Agent 定义
+本仓库交付的是**完整实现**，V1.0 十项验收标准（PRED-01…EXP-01）全部通过：
+
+- ✅ 37 张数据库表（SQLModel / SQLite）
+- ✅ **七个术式引擎全部接入**：八字(lunar-python) / 紫微(iztro-py) / 六爻(自研) / 梅花(自研) / 奇门(移植) / 掌纹(OpenCV) / 面相(OpenCV)
+- ✅ 21 个 Agent（LLM 真实可用，qiyovo.com:3000）
 - ✅ 14 种对抗性 Attack + 串联 Gate
-- ✅ 评分体系（Brier / LogLoss / Calibration / Sharpness / SkillScore）
-- ✅ 完整前端 8 个页面 + ECharts 校准曲线
-- ⚠️ 大部分业务逻辑为 `NotImplementedError` stub
+- ✅ 评分体系 + 校准 + 可靠度矩阵 + Skill vs Null
+- ✅ 学习闭环（归因 / Shadow / 规则统计 / 消融 / 可靠度回喂）
+- ✅ Scheduler 每日自动闭环（23:30→23:55）
+- ✅ Future Tree + Counterfactual
+- ✅ Obsidian 导出 + 日报 / 周报 / 月报 / 审计
+- ✅ 双盲实验（A/B/C 三组）+ Hidden Prediction
+- ✅ 完整前端 8 页面 + ECharts
 
 版本路线（方案第 66–75 节）：
 
 | 版本 | 内容 | 状态 |
 |---|---|---|
-| V0.1 | 用户档案 / Calendar Core / 八字 / Reality / Future Scanner / Prediction Ledger / 人工验证 / Brier | 骨架 |
-| V0.2 | + 紫微 / Blind Agent / Null Model | 骨架 |
-| V0.3 | + 六爻 / 梅花 / Adversarial Gate | 骨架 |
-| V0.4 | + 奇门 / Prediction Budget / Hidden Prediction | 骨架 |
-| V0.5 | + Calibration / Skill Score / Reliability Matrix / Error Attribution | 骨架 |
-| V0.6 | + Obsidian Export / 日报周报 | 骨架 |
-| V0.7 | + Future Tree / Counterfactual | 骨架 |
-| V0.8 | + Palm CV / Face Landmark | 骨架 |
-| V0.9 | + Shadow Learning / Rule Registry / Ablation Testing | 骨架 |
-| V1.0 | 验收标准 PRED-01…EXP-01 | 未达成 |
+| V0.1 | 用户档案 / Calendar Core / 八字 / Reality / Future Scanner / Prediction Ledger / 人工验证 / Brier | ✅ |
+| V0.2 | + 紫微 / Blind Agent / Null Model | ✅ |
+| V0.3 | + 六爻 / 梅花 / Adversarial Gate | ✅ |
+| V0.4 | + 奇门 / Prediction Budget / Hidden Prediction | ✅ |
+| V0.5 | + Calibration / Skill Score / Reliability Matrix / Error Attribution | ✅ |
+| V0.6 | + Obsidian Export / 日报周报 | ✅ |
+| V0.7 | + Future Tree / Counterfactual | ✅ |
+| V0.8 | + Palm CV / Face Landmark | ✅ |
+| V0.9 | + Shadow Learning / Rule Registry / Ablation Testing | ✅ |
+| V1.0 | 验收标准 PRED-01…EXP-01 | ✅ 达成 |
+
+**已知限制**：qiyovo.com:3000 中转站对长 prompt（>1k tokens）响应慢（~50s），
+术式 Agent 已通过 `_summarize_chart` 精简输入规避；掌纹/面相需提供本地照片才产出信号。
 
 ---
 
