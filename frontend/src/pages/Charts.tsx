@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
-import { api, DEFAULT_USER_ID } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading } from '../components/ui';
+import { api, DEFAULT_USER_ID, type FortuneReading } from '../api/client';
+import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
 import { SOURCE_LABEL, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -31,6 +31,183 @@ const ENGINE_REF: Record<string, string> = {
   face: 'MediaPipe Face Landmark',
 };
 
+/** 批示维度 → 图标 + 说明 */
+const READING_META: { key: string; label: string; icon: string }[] = [
+  { key: '命格总论', label: '命格总论', icon: '命' },
+  { key: '事业', label: '事业', icon: '业' },
+  { key: '财运', label: '财运', icon: '财' },
+  { key: '婚恋', label: '婚恋', icon: '姻' },
+  { key: '健康', label: '健康', icon: '健' },
+  { key: '未来5年', label: '未来 5 年', icon: '5' },
+  { key: '未来10年', label: '未来 10 年', icon: '10' },
+];
+
+/** 命理批示区块（大运时间轴 + 流年 + 批示卡片） */
+function FortuneSection({ data }: { data: FortuneReading }) {
+  const chart = data.chart;
+  if (!chart) {
+    return <ErrorBox message={data.error ?? '命盘排盘失败'} />;
+  }
+
+  const bazi = chart.bazi ?? {};
+  const pillars = [
+    ['年柱', bazi.year],
+    ['月柱', bazi.month],
+    ['日柱', bazi.day],
+    ['时柱', bazi.time],
+  ];
+
+  const dayun = chart.dayun ?? [];
+  // 当前年龄（用于标记所在大运）
+  const nowYear = new Date().getFullYear();
+  const birthYear = chart.liunian?.[0]?.age != null
+    ? nowYear - (chart.liunian[0].age ?? 0)
+    : null;
+
+  return (
+    <div className="space-y-5">
+      {/* 四柱 + 五行 + 十神 */}
+      <Card
+        title="本命八字"
+        subtitle={`日主 ${chart.day_master} · 命宫 ${chart.ming_gong || '—'} · ${
+          chart.birth_time_known ? '时辰已确认' : '时辰未知（时柱存疑）'
+        }`}
+      >
+        <div className="grid grid-cols-4 gap-2 text-center">
+          {pillars.map(([k, v]) => (
+            <div key={k} className="rounded-xl border border-ink-700 bg-ink-900 py-3">
+              <div className="text-[11px] text-slate-600">{k}</div>
+              <div className="mt-1 font-serif text-xl font-semibold tracking-[0.15em] text-gilt-300">
+                {v || '—'}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                五行 {chart.wuxing?.[k === '年柱' ? 'year' : k === '月柱' ? 'month' : k === '日柱' ? 'day' : 'time'] ?? '—'}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+          {(['year', 'month', 'day', 'time'] as const).map((k) => (
+            <div key={k} className="rounded-lg bg-ink-950/50 px-3 py-2">
+              <div className="text-slate-600">
+                {k === 'year' ? '年' : k === 'month' ? '月' : k === 'day' ? '日' : '时'} 十神
+              </div>
+              <div className="mt-0.5 text-slate-300">{chart.shishen?.[k] ?? '—'}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600">
+          <span>纳音：{['year', 'month', 'day', 'time'].map((k) => chart.nayin?.[k]).filter(Boolean).join(' · ') || '—'}</span>
+        </div>
+      </Card>
+
+      {/* 大运时间轴 */}
+      <Card title="大运" subtitle="每十年一换的大运干支，标出当前所处大运">
+        {dayun.length === 0 ? (
+          <EmptyState>暂无大运数据</EmptyState>
+        ) : (
+          <div className="flex items-stretch gap-0 overflow-x-auto pb-1">
+            {dayun.map((d, i) => {
+              const isCurrent =
+                birthYear != null && nowYear >= d.start_year && i < dayun.length - 1 && nowYear < dayun[i + 1].start_year;
+              return (
+                <div key={i} className="flex min-w-[76px] flex-1 items-center">
+                  <div
+                    className={`flex w-full flex-col items-center gap-1 rounded-lg border px-1 py-2 text-center transition-colors ${
+                      isCurrent
+                        ? 'border-gilt-500/60 bg-gilt-500/15'
+                        : 'border-ink-700 bg-ink-900'
+                    }`}
+                  >
+                    <span className={`font-serif text-base font-semibold tracking-wide ${isCurrent ? 'text-gilt-300' : 'text-slate-300'}`}>
+                      {d.ganzhi}
+                    </span>
+                    <span className="text-[10px] text-slate-600">{d.start_age} 岁</span>
+                    <span className="text-[10px] text-slate-700">{d.start_year}</span>
+                    {isCurrent && (
+                      <Badge tone="gilt">当前</Badge>
+                    )}
+                  </div>
+                  {i < dayun.length - 1 && (
+                    <div className={`h-px w-2 shrink-0 ${isCurrent ? 'bg-gilt-500/50' : 'bg-ink-700'}`} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* 流年运势表 */}
+      <Card title="流年运势" subtitle="未来十年的流年干支与生肖">
+        {!chart.liunian || chart.liunian.length === 0 ? (
+          <EmptyState>暂无流年数据</EmptyState>
+        ) : (
+          <div className="grid grid-cols-5 gap-2 text-center md:grid-cols-10">
+            {chart.liunian.map((ly) => (
+              <div key={ly.year} className="rounded-lg border border-ink-700 bg-ink-900 py-2.5">
+                <div className="text-[11px] text-slate-600">{ly.year}</div>
+                <div className="mt-0.5 font-serif text-lg font-semibold tracking-wider text-gilt-300">
+                  {ly.ganzhi}
+                </div>
+                <div className="text-[10px] text-slate-600">
+                  {ly.zodiac}年{ly.age != null ? ` · ${ly.age}岁` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* LLM 批示卡片 */}
+      <Card
+        title="命理批示"
+        subtitle="传统术数参考解读，非科学预测；不诊断疾病、不替代医疗/法律/财务建议"
+      >
+        {!data.reading ? (
+          <ErrorBox message={data.error ?? '批示生成失败（可重试）'} />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {READING_META.map((m) => {
+              const text = data.reading?.[m.key];
+              if (!text) return null;
+              const isWide = m.key === '命格总论' || m.key === '未来10年';
+              return (
+                <div
+                  key={m.key}
+                  className={`rounded-xl border border-white/[0.06] bg-ink-950/40 p-4 ${isWide ? 'md:col-span-2' : ''}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md border border-gilt-500/30 bg-gilt-500/10 text-xs font-semibold text-gilt-300">
+                      {m.icon}
+                    </span>
+                    <span className="text-sm font-medium text-slate-200">{m.label}</span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{text}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="mt-3 text-[11px] text-slate-600">
+          模型 {data.model || '—'} · {((data.duration_ms ?? 0) / 1000).toFixed(1)}s
+        </div>
+        {/* 推理链路（思考过程）可折叠展示——命理批示的推理依据，增强可解释性 */}
+        {data.reasoning && (
+          <details className="mt-3 rounded-xl border border-white/[0.06] bg-ink-950/40 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-300">
+              查看模型推理链路（思考过程）
+            </summary>
+            <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-600">
+              {data.reasoning}
+            </pre>
+          </details>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 export default function Charts() {
   const engines = useAsync(() => api.engines(), []);
   const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -41,31 +218,42 @@ export default function Charts() {
     [pid],
   );
 
+  // 命理批示
+  const fortune = useAsync(() => api.fortuneReading(DEFAULT_USER_ID), []);
+
   const payload = (snapshot.data?.payload ?? {}) as Record<string, any>;
-  const bazi = payload.bazi ?? {};
-  const shishen = payload.shishen ?? {};
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-100">命盘</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          术式引擎状态、统一历法内核快照，以及每条预测的完整血缘。
-        </p>
-      </header>
+      <PageHeader
+        title="命盘"
+        desc="本命八字、大运流年与命理批示。传统术数参考，非科学预测。"
+        right={
+          <PrimaryButton onClick={() => fortune.reload()} busy={fortune.loading}>
+            {fortune.loading ? '批示生成中，约 2-3 分钟…' : '重新生成批示'}
+          </PrimaryButton>
+        }
+      />
 
-      {/* 引擎状态 */}
+      {/* 命理批示（核心展示） */}
+      {fortune.loading && <Loading label="正在排盘并生成命理批示（推理模型思考 + 正文，约 2-3 分钟，请耐心等待）…" />}
+      {fortune.error && <ErrorBox message={fortune.error} />}
+      {!fortune.loading && !fortune.error && fortune.data && (
+        <FortuneSection data={fortune.data} />
+      )}
+
+      {/* 术式引擎 */}
       <Card
         title="术式引擎"
         subtitle="第 53 节：通过 Adapter 接入，输出统一 Signal。未接入的诚实降级，绝不假装可用"
       >
         {engines.loading && <Loading />}
         {engines.error && <ErrorBox message={engines.error} />}
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="stagger grid gap-2 md:grid-cols-2">
           {(engines.data?.engines ?? []).map((e) => (
             <div
               key={e.source}
-              className="flex items-center justify-between rounded border border-ink-800 px-3 py-2"
+              className="row-hover flex items-center justify-between rounded-lg border border-ink-800 px-3 py-2"
             >
               <div>
                 <div className="flex items-center gap-2">
@@ -95,7 +283,7 @@ export default function Charts() {
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="rounded border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 focus:border-slate-600 focus:outline-none"
+            className={inputCls}
           />
         }
       >
@@ -115,9 +303,11 @@ export default function Charts() {
                   ['日', payload.day_ganzhi],
                   ['时', payload.hour_ganzhi],
                 ].map(([k, v]) => (
-                  <div key={k} className="rounded bg-ink-900 py-2">
+                  <div key={k} className="rounded-lg border border-ink-700 bg-ink-900 py-2.5">
                     <div className="text-[11px] text-slate-600">{k}</div>
-                    <div className="mt-0.5 text-base text-slate-200">{v || '—'}</div>
+                    <div className="mt-1 font-serif text-lg font-semibold tracking-[0.15em] text-gilt-300">
+                      {v || '—'}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -132,21 +322,23 @@ export default function Charts() {
               <div className="mb-1 font-medium text-slate-400">本命八字</div>
               <div className="grid grid-cols-4 gap-2 text-center">
                 {[
-                  ['年', bazi.year],
-                  ['月', bazi.month],
-                  ['日', bazi.day],
-                  ['时', bazi.time],
+                  ['年', payload.bazi?.year],
+                  ['月', payload.bazi?.month],
+                  ['日', payload.bazi?.day],
+                  ['时', payload.bazi?.time],
                 ].map(([k, v]) => (
-                  <div key={k} className="rounded bg-ink-900 py-2">
+                  <div key={k} className="rounded-lg border border-ink-700 bg-ink-900 py-2.5">
                     <div className="text-[11px] text-slate-600">{k}</div>
-                    <div className="mt-0.5 text-base text-slate-200">{v || '—'}</div>
+                    <div className="mt-1 font-serif text-lg font-semibold tracking-[0.15em] text-gilt-300">
+                      {v || '—'}
+                    </div>
                   </div>
                 ))}
               </div>
-              <div className="mt-2 text-slate-600">日主 {bazi.day_master || '—'}</div>
+              <div className="mt-2 text-slate-600">日主 {payload.bazi?.day_master || '—'}</div>
               <div className="text-slate-600">
-                十神（天干） 年 {shishen.year || '—'} · 月 {shishen.month || '—'} · 时{' '}
-                {shishen.time || '—'}
+                十神（天干） 年 {payload.shishen?.year || '—'} · 月 {payload.shishen?.month || '—'} · 时{' '}
+                {payload.shishen?.time || '—'}
               </div>
               {payload.ming_gong && (
                 <div className="text-slate-600">命宫 {payload.ming_gong}</div>
@@ -166,7 +358,7 @@ export default function Charts() {
             value={pid}
             onChange={(e) => setPid(e.target.value)}
             placeholder="输入 prediction_id"
-            className="flex-1 rounded border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-slate-600 focus:outline-none"
+            className={`flex-1 ${inputCls}`}
           />
         </div>
 

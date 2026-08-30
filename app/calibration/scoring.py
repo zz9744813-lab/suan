@@ -208,18 +208,24 @@ class Aggregate:
     overconfidence: float = 0.0
 
     def to_dict(self) -> dict:
+        def finite(v: float | None) -> float | None:
+            """NaN/Inf 不是合法 JSON，统一输出 None（前端显示 —）。"""
+            if v is None or not math.isfinite(v):
+                return None
+            return round(v, 4)
+
         return {
             "sample_size": self.sample_size,
-            "brier": round(self.brier, 4),
-            "log_loss": round(self.log_loss, 4),
-            "sharpness": round(self.sharpness, 4),
-            "observed_rate": round(self.observed_rate, 4),
-            "mean_probability": round(self.mean_probability, 4),
+            "brier": finite(self.brier),
+            "log_loss": finite(self.log_loss),
+            "sharpness": finite(self.sharpness),
+            "observed_rate": finite(self.observed_rate),
+            "mean_probability": finite(self.mean_probability),
             "reliability": self.reliability,
             "ci": [round(self.ci_low, 4), round(self.ci_high, 4)],
-            "skill_score": None if self.skill_score is None else round(self.skill_score, 4),
-            "null_brier": None if self.null_brier is None else round(self.null_brier, 4),
-            "overconfidence": round(self.overconfidence, 4),
+            "skill_score": finite(self.skill_score),
+            "null_brier": finite(self.null_brier),
+            "overconfidence": finite(self.overconfidence),
             "bins": [
                 {
                     "bin": [b.bin_lower, b.bin_upper],

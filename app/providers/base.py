@@ -32,7 +32,7 @@ from typing import Any, Literal
 
 import httpx
 
-from app.config import ProviderSettings, get_settings
+from app.config import ProviderSettings
 
 Tier = Literal["reasoning", "cheap", "vision"]
 
@@ -49,6 +49,11 @@ class LLMResponse:
     tokens_in: int | None = None
     tokens_out: int | None = None
     duration_ms: int = 0
+
+    # 思考链路（reasoning/CoT）。deepseek-v4-flash 等推理模型
+    # 会在独立字段返回英文思考过程，正文在 content 里。
+    # 保留此字段用于审计与可选展示，绝不当成正文解析。
+    reasoning: str = ""
 
     error: str | None = None
 
@@ -173,9 +178,13 @@ class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, settings: ProviderSettings, tier: Tier = "reasoning") -> None:
         self.settings = settings
         self.tier = tier
-        # 端点实测：首次长请求可达 44s。90s 足够且不会无限挂起。
-        self._timeout = 90.0
-        self.max_retries = 2
+        # 端点实测：命理批示等长请求 43~56s；推理模型思考链路长时更久。
+        # 180s 给足「思考 + 正文」的生成时间，又不至于无限挂起。
+        self._timeout = 180.0
+        # 重试 5 次（qiyovo 中转站实测成功率仅约 60%，失败模式有三种：
+        # HTTP 500 / HTTP 200 + error 包体 / HTTP 200 + 空 choices。
+        # 60% 成功率下 3 次全失败概率 6.4%，5 次降到 1%，必须重试兜底）
+        self.max_retries = 5
 
     @property
     def configured(self) -> bool:
@@ -224,7 +233,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 if resp.status_code >= 500:
                     last_error = f"HTTP {resp.status_code}"
                     if attempt < self.max_retries - 1:
-                        time.sleep(1 + attempt)
+                        time.sleep(1 + attempt * 2)
                         continue
 
                 resp.raise_for_status()
@@ -237,11 +246,32 @@ class OpenAICompatibleProvider(LLMProvider):
                     }
                 else:
                     data = resp.json()
+
+                # 软错误兜底：qiyovo 中转站有四种失败模式（HTTP 200 但无效）：
+                #   1. {"error": {...}}                     → 有 error 字段
+                #   2. {"code":502,"message":"overloaded"}  → 有 code 无 choices
+                #   3. choices 为空 / message 缺失          → 无内容
+                #   4. content 与 reasoning 均为空          → 空回复
+                if isinstance(data, dict):
+                    choices = data.get("choices")
+                    msg = choices[0].get("message") if isinstance(choices, list) and choices else None
+                    content_ok = bool(msg and (msg.get("content") or msg.get("reasoning")))
+                    if "error" in data or ("code" in data and "choices" not in data) or not content_ok:
+                        err_msg = (
+                            data.get("error")
+                            or data.get("message")
+                            or ("空回复" if not content_ok else None)
+                            or str(data)[:120]
+                        )
+                        last_error = f"upstream soft-error: {err_msg}"
+                        if attempt < self.max_retries - 1:
+                            time.sleep(1 + attempt * 2)
+                            continue
                 break
             except (httpx.HTTPError, ValueError) as exc:
                 last_error = str(exc)
                 if attempt < self.max_retries - 1:
-                    time.sleep(1 + attempt)
+                    time.sleep(1 + attempt * 2)
         else:
             return LLMResponse(
                 content="",
@@ -253,7 +283,11 @@ class OpenAICompatibleProvider(LLMProvider):
 
         duration_ms = int((time.time() - started) * 1000)
         try:
-            content = data["choices"][0]["message"]["content"] or ""
+            message = data["choices"][0]["message"] or {}
+            content = message.get("content") or ""
+            # 思考链路单独提取（deepseek-v4-flash 的 reasoning 字段），
+            # 不混入 content，避免污染正文解析。
+            reasoning = message.get("reasoning") or ""
         except (KeyError, IndexError, TypeError) as exc:
             return LLMResponse(
                 content="",
@@ -272,6 +306,7 @@ class OpenAICompatibleProvider(LLMProvider):
             tokens_in=usage.get("prompt_tokens"),
             tokens_out=usage.get("completion_tokens"),
             duration_ms=duration_ms,
+            reasoning=reasoning,
         )
 
 
@@ -279,9 +314,13 @@ class OpenAICompatibleProvider(LLMProvider):
 # Provider 工厂（第 42 节分层）
 # ----------------------------------------------------------------------
 def get_provider(tier: Tier = "reasoning") -> LLMProvider:
-    """按分层取得 Provider。未配置则返回 MockProvider。"""
-    settings = get_settings()
-    ps = settings.provider(tier)
+    """按分层取得 Provider。未配置则返回 MockProvider。
+
+    配置来源：运行时覆盖层（设置页保存）> .env（第 41 节）。
+    """
+    from app.services.llm_config import effective_provider
+
+    ps = effective_provider(tier)
     if not ps.configured:
         return MockProvider()
     return OpenAICompatibleProvider(ps, tier=tier)

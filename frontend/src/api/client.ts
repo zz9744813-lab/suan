@@ -14,16 +14,32 @@ import type {
 
 const BASE = import.meta.env.VITE_BACKEND_URL ?? '';
 
+// 命理批示等长请求（推理模型思考+正文）实测约 2-3 分钟，
+// 加上中转站重试，给 5 分钟超时，避免浏览器默认断开。
+const REQUEST_TIMEOUT_MS = 300_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${detail.slice(0, 300)}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...init,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => res.statusText);
+      throw new Error(`API ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    return res.json() as Promise<T>;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('请求超时（后端生成较慢，请稍后重试）');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 const get = <T>(path: string) => request<T>(path);
@@ -58,9 +74,72 @@ export interface GenerateResult {
   notes: string[];
 }
 
+export interface LLMTierConfig {
+  base_url: string;
+  model: string;
+  api_key_masked: string;
+  has_api_key: boolean;
+  configured: boolean;
+  overridden_fields: string[];
+}
+
+export interface LLMTestResult {
+  ok: boolean;
+  configured: boolean;
+  model?: string;
+  duration_ms?: number;
+  sample?: string;
+  error: string | null;
+}
+
+/** 出生档案（第 64 节高敏感数据，本地优先） */
+export interface BirthProfile {
+  user_id: number;
+  solar_birth_date: string;
+  solar_birth_time: string;
+  birth_time_known: boolean;
+  gender: string;
+  birth_place: string;
+  longitude: number | null;
+  latitude: number | null;
+  use_true_solar_time: boolean;
+}
+
+/** 命理批示（第 6.1 节程序排盘 + LLM 解读，纯展示不进入 Fusion） */
+export interface FortuneReading {
+  ok: boolean;
+  error: string | null;
+  model: string;
+  duration_ms: number;
+  reasoning?: string;
+  chart: {
+    degraded: boolean;
+    bazi: { year: string; month: string; day: string; time: string; day_master: string };
+    day_master: string;
+    shishen: Record<string, string>;
+    wuxing: Record<string, string>;
+    nayin: Record<string, string>;
+    ming_gong: string;
+    dayun: { start_age: number; start_year: number; ganzhi: string }[];
+    liunian: { year: number; ganzhi: string; zodiac: string; age: number | null }[];
+    birth_time_known: boolean;
+    gender: string;
+  } | null;
+  reading: Record<string, string> | null;
+}
+
 export const api = {
-  meta: () => get<Record<string, unknown>>('/'),
-  health: () => get<{ status: string; engines: Record<string, { available: boolean }> }>('/health'),
+  meta: () => get<Record<string, unknown>>('/api/meta'),
+  health: () => get<{ status: string; engines: Record<string, { available: boolean }> }>('/api/health'),
+
+  llmConfig: () => get<{ tiers: Record<string, LLMTierConfig> }>('/api/system/llm-config'),
+  saveLLMConfig: (tier: string, fields: { base_url?: string; model?: string; api_key?: string }) =>
+    request<{ ok: boolean; tiers: Record<string, LLMTierConfig> }>('/api/system/llm-config', {
+      method: 'PUT',
+      body: JSON.stringify({ tier, ...fields }),
+    }),
+  testLLMConfig: (tier: string, draft?: { base_url?: string; model?: string; api_key?: string }) =>
+    post<LLMTestResult>('/api/system/llm-config/test', { tier, ...(draft ?? {}) }),
 
   engines: () => get<{ engines: EngineInfo[]; available_count: number }>('/api/system/engines'),
   ontology: (domain?: string, scale?: string) =>
@@ -165,4 +244,14 @@ export const api = {
     }),
 
   listUsers: () => get<{ count: number; items: { id: number; user_key: string }[] }>('/api/users'),
+
+  profile: (userId: number) => get<BirthProfile>(`/api/users/${userId}/profile`),
+  updateProfile: (userId: number, fields: Record<string, unknown>) =>
+    request<BirthProfile>(`/api/users/${userId}/profile`, {
+      method: 'PUT',
+      body: JSON.stringify(fields),
+    }),
+
+  fortuneReading: (userId: number) =>
+    get<FortuneReading>(`/api/fortune/reading?user_id=${userId}`),
 };

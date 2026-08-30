@@ -14,29 +14,209 @@ body,
 
 body {
   margin: 0;
-  background: #0a0c10;
+  background: #08090d;
   color: #e5e7eb;
   font-family:
-    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 概率条：方案第 29.1 节首页要求一眼看出高低 */
-.prob-bar {
+::selection {
+  background: rgba(217, 185, 106, 0.28);
+  color: #f5edd8;
+}
+
+/* ---------- 滚动条 ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #252c3b transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
   height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #252c3b;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #333c4f;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 焦点可见性 ---------- */
+:focus-visible {
+  outline: 2px solid rgba(217, 185, 106, 0.55);
+  outline-offset: 2px;
   border-radius: 4px;
-  background: #232936;
+}
+
+/* ---------- 动效 ---------- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 4px rgba(74, 222, 128, 0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease both;
+}
+
+/* 错峰入场：配合 style={{ animationDelay }} 使用 */
+.stagger > * {
+  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.02s; }
+.stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.stagger > *:nth-child(3) { animation-delay: 0.1s; }
+.stagger > *:nth-child(4) { animation-delay: 0.14s; }
+.stagger > *:nth-child(5) { animation-delay: 0.18s; }
+.stagger > *:nth-child(6) { animation-delay: 0.22s; }
+.stagger > *:nth-child(7) { animation-delay: 0.26s; }
+.stagger > *:nth-child(8) { animation-delay: 0.3s; }
+.stagger > *:nth-child(n + 9) { animation-delay: 0.34s; }
+
+/* 骨架屏 */
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    #131722 25%,
+    #1a1f2c 50%,
+    #131722 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* 状态呼吸灯 */
+.status-dot {
+  animation: pulse-dot 2.2s ease-in-out infinite;
+}
+
+/* ---------- 概率条（方案第 29.1 节：一眼看出高低） ---------- */
+.prob-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #1a1f2c;
   overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .prob-bar > div {
   height: 100%;
-  border-radius: 4px;
-  transition: width 0.4s ease;
+  border-radius: 999px;
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 数字等宽，避免概率跳动时布局抖动 */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 通用交互动效 ---------- */
+.btn-press {
+  transition:
+    transform 0.12s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
+}
+.btn-press:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.card-hover {
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.25s ease;
+}
+.card-hover:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.row-hover {
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease;
+}
+.row-hover:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+/* 输入框聚焦光晕 */
+.input-glow {
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.input-glow:focus {
+  border-color: rgba(217, 185, 106, 0.5);
+  box-shadow: 0 0 0 3px rgba(217, 185, 106, 0.12);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-fade-in,
+  .stagger > * {
+    animation: none;
+  }
+  .prob-bar > div,
+  .btn-press,
+  .card-hover,
+  .row-hover {
+    transition: none;
+  }
 }

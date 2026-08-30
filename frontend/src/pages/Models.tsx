@@ -1,5 +1,5 @@
 import { api, DEFAULT_USER_ID } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading, Stat } from '../components/ui';
+import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader, Stat } from '../components/ui';
 import { RELIABILITY_COLOR, RELIABILITY_LABEL, num, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -96,14 +96,12 @@ export default function Models() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-100">模型</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          各术式、各领域的相对预测能力。这里保存的是「相对 Null Model 的 skill」，不是命中率。
-        </p>
-      </header>
+      <PageHeader
+        title="模型"
+        desc="各术式、各领域的相对预测能力。这里保存的是「相对 Null Model 的 skill」，不是命中率。"
+      />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="样本量" value={overall.data?.sample_size ?? '—'} />
         <Stat label="Brier" value={overall.data ? num(overall.data.brier) : '—'} />
         <Stat

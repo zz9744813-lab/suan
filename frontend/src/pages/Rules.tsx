@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { api } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading } from '../components/ui';
+import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader } from '../components/ui';
 import { DOMAIN_LABEL, SCALE_LABEL } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -24,29 +24,27 @@ export default function Rules() {
 
   return (
     <div className="space-y-5">
-      <header className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-100">规则</h1>
-          <p className="mt-1 text-xs text-slate-500">
-            每条传统规则都有唯一 ID，长期统计其在各领域、各时间尺度上的真实增益。
-          </p>
-        </div>
-        <div className="flex gap-1">
-          {['active', 'shadow', 'deprecated', 'rejected'].map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatus(s)}
-              className={`rounded px-2 py-1 text-xs transition ${
-                status === s
-                  ? 'bg-ink-800 text-slate-100'
-                  : 'text-slate-600 hover:text-slate-400'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </header>
+      <PageHeader
+        title="规则"
+        desc="每条传统规则都有唯一 ID，长期统计其在各领域、各时间尺度上的真实增益。"
+        right={
+          <div className="inline-flex gap-0.5 rounded-lg border border-ink-800 bg-ink-900 p-0.5">
+            {['active', 'shadow', 'deprecated', 'rejected'].map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatus(s)}
+                className={`btn-press rounded-md px-2.5 py-1 text-xs transition ${
+                  status === s
+                    ? 'bg-ink-700 text-gilt-300 shadow-card'
+                    : 'text-slate-600 hover:text-slate-400'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       <Card title={`规则清单（${status}）`}>
         {rules.loading && <Loading />}

@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -117,6 +117,33 @@ def get_profile(user_id: int, session: Session = Depends(get_session)):
     ).first()
     if profile is None:
         raise HTTPException(404, "未找到出生档案")
+    return profile
+
+
+@router.put("/users/{user_id}/profile")
+def update_profile(user_id: int, payload: BirthProfileIn, session: Session = Depends(get_session)):
+    """更新出生档案（出生时间 / 性别 / 出生地等）。
+
+    用户首次创建时只能填出生日期，后续可在这里补全出生时间（时辰）、
+    性别、出生地，用于八字/紫微排盘的时柱与阳男阴女判断。
+    """
+    profile = session.exec(
+        select(BirthProfile).where(BirthProfile.user_id == user_id)
+    ).first()
+    if profile is None:
+        raise HTTPException(404, "未找到出生档案，请先创建用户并填写出生日期")
+
+    profile.solar_birth_date = payload.solar_birth_date
+    profile.solar_birth_time = payload.solar_birth_time
+    profile.birth_time_known = payload.birth_time_known
+    profile.gender = payload.gender
+    profile.birth_place = payload.birth_place
+    profile.longitude = payload.longitude
+    profile.latitude = payload.latitude
+    profile.use_true_solar_time = payload.use_true_solar_time
+    session.add(profile)
+    session.commit()
+    session.refresh(profile)
     return profile
 
 
@@ -234,6 +261,89 @@ def gate_test(payload: GateTestIn):
 
 
 # ======================================================================
+# LLM Provider 配置（第 41 / 42 节）
+# ======================================================================
+class LLMConfigIn(BaseModel):
+    tier: Literal["reasoning", "cheap", "vision"]
+    # None = 不动该字段；空字符串 = 清除该字段的覆盖（回退 .env）
+    base_url: str | None = None
+    model: str | None = None
+    # 空字符串/None = 沿用现有 key；提供新值 = 覆盖。
+    # 想彻底停用某一层：把 base_url 或 model 清空即可（configured=False）。
+    api_key: str | None = None
+
+
+class LLMConfigTestIn(BaseModel):
+    tier: Literal["reasoning", "cheap", "vision"]
+    # 可选：用「未保存的草稿」直接测试；不传则用当前生效配置
+    base_url: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+
+
+@router.get("/system/llm-config")
+def get_llm_config():
+    """三层的有效配置视图。API Key 只返回脱敏形式（第 41 节）。"""
+    from app.services.llm_config import describe
+
+    return {"tiers": describe()}
+
+
+@router.put("/system/llm-config")
+def put_llm_config(payload: LLMConfigIn):
+    """保存某一层的配置到运行时覆盖层（data/llm_config.json）。"""
+    from app.services.llm_config import describe, update_tier
+
+    update_tier(
+        payload.tier,
+        base_url=payload.base_url,
+        model=payload.model,
+        api_key=payload.api_key if payload.api_key else None,
+    )
+    return {"ok": True, "tiers": describe()}
+
+
+@router.post("/system/llm-config/test")
+def test_llm_config(payload: LLMConfigTestIn):
+    """用指定（或当前生效）配置发一次最小调用，验证连通性。
+
+    注意：只返回延迟/模型/错误摘要，不回显 key。
+    """
+    from app.config import ProviderSettings
+    from app.providers.base import LLMRequest, OpenAICompatibleProvider
+    from app.services.llm_config import effective_provider
+
+    eff = effective_provider(payload.tier)
+    ps = ProviderSettings(
+        base_url=payload.base_url or eff.base_url,
+        model=payload.model or eff.model,
+        api_key=payload.api_key or eff.api_key,
+    )
+    if not ps.configured:
+        return {"ok": False, "error": "配置不完整：base_url 与 model 必填", "configured": False}
+
+    provider = OpenAICompatibleProvider(ps, tier=payload.tier)
+    resp = provider.complete(
+        LLMRequest(
+            messages=[{"role": "user", "content": "ping，回复 pong 即可"}],
+            # 推理模型（deepseek-v4-flash / glm-5.2）的思考链路也计入 max_tokens，
+            # 太小时正文没开始写就被截断，sample 会变成思考链路开头而非回复。
+            max_tokens=120,
+            temperature=0,
+        )
+    )
+    return {
+        "ok": resp.ok,
+        "configured": True,
+        "model": resp.model,
+        "duration_ms": resp.duration_ms,
+        # sample 优先取正文；正文为空时展示思考链路开头（推理模型截断场景）
+        "sample": (resp.content or resp.reasoning or "")[:40],
+        "error": resp.error,
+    }
+
+
+# ======================================================================
 # 日历快照（第 6 节 Calendar Core）
 # ======================================================================
 @router.get("/calendar/snapshot")
@@ -267,3 +377,21 @@ def calendar_snapshot(
         "degrade_reason": result.degrade_reason,
         "payload": result.payload,
     }
+
+
+# ======================================================================
+# 命理批示（本命盘解读 + 大运 / 流年运势）
+# ======================================================================
+@router.get("/fortune/reading")
+def fortune_reading(
+    user_id: int = Query(...),
+    session: Session = Depends(get_session),
+):
+    """传统术数命盘解读 + 未来运势批示。
+
+    与预测闭环严格区分：这是纯展示，不进入 Fusion、不参与评分。
+    第 6.1 节：程序排盘，LLM 只做解读（禁止自行算盘）。
+    """
+    from app.services.fortune import generate_reading
+
+    return generate_reading(session, user_id=user_id)

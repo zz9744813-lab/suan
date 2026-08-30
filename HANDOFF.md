@@ -29,6 +29,8 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
 | 对抗审查 | 14 种攻击 + 串联 Gate |
+| 命理批示 | `GET /api/fortune/reading` —— 大运/流年 + 七维度 LLM 批示（2026-08-30 新增） |
+| 出生档案 | 创建 + `PUT /api/users/{id}/profile` 更新（之前只有 create，2026-08-30 补） |
 | 前端 | React + TS + Vite，8 个一级页面 |
 | git 远端 | `zz9744813-lab/suan` main @ `dc416fa`，本地=远端，工作区干净 |
 | 原 NovelForge | 完整镜像备份在 `F:\agi\_suan_backup\suan.git`（含 5 分支+5 PR） |
@@ -78,11 +80,25 @@ C:\Users\6\.workbuddy\binaries\python\envs\default\Scripts\pip.exe
 
 - `107.172.138.14:3000` **已失效**（Invalid token），别再用。
 - **`qiyovo.com:3000` 可用**，key 在本地 `.env` 里。
-- 模型分层：`REASONING=deepseek-v4-flash`、`CHEAP=minimax-m3`。可用模型还有 `glm-5.2`。
-- 这个中转站有**三个已经踩过的坑**，改 Provider/Agent 代码时别重踩：
+- 三模型系统化实测结论（2026-08-31，同 prompt × 3 轮，中转站空闲时段）：
+
+| 模型 | 成功率 | 延迟 | 类型 | 结论 |
+|---|---|---|---|---|
+| `deepseek-v4-flash` | 3/3 | 2.5-7.5s | 推理（reasoning+content 分离） | **reasoning 层主力** |
+| `minimax-m3` | 3/3 | 10-12s | 非推理，直接出答案 | **cheap 层**（分担负载） |
+| `glm-5.2` | 3/3 | 3.7-4.1s | 推理，思考极长 | 备用：**必须 max_tokens≥800**，否则思考吃光额度 content 为空 |
+
+- **历史误判澄清**（2026-08-30 曾判 minimax 147s / glm 空内容"不可用"）：
+  - minimax 147s 是**中转站过载时段的偶发**，空闲时段 10-12s 稳定；
+  - glm "空内容"是 **ping 测试 max_tokens=8 太小**——推理模型思考链路把额度吃光，
+    `finish_reason=length`，正文没开始写就被截断。**测推理模型必须给足 max_tokens。**
+- 中转站**整体成功率随时段波动（约 60%~100%）**：过载时段软错误频发，provider 已做
+  5 次重试 + 四种失败模式检测兜底（见 `app/providers/base.py`）。
+- 这个中转站有**四个已经踩过的坑**，改 Provider/Agent 代码时别重踩：
   1. **默认返回 SSE 流式**——即使请求里 `stream=false`，它也可能回 `text/event-stream`，`resp.json()` 会崩。代码里已做 SSE 兼容解析（解析 `data:` 行）。
   2. **`response_format: json_object` 会让它挂起**——所以 Agent 一律用 prompt 约束 JSON 输出 + 宽容解析（`app/providers/base.py` 的 `LLMResponse.json()` 会剥代码块、提取首个 JSON 子串）。
   3. **长 prompt（>1k tokens）要 50s+**——术式 Agent 用 `_summarize_chart()` 把全量盘面精简到 ~350 tokens 才调 LLM。**新增任何 LLM 调用时先想：prompt 是不是太长了？**
+  4. **间歇性软错误**——HTTP 200 + 包体是 `{"code":502,"message":"..."}` / `{"error":...}` / 空 choices / 空 content，共四种。`OpenAICompatibleProvider.complete()` 已检测并重试（`max_retries=5`，超时 180s）。**别把这段防护删了。**
 
 ### 4.5 术数引擎的历史排坑结论
 
@@ -116,7 +132,7 @@ xuanmirror/
 │  ├─ models/             SQLModel 数据表（37 张）
 │  ├─ schemas/            Signal / Prediction / Outcome 等传输模型
 │  └─ services/           编排层：pipeline / learning / ablation / future_tree /
-│                         counterfactual / exports / reports
+│                         counterfactual / exports / reports / fortune
 ├─ tests/                 conftest + smoke + 各模块 + golden + acceptance
 ├─ docs/                  CONSTITUTION.md(宪法) / ENGINES.md / 工程方案_v1.0.md
 ├─ rules/                 Rule Registry（YAML，目前只有 bazi.yaml 示例）
@@ -254,6 +270,8 @@ RealityState 扫描 → 候选事件(candidates)
 7. **lunar-python 十神方法**是 `getYearShiShenGan/Zhi`（天干/地支两套），不是 `...Gang`。
 8. **冻结哈希**直接对 freeze_payload 算，从其他表重建会因随机 signal_id 假阳性。
 9. **iztro-py 时辰索引**非小时（第 4.5 节）。
+10. **qiyovo 中转站间歇软错误**（2026-08-30）——HTTP 200 + body `{"code":502,"message":"..."}`。`OpenAICompatibleProvider.complete()` 已检测并重试，**别把这段防护删了**。
+11. **出生档案接口只有 create 没有 update**（2026-08-30）——已补 `PUT /api/users/{id}/profile`。
 
 ---
 

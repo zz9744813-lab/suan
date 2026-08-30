@@ -2,7 +2,7 @@ import ReactECharts from 'echarts-for-react';
 import { useState } from 'react';
 
 import { api, DEFAULT_USER_ID } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading, Stat } from '../components/ui';
+import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader, Stat, inputCls } from '../components/ui';
 import { num, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -107,18 +107,18 @@ function GateTester() {
           value={desc}
           onChange={(e) => setDesc(e.target.value)}
           placeholder="预测描述"
-          className="w-full rounded border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-slate-600 focus:outline-none"
+          className={`w-full ${inputCls}`}
         />
         <input
           value={criteria}
           onChange={(e) => setCriteria(e.target.value)}
           placeholder="成功标准"
-          className="w-full rounded border border-ink-700 bg-ink-900 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:border-slate-600 focus:outline-none"
+          className={`w-full ${inputCls}`}
         />
         <button
           onClick={run}
           disabled={busy}
-          className="rounded bg-slate-200 px-3 py-1.5 text-xs font-medium text-ink-950 disabled:opacity-50"
+          className="btn-press rounded-lg bg-slate-200 px-3.5 py-1.5 text-xs font-semibold text-ink-950 hover:bg-white disabled:opacity-50"
         >
           {busy ? '检测中…' : '跑一遍 Gate'}
         </button>
@@ -176,14 +176,12 @@ export default function Labs() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-100">实验室</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          概率质量、校准、与 Null Model 的对比，以及消融实验。
-        </p>
-      </header>
+      <PageHeader
+        title="实验室"
+        desc="概率质量、校准、与 Null Model 的对比，以及消融实验。"
+      />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="样本量" value={o?.sample_size ?? '—'} />
         <Stat label="Brier" value={o ? num(o.brier) : '—'} hint="越低越好" />
         <Stat label="Log Loss" value={o ? num(o.log_loss) : '—'} hint="惩罚极端错误" />
@@ -225,10 +223,10 @@ export default function Labs() {
             <div>
               <div className="text-slate-500">过度自信指数</div>
               <div
-                className={`mt-1 text-lg tabular ${o.overconfidence > 0.05 ? 'text-cinnabar-400' : 'text-slate-200'}`}
+                className={`mt-1 text-lg tabular ${(o.overconfidence ?? 0) > 0.05 ? 'text-cinnabar-400' : 'text-slate-200'}`}
               >
-                {o.overconfidence > 0 ? '+' : ''}
-                {o.overconfidence.toFixed(3)}
+                {(o.overconfidence ?? 0) > 0 ? '+' : ''}
+                {o.overconfidence != null ? o.overconfidence.toFixed(3) : '—'}
               </div>
               <div className="mt-0.5 text-slate-600">正值 = 模型过度自信</div>
             </div>

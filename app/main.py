@@ -114,6 +114,18 @@ def health():
     }
 
 
+# /api 别名：前端 dev server 只代理 /api 前缀，
+# 根路径的 / 与 /health 经别名暴露给前端（内容与根路径一致）。
+@app.get("/api/health", tags=["meta"], include_in_schema=False)
+def health_alias():
+    return health()
+
+
+@app.get("/api/meta", tags=["meta"], include_in_schema=False)
+def meta_alias():
+    return root()
+
+
 # ----------------------------------------------------------------------
 # 路由注册
 # ----------------------------------------------------------------------

@@ -67,3 +67,12 @@ Thumbs.db
 logs/
 *.log
 _research/
+
+# 工作产物截图 / 临时脚本（不入库）
+.shots/
+
+# LLM 运行时覆盖层（结构上会存 API Key，C-007 原则不入库；.env 才是基础配置）
+data/llm_config.json
+
+# TypeScript 增量构建产物
+frontend/tsconfig.tsbuildinfo

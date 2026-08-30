@@ -1,5 +1,14 @@
 import { api, DEFAULT_USER_ID } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading, ProbBar, Stat } from '../components/ui';
+import {
+  Badge,
+  Card,
+  EmptyState,
+  ErrorBox,
+  Loading,
+  PageHeader,
+  ProbBar,
+  Stat,
+} from '../components/ui';
 import { pct, shortDateTime } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -21,14 +30,9 @@ export default function Timeline() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-xl font-semibold text-slate-100">时间线</h1>
-        <p className="mt-1 text-xs text-slate-500">
-          全部已验证预测，按时间倒序。成功与失败同等展示。
-        </p>
-      </header>
+      <PageHeader title="时间线" desc="全部已验证预测，按时间倒序。成功与失败同等展示。" />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="完全命中" value={full} tone="good" />
         <Stat label="部分命中" value={partial} tone="warn" />
         <Stat label="未命中" value={none} tone="bad" />
@@ -51,7 +55,10 @@ export default function Timeline() {
 
         <ul className="divide-y divide-ink-800">
           {items.map((it) => (
-            <li key={it.prediction_id} className="flex items-center gap-4 py-2.5">
+            <li
+              key={it.prediction_id}
+              className="row-hover -mx-2 flex items-center gap-4 rounded-lg px-2 py-2.5"
+            >
               <div className="w-28 shrink-0 text-xs text-slate-600">
                 {shortDateTime(it.judged_at)}
               </div>

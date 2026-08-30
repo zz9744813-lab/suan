@@ -92,16 +92,16 @@ export interface HistoryItem {
 /** 方案第 19 节聚合评分 */
 export interface Aggregate {
   sample_size: number;
-  brier: number;
-  log_loss: number;
-  sharpness: number;
-  observed_rate: number;
-  mean_probability: number;
+  brier: number | null;
+  log_loss: number | null;
+  sharpness: number | null;
+  observed_rate: number | null;
+  mean_probability: number | null;
   reliability: 'low' | 'medium' | 'high';
   ci: [number, number];
   skill_score: number | null;
   null_brier: number | null;
-  overconfidence: number;
+  overconfidence: number | null;
   bins: {
     bin: string;
     n: number;
