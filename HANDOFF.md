@@ -1,0 +1,287 @@
+# 玄鉴 XuanMirror —— 项目交接文档（给接手的 AI 智能体）
+
+> 生成时间：2026-08-30。本文档目标：让你**在不看历史对话的前提下**，完整理解项目、能跑起来、能安全地做优化。所有命令均为实测可复现，坑点全部列出。
+
+---
+
+## 1. 一句话定位
+
+**玄鉴是一个「个人智能未来预测、验证与自校准系统」**，不是算命聊天机器人。
+
+核心闭环（这是整个系统的灵魂，所有代码都围绕它）：
+
+```
+Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn → Predict Again
+    预测      冻结     现实对照   验证      评分      归因      学习       再预测
+```
+
+真正的产品不是命盘，是**一个不断被现实检验的个人 Future Model**。术数（八字/六爻/紫微…）在这个系统里只是「待验证的信号」，和 Reality（现实事件）、Null Model（贝叶斯基线）并列，谁准谁在融合里拿更高权重——**如果 Null 比术数强，系统必须承认术数没有贡献**（宪法 C-006）。
+
+---
+
+## 2. 当前状态快照（已核实的结论）
+
+| 项 | 值 |
+|---|---|
+| 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
+| 测试 | `74 passed, 2 skipped`（7.2s，全绿） |
+| 数据库 | SQLite，**37 张表** |
+| 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
+| Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
+| 对抗审查 | 14 种攻击 + 串联 Gate |
+| 前端 | React + TS + Vite，8 个一级页面 |
+| git 远端 | `zz9744813-lab/suan` main @ `dc416fa`，本地=远端，工作区干净 |
+| 原 NovelForge | 完整镜像备份在 `F:\agi\_suan_backup\suan.git`（含 5 分支+5 PR） |
+
+**重要**：这是「方案 v1.0 按验收标准全部实现并测试通过」的状态，但**不是长期跑过的生产系统**——预测样本量目前为 0，可靠度矩阵、校准曲线、Shadow 学习都还是「代码在、没数据喂」的状态。见第 12 节「待优化方向」。
+
+---
+
+## 3. 技术栈
+
+- **后端**：Python 3.13.12（managed）· FastAPI · SQLModel · SQLite · Pydantic v2 · httpx · APScheduler
+- **术数引擎**：lunar-python（八字/历法）、iztro-py（紫微，纯 Python）、六爻/梅花（自研）、奇门（移植自开源 CLI）
+- **CV**：OpenCV（掌纹/面相，传统 CV，非深度学习模型）
+- **前端**：React 18 · TypeScript · Vite 5 · Tailwind · ECharts · echarts-for-react
+- **测试**：pytest
+
+---
+
+## 4. 环境事实（★★★ 最重要，接手必读 ★★★）
+
+### 4.1 Python 解释器（必须用这个，不要用系统 Python）
+
+```
+C:\Users\6\.workbuddy\binaries\python\envs\default\Scripts\python.exe   # managed 3.13.12，所有依赖都装在这
+C:\Users\6\.workbuddy\binaries\python\envs\default\Scripts\pip.exe
+```
+
+- 系统里还有一个 `F:\Hermes\hermes-agent\venv\Scripts\python.exe`（3.11.16），**不要用**——它没有玄鉴的依赖。
+- 装新依赖也装进上面这个 venv，不要 `pip install` 到全局。
+
+### 4.2 Node（前端构建）
+
+之前构建命令是 `cd frontend && npm run build`（npm 在 PATH 里，直接用即可）。managed node 在 `C:\Users\6\.workbuddy\binaries\node\versions\22.22.2\node.exe`（如遇 npm 异常可指定它）。
+
+### 4.3 ⚠️ 系统代理陷阱（曾导致全链路挂死）
+
+这台机器设置了全局代理：**`HTTPS_PROXY=127.0.0.1:2080`**（也影响 http）。
+
+- 任何走这个代理的外网请求都会**挂起**（不是报错，是卡死直到超时）。
+- 玄鉴的 LLM Provider 已经用 `httpx.Client(trust_env=False)` 绕过了（见 `app/providers/base.py`）。
+- **但你写新代码时注意**：如果用 `requests`、`curl`、`aiohttp` 或任何新的 HTTP 客户端，必须显式禁用代理。`curl` 加 `--noproxy "*"`，`httpx` 加 `trust_env=False`。
+- 排查网络问题时先怀疑这个，别先怀疑代码。
+
+### 4.4 LLM 中转站（qiyovo.com:3000）
+
+配置在 `.env`（已在 `.gitignore`，不入库，key 别提交）：
+
+- `107.172.138.14:3000` **已失效**（Invalid token），别再用。
+- **`qiyovo.com:3000` 可用**，key 在本地 `.env` 里。
+- 模型分层：`REASONING=deepseek-v4-flash`、`CHEAP=minimax-m3`。可用模型还有 `glm-5.2`。
+- 这个中转站有**三个已经踩过的坑**，改 Provider/Agent 代码时别重踩：
+  1. **默认返回 SSE 流式**——即使请求里 `stream=false`，它也可能回 `text/event-stream`，`resp.json()` 会崩。代码里已做 SSE 兼容解析（解析 `data:` 行）。
+  2. **`response_format: json_object` 会让它挂起**——所以 Agent 一律用 prompt 约束 JSON 输出 + 宽容解析（`app/providers/base.py` 的 `LLMResponse.json()` 会剥代码块、提取首个 JSON 子串）。
+  3. **长 prompt（>1k tokens）要 50s+**——术式 Agent 用 `_summarize_chart()` 把全量盘面精简到 ~350 tokens 才调 LLM。**新增任何 LLM 调用时先想：prompt 是不是太长了？**
+
+### 4.5 术数引擎的历史排坑结论
+
+- **sxtwl**（寿星历）：Windows 无预编译 wheel，`pip install sxtwl` 编译失败 → 所以六爻/奇门**没有**用依赖 sxtwl 的现成库，而是自研/移植，历法统一走 `lunar-python`。
+- **mediapipe 1.0.1** 移除了旧 `solutions` API（改成 tasks API 且要下载模型文件）→ 掌纹/面相改用 **OpenCV 传统 CV**（`app/core/palm/cv.py`、`app/core/face/cv.py`），无需模型文件、开箱即用。
+- **iztro-py**（紫微）的 `astro.by_solar(date_str, time_index, gender)` **第二参是「时辰索引 0-12」不是小时**：`index = min((hour+1)//2, 12)`。踩过这个坑。
+
+---
+
+## 5. 目录结构与模块职责
+
+```
+xuanmirror/
+├─ app/
+│  ├─ main.py             FastAPI 入口（lifespan 里接 Scheduler）
+│  ├─ config.py           pydantic-settings 配置（读 .env），所有开关都在这
+│  ├─ database.py         引擎 + 建表 + 会话注入（SQLite，V2 才迁 PG）
+│  ├─ api/routes/         predictions / analytics / system 三组路由
+│  ├─ core/               ★ 术式引擎层（每个术式一个包）
+│  │  ├─ calendar/        Calendar Core（lunar-python 封装，八字四柱/十神/大运）
+│  │  ├─ bazi/ ziwei/ liuyao/ meihua/ qimen/ palm/ face/
+│  │  │                   └─ 每个包 = engine.py(确定性排盘) + adapter.py(盘面→Signal)
+│  │  └─ base.py          Adapter 注册表 registry + AdapterQuery 输入模型
+│  ├─ agents/             ★ 21 个业务 Agent（Blind 架构，见第 7 节）
+│  ├─ adversarial/        14 种攻击 + Gate（见第 8 节）
+│  ├─ calibration/        Brier / LogLoss / Calibration / Sharpness / Skill Score
+│  ├─ learning/           归因 / 可靠度矩阵 / 规则提升
+│  ├─ reality/            RealityState + Null Model
+│  ├─ prediction/         Prediction Budget + Ontology
+│  ├─ providers/          LLM Provider 抽象（reasoning/cheap/vision 三层）
+│  ├─ models/             SQLModel 数据表（37 张）
+│  ├─ schemas/            Signal / Prediction / Outcome 等传输模型
+│  └─ services/           编排层：pipeline / learning / ablation / future_tree /
+│                         counterfactual / exports / reports
+├─ tests/                 conftest + smoke + 各模块 + golden + acceptance
+├─ docs/                  CONSTITUTION.md(宪法) / ENGINES.md / 工程方案_v1.0.md
+├─ rules/                 Rule Registry（YAML，目前只有 bazi.yaml 示例）
+├─ prompts/               Prompt 版本库（constitution.txt）
+├─ reports/               Obsidian/日报周报月报输出目录（当前空）
+├─ frontend/              React 前端（8 页面）
+└─ .env / .env.example    本地配置（.env 不入库）
+```
+
+---
+
+## 6. 怎么跑起来（实测命令，逐条可复制）
+
+### 6.1 跑测试（最常用，改完代码先跑这个）
+
+```bash
+cd /f/agi/xuanmirror
+PYTHONPATH=. XUANMIRROR_DB_URL="sqlite:///./data/xuanmirror.db" \
+  "C:/Users/6/.workbuddy/binaries/python/envs/default/Scripts/python.exe" -m pytest tests/ -q
+```
+
+预期：`74 passed, 2 skipped`。2 个 skipped 是 live LLM 测试（`test_live_llm.py`），加 `XUANMIRROR_LIVE_LLM=1` 才会真调中转站。
+
+**注意**：测试里 LLM 已被 mock（`tests/conftest.py` 有 mock fixture），所以测试飞快、确定性、不依赖网络。这是刻意设计——验收测试不该因为中转站抖动而红。
+
+### 6.2 启动后端
+
+```bash
+cd /f/agi/xuanmirror
+PYTHONPATH=. "C:/Users/6/.workbuddy/binaries/python/envs/default/Scripts/python.exe" \
+  -m uvicorn app.main:app --port 8765
+```
+
+- 端口 **8765**（故意避开 Hermes 等本地服务）。API 文档在 `http://127.0.0.1:8765/docs`。
+- 默认 `SCHEDULER_ENABLED=false`，调度器不会自动跑。
+
+### 6.3 启动前端
+
+```bash
+cd /f/agi/xuanmirror/frontend
+npm run dev        # http://localhost:5173，/api 代理到 127.0.0.1:8765
+npm run build      # 生产构建，ECharts 单独分包
+```
+
+前端默认用户 `DEFAULT_USER_ID = 1`（`frontend/src/api/client.ts`）。
+
+### 6.4 git
+
+```bash
+cd /f/agi/xuanmirror
+git status && git log --oneline -5
+# 远端：https://github.com/zz9744813-lab/suan.git  （main 分支）
+```
+
+**协作约定**（用户习惯）：提交前先 `git status` 看差异、只提交变更部分、直接合 main 不开分支；不要 `git push --force`（除非用户明确说清空）。
+
+---
+
+## 7. 21 个业务 Agent（Blind Multi-Agent）
+
+设计要点：**每个 Agent 只拿到自己的输入，不存在任何 Agent 读别人结论的路径**（防共谋，对应 AgentCollusionAttack）。
+
+| 层 | Agent | 职责 |
+|---|---|---|
+| 基类 | BaseAgent / DeterministicAgent / AdversarialAgent | 抽象基类 |
+| 扫描 | FutureScannerAgent | 从现实状态扫候选预测事件 |
+| 信号 | BaziAgent / ZiweiAgent / LiuyaoAgent / MeihuaAgent / QimenAgent / PalmAgent / FaceAgent / MetaphysicalAgent | 各术式 → Signal |
+| 现实 | RealityAgent / NullAgent | 现实事件信号 + 贝叶斯基线 |
+| 生成 | CandidateAgent | 候选预测 → 概率 |
+| 审查 | SkepticAgent / AdversarialAgent | 质疑 + 对抗审查 |
+| 冻结 | FreezeAgent | 冻结预测（哈希防篡改） |
+| 验证 | OutcomeCollectorAgent / OutcomeJudgeAgent | 收集结果 + 判定命中 |
+| 学习 | AttributionAgent / LearningAgent | 归因 + 学习 |
+| 报告 | ReportAgent / FirstPrinciplesAuditAgent / CalibrationAgent | 周月报 / 第一性审计 / 校准 |
+
+LLM 是「增强」不是「核心」——管线核心逻辑（预算、Gate、冻结、评分）全是确定性代码，LLM 挂了系统照常降级（ABSTAIN）。
+
+---
+
+## 8. 14 种对抗攻击 + Gate
+
+`app/adversarial/attacks/deterministic.py`，全部确定性实现：
+
+Vagueness（模糊）· Barnum（巴纳姆）· Definition（定义漂移）· TimeWindow（时间窗）· CherryPick（摘樱桃）· MultipleTesting（多重检验）· Retrofitting（事后改口）· OutcomeLeak（结果泄漏）· SelfFulfilling（自我实现）· Baseline（基线）· AgentCollusion（Agent 共谋）· CorrelatedEvidence（相关证据）· ConfirmationBias（确认偏误）· NarrativeExcuse（叙事借口）。
+
+Gate 是**串联**的：任一攻击命中即拦截，预测不得进入正式账本。
+
+---
+
+## 9. 核心数据流（预测闭环怎么走）
+
+`app/services/pipeline.py` 的 `DailyPipeline.run()` 是主编排：
+
+```
+RealityState 扫描 → 候选事件(candidates)
+  → 每候选：收集 Signal（Null + Reality + 各术式 Adapter，Blind）
+  → Fusion 融合（Null Model 贝叶斯收缩，权重来自可靠度矩阵）
+  → 对抗 Gate 审查（14 攻击，任一命中拦截）
+  → Freeze 冻结（sha256 防篡改，冻结后不可改，只能 v1→v2）
+→ 次日到期 → VERIFY_REQUIRED 进验证队列
+→ 用户填 Outcome → 评分（Brier/LogLoss/校准/Sharpness/Skill vs Null）
+→ run_learning_after_verify：归因 → 假设落库 → Shadow 样本 → 规则统计 → 可靠度回喂 Fusion 权重
+```
+
+调度器（`app/scheduler.py`，APScheduler，3 个 job）：
+- 23:30 Reality 更新 → 23:40 每日管线 → 21:00 验证提醒
+
+---
+
+## 10. 十项验收标准（tests/test_acceptance.py）
+
+| ID | 含义 |
+|---|---|
+| PRED-01 | 每天自动生成 ≥3 条正式预测 |
+| PRED-02 | 每条可证伪/有概率/有窗口/有成败标准 |
+| FREEZE-01 | 预测发布后不可覆盖 |
+| VERIFY-01 | 到期自动进验证队列 |
+| VERIFY-02 | 自然语言可映射为 Outcome |
+| SCORE-01 | Brier / Calibration / Skill vs Null |
+| ADV-01 | 模糊预测不能过 Gate |
+| ADV-02 | 失败预测不能隐藏 |
+| LEARN-01 | 能定位哪个系统/规则/尺度导致错误 |
+| EXP-01 | 能跑 Reality Only / Metaphysical Only / Fusion / Null 对照 |
+
+---
+
+## 11. 已修复的历史坑（别重踩，别回退）
+
+1. **httpx 走系统代理挂死** → `trust_env=False`（第 4.3 节）。
+2. **中转站 SSE 流式** → 兼容解析 `data:` 行（第 4.4 节）。
+3. **`response_format=json_object` 挂起** → 改 prompt 约束 + 宽容 JSON 解析。
+4. **SQLite 内存库 + TestClient** 需 `poolclass=StaticPool`，否则建表/请求两套空库报 `no such table`。
+5. **SQLModel 共享 JSON 列**：被多表继承的基类字段不能用 `sa_column=Column(JSON)`（同一 Column 实例冲突），必须 `sa_type=JSON`。
+6. **FastAPI 路由顺序**：静态路径 `/predictions/history` 要定义在动态 `/predictions/{id}` 之前。
+7. **lunar-python 十神方法**是 `getYearShiShenGan/Zhi`（天干/地支两套），不是 `...Gang`。
+8. **冻结哈希**直接对 freeze_payload 算，从其他表重建会因随机 signal_id 假阳性。
+9. **iztro-py 时辰索引**非小时（第 4.5 节）。
+
+---
+
+## 12. 待优化方向（给接手者的建议，按优先级）
+
+> 这些是「下一步该干嘛」的明确清单。前 3 项是真正的短板，其余是打磨。
+
+1. **【高】开启调度器跑真实闭环**：`.env` 里 `SCHEDULER_ENABLED=true`，让系统 23:40 真跑每日管线，开始积累真实样本。目前样本量为 0，学习闭环/可靠度矩阵/校准曲线全是「空转」状态——没有真实数据，整个系统的核心价值（自我校准）体现不出来。
+
+2. **【高】LLM 调用并发化**：`DailyPipeline` 里候选的 LLM 调用是**串行**的，中转站又慢（50s/次），全量跑约 10+ 分钟。改成并发（httpx AsyncClient / ThreadPool）能把每日管线压到 1-2 分钟。
+
+3. **【高】掌纹/面相无测试样例**：这两个 CV 引擎需要 `AdapterQuery.image_path` 传本地照片才产出信号，目前测试没覆盖真实图片路径。建议造 1-2 张样例图（手部/人脸）进 `tests/fixtures/`，补真实 CV 的 golden case。
+
+4. **【中】清理 deprecation warnings**：`datetime.utcnow()` 在 Python 3.13 已弃用，跑测试有 1287 个 warnings（主要在 `app/scheduler.py` 和 `tests/test_scheduler.py`）。改成 `datetime.now(timezone.utc)`。
+
+5. **【中】前端新功能入口核对**：后端已实现 Future Tree / Counterfactual / 双盲实验 / Obsidian 导出 / 报告，但前端只补了 Future 页。核对 `frontend/src/pages/` 是否缺「实验」「导出」「报告」的入口，需要就补页面 + `api/client.ts` 的调用。
+
+6. **【中】文档与代码一致性**（用户很看重）：README 声称 37 表/21 Agent，实际核对下来一致；但 `rules/` 只有 bazi.yaml 一个示例、`prompts/` 只有 constitution.txt，Rule Registry 和 Prompt 版本库还很空。需要的话按方案补全。
+
+7. **【低】数据库 V1→V2**：方案第 44 节说 V2 迁 PostgreSQL（`app/database.py` 里已留注释）。当前 SQLite 够用，不是急事。
+
+8. **【低】远端 codex/* 分支**：远端还有 5 个 `codex/*` 分支未删（用户当时说「清空」只清了 main），要删需用户确认。
+
+---
+
+## 13. 安全边界（接手者务必遵守）
+
+- 这是**术数 + 个人预测实验平台，不是经科学验证的预知系统**，代码注释和文档里一直强调这点，别改成「算命大师」话术。
+- 系统不得：以术数诊断疾病、预测死亡日期、替代医生/律师/财务、鼓励高风险下注、因面部特征推断敏感人格。
+- 面部/掌纹/出生信息是高敏感数据，**本地优先**（`ENABLE_CLOUD_VISION=false`）。
+- **宪法（docs/CONSTITUTION.md）是最高准则**，任何改动不得违反 C-001~C-007。
