@@ -23,7 +23,7 @@ const QUICK = [
   { key: 'A', label: '发生', cls: 'border-jade-500/40 text-jade-400 hover:bg-jade-500/15' },
   { key: 'B', label: '未发生', cls: 'border-cinnabar-500/40 text-cinnabar-400 hover:bg-cinnabar-500/15' },
   { key: 'C', label: '部分发生', cls: 'border-amber-500/40 text-amber-400 hover:bg-amber-500/15' },
-  { key: 'D', label: '无法判断', cls: 'border-ink-600 text-slate-400 hover:bg-ink-800' },
+  { key: 'D', label: '无法判断', cls: 'border-ink-600 text-t2 hover:bg-panel' },
 ];
 
 export default function Verify() {
@@ -88,12 +88,12 @@ export default function Verify() {
             return (
               <li
                 key={it.prediction_id}
-                className="row-hover rounded-lg border border-ink-800 p-4"
+                className="row-hover rounded-lg border border-line p-4"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
-                    <div className="text-sm text-slate-200">{it.description}</div>
-                    <div className="mt-1 text-xs text-slate-600">
+                    <div className="text-sm text-t1">{it.description}</div>
+                    <div className="mt-1 text-xs text-t4">
                       {it.event_type} · 窗口 {shortDateTime(it.window[0])} ~{' '}
                       {shortDateTime(it.window[1])}
                     </div>
@@ -106,7 +106,7 @@ export default function Verify() {
                 <div className="mt-3 grid gap-2 text-xs md:grid-cols-2">
                   <div className="rounded-lg border border-jade-500/15 bg-jade-500/5 p-2.5">
                     <div className="mb-1 font-medium text-jade-400">成功标准</div>
-                    <ul className="space-y-0.5 text-slate-400">
+                    <ul className="space-y-0.5 text-t2">
                       {it.success_criteria.map((c, i) => (
                         <li key={i}>· {c}</li>
                       ))}
@@ -114,7 +114,7 @@ export default function Verify() {
                   </div>
                   <div className="rounded-lg border border-cinnabar-500/15 bg-cinnabar-500/5 p-2.5">
                     <div className="mb-1 font-medium text-cinnabar-400">失败标准</div>
-                    <ul className="space-y-0.5 text-slate-400">
+                    <ul className="space-y-0.5 text-t2">
                       {it.failure_criteria.map((c, i) => (
                         <li key={i}>· {c}</li>
                       ))}

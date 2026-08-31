@@ -2,7 +2,109 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   主题变量：日间（默认）/ 夜间（[data-theme='dark']）
+   切换由 ThemeToggle 写 document.documentElement.dataset.theme，
+   index.html 内联脚本提前设置避免首屏闪色（FOUC）。
+   ============================================================ */
 :root {
+  /* 日间 */
+  --p: #f2f3f6; /* 页面底 */
+  --card: #ffffff; /* 卡片底 */
+  --panel: #e9ecf1; /* 内嵌面板底 */
+  --line: #dfe3ea; /* 分隔线 */
+  --bd: rgba(15, 23, 42, 0.1); /* 通用边框 */
+  --t1: #1a2233; /* 主文字 */
+  --t2: #46536b; /* 次文字 */
+  --t3: #5d6b84; /* 说明文字 */
+  --t4: #8a94a8; /* 弱文字 */
+  --t5: #aeb7c6; /* 极弱文字 */
+  --gt: #8f7414; /* 鎏金文字（日间加深保证对比） */
+  --navh: rgba(15, 23, 42, 0.05); /* 导航 hover */
+  --nava: rgba(15, 23, 42, 0.09); /* 导航 active */
+  --in: #ffffff; /* 输入框底 */
+  --sk1: #e6e9ef; /* 骨架屏 */
+  --sk2: #f3f5f8;
+  --prob-bg: #e3e7ee;
+  --card-hover-bd: rgba(15, 23, 42, 0.18);
+  --card-hover-bg: rgba(15, 23, 42, 0.015);
+  --row-hover-bg: rgba(15, 23, 42, 0.04);
+  --row-hover-bd: rgba(15, 23, 42, 0.12);
+  --glow-focus: rgba(201, 162, 39, 0.45);
+  --shadow-card:
+    0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px -12px rgba(15, 23, 42, 0.18);
+  --shadow-lift: 0 2px 4px rgba(15, 23, 42, 0.06), 0 16px 40px -16px rgba(15, 23, 42, 0.28);
+
+  /* tailwind ink / slate 调色板的 R G B 数字（无 rgb() 包装）*/
+  /* 数字越大越亮。日间：ink 浅、slate 深；夜间：反之。 */
+  --ink-950: 248 250 252; /* 页面底的最浅 */
+  --ink-900: 241 245 249;
+  --ink-850: 233 237 244;
+  --ink-800: 220 226 236;
+  --ink-700: 192 200 215;
+  --ink-600: 148 163 184;
+  --slate-100: 15 23 42; /* 主文字（最深） */
+  --slate-200: 30 41 59;
+  --slate-300: 51 65 85;
+  --slate-400: 71 85 105;
+  --slate-500: 100 116 139;
+  --slate-600: 148 163 184;
+  --slate-700: 192 200 215;
+  --slate-800: 220 226 236;
+  --slate-900: 241 245 249;
+  --slate-950: 248 250 252;
+  --surface: 255 255 255; /* 卡片浮层：日间纯白 */
+
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --p: #08090d;
+  --card: #11151f;
+  --panel: #0d1017;
+  --line: rgba(255, 255, 255, 0.07);
+  --bd: rgba(255, 255, 255, 0.08);
+  --t1: #e2e8f0;
+  --t2: #94a3b8;
+  --t3: #64748b;
+  --t4: #475569;
+  --t5: #334155;
+  --gt: #ecd9a0;
+  --navh: rgba(255, 255, 255, 0.03);
+  --nava: rgba(255, 255, 255, 0.06);
+  --in: rgba(8, 9, 13, 0.6);
+  --sk1: #131722;
+  --sk2: #1a1f2c;
+  --prob-bg: #1a1f2c;
+  --card-hover-bd: rgba(255, 255, 255, 0.12);
+  --card-hover-bg: rgba(255, 255, 255, 0.02);
+  --row-hover-bg: rgba(255, 255, 255, 0.03);
+  --row-hover-bd: rgba(255, 255, 255, 0.09);
+  --glow-focus: rgba(217, 185, 106, 0.55);
+  --shadow-card:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-lift:
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 16px 40px -16px rgba(0, 0, 0, 0.75);
+
+  /* 夜间：ink 深、slate 亮 */
+  --ink-950: 8 9 13;
+  --ink-900: 14 17 24;
+  --ink-850: 19 23 34;
+  --ink-800: 26 31 44;
+  --ink-700: 37 44 59;
+  --ink-600: 51 60 79;
+  --slate-100: 241 245 249;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --slate-700: 51 65 85;
+  --slate-800: 30 41 59;
+  --slate-900: 15 23 42;
+  --slate-950: 2 6 23;
+  --surface: 17 21 31;
+
   color-scheme: dark;
 }
 
@@ -14,35 +116,36 @@ body,
 
 body {
   margin: 0;
-  background: #08090d;
-  color: #e5e7eb;
+  background: var(--p);
+  color: var(--t1);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 ::selection {
   background: rgba(217, 185, 106, 0.28);
-  color: #f5edd8;
+  color: inherit;
 }
 
 /* ---------- 滚动条 ---------- */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #252c3b transparent;
+  scrollbar-color: var(--t5) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #252c3b;
+  background: var(--t5);
   border-radius: 8px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #333c4f;
+  background: var(--t4);
 }
 *::-webkit-scrollbar-track {
   background: transparent;
@@ -50,7 +153,7 @@ body {
 
 /* ---------- 焦点可见性 ---------- */
 :focus-visible {
-  outline: 2px solid rgba(217, 185, 106, 0.55);
+  outline: 2px solid var(--glow-focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -122,12 +225,7 @@ body {
 /* 骨架屏 */
 .skeleton {
   border-radius: 6px;
-  background: linear-gradient(
-    90deg,
-    #131722 25%,
-    #1a1f2c 50%,
-    #131722 75%
-  );
+  background: linear-gradient(90deg, var(--sk1) 25%, var(--sk2) 50%, var(--sk1) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -142,9 +240,9 @@ body {
   position: relative;
   height: 8px;
   border-radius: 999px;
-  background: #1a1f2c;
+  background: var(--prob-bg);
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 .prob-bar > div {
@@ -180,8 +278,8 @@ body {
     background-color 0.25s ease;
 }
 .card-hover:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  background-color: rgba(255, 255, 255, 0.02);
+  border-color: var(--card-hover-bd);
+  background-color: var(--card-hover-bg);
 }
 
 .row-hover {
@@ -191,8 +289,8 @@ body {
     transform 0.18s ease;
 }
 .row-hover:hover {
-  background-color: rgba(255, 255, 255, 0.03);
-  border-color: rgba(255, 255, 255, 0.09);
+  background-color: var(--row-hover-bg);
+  border-color: var(--row-hover-bd);
 }
 
 /* 输入框聚焦光晕 */
@@ -202,8 +300,8 @@ body {
     box-shadow 0.2s ease;
 }
 .input-glow:focus {
-  border-color: rgba(217, 185, 106, 0.5);
-  box-shadow: 0 0 0 3px rgba(217, 185, 106, 0.12);
+  border-color: var(--glow-focus);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.14);
   outline: none;
 }
 

@@ -124,6 +124,10 @@ export interface FortuneReading {
     liunian: { year: number; ganzhi: string; zodiac: string; age: number | null }[];
     birth_time_known: boolean;
     gender: string;
+    /** 精确周岁：考虑本年生日是否已过 */
+    current_age_exact?: number;
+    /** 年份差（虚岁）：当前年 - 出生年 */
+    current_age_nominal?: number;
   } | null;
   reading: Record<string, string> | null;
 }

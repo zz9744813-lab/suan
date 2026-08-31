@@ -114,16 +114,16 @@ function TierForm({
   const meta = TIER_META[tier] ?? { label: tier, desc: '' };
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-ink-950/40 p-4">
+    <div className="rounded-xl border border-bd bg-panel p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-slate-200">{meta.label}</span>
+        <span className="text-sm font-medium text-t1">{meta.label}</span>
         <Badge tone={config?.configured ? 'good' : 'default'}>
           {config?.configured ? '已配置' : '未配置'}
         </Badge>
         {(config?.overridden_fields.length ?? 0) > 0 && (
           <Badge tone="gilt">页面配置覆盖 .env</Badge>
         )}
-        <span className="ml-auto text-[11px] text-slate-600">{meta.desc}</span>
+        <span className="ml-auto text-[11px] text-t4">{meta.desc}</span>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -270,7 +270,7 @@ export default function Settings() {
       />
 
       {notice && (
-        <div className="animate-fade-in rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-300">
+        <div className="animate-fade-in rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-500">
           {notice}
         </div>
       )}
@@ -301,9 +301,9 @@ export default function Settings() {
         {meta.error && <ErrorBox message={meta.error} />}
         <div className="grid gap-2 text-xs md:grid-cols-5">
           {Object.entries(versions).map(([k, v]) => (
-            <div key={k} className="rounded-xl bg-ink-950/60 px-3 py-2.5">
-              <div className="text-slate-600">{k}</div>
-              <div className="mt-0.5 font-mono text-slate-300">{String(v)}</div>
+            <div key={k} className="rounded-xl bg-panel px-3 py-2.5">
+              <div className="text-t4">{k}</div>
+              <div className="mt-0.5 font-mono text-t1">{String(v)}</div>
             </div>
           ))}
         </div>
@@ -311,21 +311,21 @@ export default function Settings() {
 
       <Card title="模型分层" subtitle="第 42 节：不是所有任务都需要最贵的模型">
         <table className="w-full text-xs">
-          <thead className="text-slate-600">
-            <tr className="border-b border-white/[0.06]">
+          <thead className="text-t4">
+            <tr className="border-b border-bd">
               <th className="py-2 text-left font-medium">任务</th>
               <th className="py-2 text-left font-medium">层级</th>
               <th className="py-2 text-left font-medium">依据</th>
             </tr>
           </thead>
-          <tbody className="text-slate-400">
+          <tbody className="text-t2">
             {TIERS.map((t) => (
-              <tr key={t.task} className="row-hover border-b border-white/[0.04]">
+              <tr key={t.task} className="row-hover border-b border-bd">
                 <td className="py-2">{t.task}</td>
                 <td className="py-2">
                   <Badge tone={t.tier.includes('程序') ? 'info' : 'default'}>{t.tier}</Badge>
                 </td>
-                <td className="py-2 text-slate-600">{t.note}</td>
+                <td className="py-2 text-t4">{t.note}</td>
               </tr>
             ))}
           </tbody>
@@ -335,23 +335,23 @@ export default function Settings() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="预测预算" subtitle="第 4 节：强制下注制度，禁止撒网式算准">
           <table className="w-full text-xs">
-            <tbody className="text-slate-400">
+            <tbody className="text-t2">
               {BUDGET.map(([k, v]) => (
-                <tr key={k} className="border-b border-white/[0.04]">
+                <tr key={k} className="border-b border-bd">
                   <td className="py-2">{k}</td>
-                  <td className="py-2 text-right tabular text-slate-200">{v}</td>
+                  <td className="py-2 text-right tabular text-t1">{v}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-3 text-[11px] leading-relaxed text-slate-600">
+          <p className="mt-3 text-[11px] leading-relaxed text-t4">
             只有 Information Value 最高的预测才能获得额度。候选命中不计入正式评分
             （第 20.6 节 MultipleTestingAttack）。
           </p>
         </Card>
 
         <Card title="隐私与实验模式" subtitle="第 64 / 34 / 35 节">
-          <ul className="space-y-3 text-xs leading-relaxed text-slate-400">
+          <ul className="space-y-3 text-xs leading-relaxed text-t2">
             <li className="flex items-start gap-2">
               <Badge tone="info">第 64 节</Badge>
               <span>面部、掌纹、出生信息属高敏感数据。原始照片本地保存，上传前裁剪，可关闭云 Vision。</span>
@@ -382,15 +382,15 @@ export default function Settings() {
                 onClick={() => loadProfile(u.id)}
                 className={`btn-press rounded-md border px-2.5 py-1 text-xs transition-colors ${
                   editingId === u.id
-                    ? 'border-gilt-500/50 bg-gilt-500/10 text-gilt-300'
-                    : 'border-ink-700 text-slate-400 hover:border-ink-600 hover:text-slate-200'
+                    ? 'border-gilt-500/50 bg-gilt-500/10 text-gt'
+                    : 'border-line text-t2 hover:border-t4 hover:text-t1'
                 }`}
               >
                 {u.user_key} (id={u.id})
               </button>
             ))}
             {users.data.items.length === 0 && (
-              <span className="text-xs text-slate-600">暂无用户</span>
+              <span className="text-xs text-t4">暂无用户</span>
             )}
           </div>
         )}
@@ -399,7 +399,7 @@ export default function Settings() {
         {profile && (
           <div className="mb-4 animate-fade-up rounded-xl border border-gilt-500/30 bg-gilt-500/[0.06] p-4">
             <div className="mb-3 flex items-center gap-2">
-              <span className="text-sm font-medium text-gilt-300">
+              <span className="text-sm font-medium text-gt">
                 编辑出生档案（id={editingId}）
               </span>
               <Badge tone="gilt">命盘将按此重排</Badge>

@@ -41,11 +41,20 @@ def _zodiac(year_ganzhi: str) -> str:
     return animals[idx] if idx >= 0 else ""
 
 
-def future_liunian(start_year: int, n: int = FUTURE_YEARS, birth_year: int | None = None) -> list[dict[str, Any]]:
-    """未来 n 年的流年干支 + 生肖（确定性，取自 lunar-python）。
+def future_liunian(
+    start_year: int,
+    n: int = FUTURE_YEARS,
+    birth_year: int | None = None,
+    birth_month: int = 1,
+    birth_day: int = 1,
+) -> list[dict[str, Any]]:
+    """未来 n 年的流年干支 + 生肖 + 精确周岁（确定性，取自 lunar-python）。
 
     取年中（6 月 15 日）避开立春边界，保证年柱准确。
-    birth_year 传入时，age 为用户在该流年的周岁（虚岁-1）。
+    年龄：对每个流年，用"流年那年的生日同月同日"作为参考点算精确周岁：
+        年龄 = 流年年 - 出生年
+        若流年当年 (月, 日) 还未到生日 (月, 日)，再 -1
+        （不直接用 today，因为要看"流年那一年你多大了"）
     """
     from lunar_python import Solar
 
@@ -53,12 +62,18 @@ def future_liunian(start_year: int, n: int = FUTURE_YEARS, birth_year: int | Non
     for y in range(start_year, start_year + n):
         lunar = Solar.fromYmd(y, 6, 15).getLunar()
         gz = lunar.getYearInGanZhi()
+        age = None
+        if birth_year is not None:
+            age = y - birth_year
+            # 流年那年的生日是否已过（用年中 6-15 作为参考，6-15 < 12-20 则 -1）
+            if (6, 15) < (birth_month, birth_day):
+                age -= 1
         out.append(
             {
                 "year": y,
                 "ganzhi": gz,
                 "zodiac": lunar.getYearShengXiao(),
-                "age": (y - birth_year) if birth_year else None,
+                "age": age,
             }
         )
     return out
@@ -88,6 +103,12 @@ def build_chart_summary(profile: BirthProfile) -> dict[str, Any]:
         d for d in (payload.get("dayun") or []) if d.get("ganzhi")
     ]  # 过滤 lunar-python 首条空占位
 
+    # 精确周岁：考虑是否过了本年生日（不是简单年份差）
+    today = date.today()
+    age_exact = today.year - profile.solar_birth_date.year - (
+        (today.month, today.day) < (profile.solar_birth_date.month, profile.solar_birth_date.day)
+    )
+
     return {
         "degraded": False,
         "bazi": bazi,
@@ -98,8 +119,13 @@ def build_chart_summary(profile: BirthProfile) -> dict[str, Any]:
         "ming_gong": payload.get("ming_gong", ""),
         "dayun": dayun,
         "liunian": future_liunian(
-            date.today().year, FUTURE_YEARS, birth_year=profile.solar_birth_date.year
+            today.year, FUTURE_YEARS,
+            birth_year=profile.solar_birth_date.year,
+            birth_month=profile.solar_birth_date.month,
+            birth_day=profile.solar_birth_date.day,
         ),
+        "current_age_exact": age_exact,
+        "current_age_nominal": today.year - profile.solar_birth_date.year,
         "birth_time_known": profile.birth_time_known,
         "gender": profile.gender,
     }

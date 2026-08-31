@@ -156,8 +156,8 @@ function GateTester() {
                 >
                   {a.verdict}
                 </Badge>
-                <span className="w-56 shrink-0 text-slate-400">{a.attack}</span>
-                <span className="text-slate-600">{a.reason}</span>
+                <span className="w-56 shrink-0 text-t2">{a.attack}</span>
+                <span className="text-t4">{a.reason}</span>
               </li>
             ))}
           </ul>
@@ -210,25 +210,25 @@ export default function Labs() {
         >
           <div className="grid gap-3 text-xs md:grid-cols-3">
             <div>
-              <div className="text-slate-500">观测发生率</div>
-              <div className="mt-1 text-lg tabular text-slate-200">{pct(o.observed_rate, 1)}</div>
-              <div className="mt-0.5 text-slate-600">
+              <div className="text-t3">观测发生率</div>
+              <div className="mt-1 text-lg tabular text-t1">{pct(o.observed_rate, 1)}</div>
+              <div className="mt-0.5 text-t4">
                 95% CI [{pct(o.ci[0], 1)}, {pct(o.ci[1], 1)}]
               </div>
             </div>
             <div>
-              <div className="text-slate-500">平均预测概率</div>
-              <div className="mt-1 text-lg tabular text-slate-200">{pct(o.mean_probability, 1)}</div>
+              <div className="text-t3">平均预测概率</div>
+              <div className="mt-1 text-lg tabular text-t1">{pct(o.mean_probability, 1)}</div>
             </div>
             <div>
-              <div className="text-slate-500">过度自信指数</div>
+              <div className="text-t3">过度自信指数</div>
               <div
-                className={`mt-1 text-lg tabular ${(o.overconfidence ?? 0) > 0.05 ? 'text-cinnabar-400' : 'text-slate-200'}`}
+                className={`mt-1 text-lg tabular ${(o.overconfidence ?? 0) > 0.05 ? 'text-cinnabar-400' : 'text-t1'}`}
               >
                 {(o.overconfidence ?? 0) > 0 ? '+' : ''}
                 {o.overconfidence != null ? o.overconfidence.toFixed(3) : '—'}
               </div>
-              <div className="mt-0.5 text-slate-600">正值 = 模型过度自信</div>
+              <div className="mt-0.5 text-t4">正值 = 模型过度自信</div>
             </div>
           </div>
         </Card>
@@ -243,8 +243,8 @@ export default function Labs() {
         {!calib.loading && !calib.error && <CalibrationChart bins={calib.data?.bins ?? []} />}
         {calib.data && calib.data.bins.length > 0 && (
           <table className="mt-3 w-full text-xs">
-            <thead className="text-slate-600">
-              <tr className="border-b border-ink-800">
+            <thead className="text-t4">
+              <tr className="border-b border-line">
                 <th className="py-1 text-left">分桶</th>
                 <th className="py-1 text-right">样本</th>
                 <th className="py-1 text-right">预测</th>
@@ -252,9 +252,9 @@ export default function Labs() {
                 <th className="py-1 text-right">偏差</th>
               </tr>
             </thead>
-            <tbody className="tabular text-slate-400">
+            <tbody className="tabular text-t2">
               {calib.data.bins.map((b) => (
-                <tr key={b.bin} className="border-b border-ink-800/50">
+                <tr key={b.bin} className="border-b border-line">
                   <td className="py-1">{b.bin}</td>
                   <td className="py-1 text-right">{b.n}</td>
                   <td className="py-1 text-right">{pct(b.predicted, 1)}</td>

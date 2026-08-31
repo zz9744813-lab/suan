@@ -53,25 +53,25 @@ export default function Timeline() {
           <EmptyState>还没有已验证的预测。先去「验证」页提交结果。</EmptyState>
         )}
 
-        <ul className="divide-y divide-ink-800">
+        <ul className="divide-y divide-line">
           {items.map((it) => (
             <li
               key={it.prediction_id}
               className="row-hover -mx-2 flex items-center gap-4 rounded-lg px-2 py-2.5"
             >
-              <div className="w-28 shrink-0 text-xs text-slate-600">
+              <div className="w-28 shrink-0 text-xs text-t4">
                 {shortDateTime(it.judged_at)}
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-slate-300">{it.event_type}</div>
+                <div className="truncate text-sm text-t1">{it.event_type}</div>
                 <div className="mt-1 flex items-center gap-2">
                   <ProbBar p={it.probability} className="w-28" />
-                  <span className="text-xs tabular text-slate-400">
+                  <span className="text-xs tabular text-t2">
                     {pct(it.probability)}
                   </span>
                   {it.null_probability != null && (
-                    <span className="text-[11px] text-slate-600">
+                    <span className="text-[11px] text-t4">
                       Null {pct(it.null_probability)}
                     </span>
                   )}
@@ -92,7 +92,7 @@ export default function Timeline() {
                 </Badge>
               </div>
 
-              <div className="w-20 shrink-0 text-right text-xs tabular text-slate-500">
+              <div className="w-20 shrink-0 text-right text-xs tabular text-t3">
                 BS {it.brier.toFixed(3)}
               </div>
             </li>

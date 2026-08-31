@@ -1,4 +1,5 @@
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { useState } from 'react';
 
 import { api } from './api/client';
 import { useAsync } from './lib/useAsync';
@@ -133,9 +134,9 @@ function OfflineBanner() {
   return (
     <div className="mb-4 flex items-center gap-3 rounded-xl border border-cinnabar-500/30 bg-cinnabar-500/[0.07] px-4 py-2.5">
       <span className="h-2 w-2 shrink-0 rounded-full bg-cinnabar-400" />
-      <div className="flex-1 text-xs text-slate-300">
+      <div className="flex-1 text-xs text-t1">
         后端服务离线，页面数据不可用。请用桌面快捷方式或
-        <span className="mx-1 font-mono text-slate-400">uvicorn app.main:app --port 8765</span>
+        <span className="mx-1 font-mono text-t2">uvicorn app.main:app --port 8765</span>
         启动后端。
       </div>
       <button
@@ -145,6 +146,42 @@ function OfflineBanner() {
         重试连接
       </button>
     </div>
+  );
+}
+
+/** 日间/夜间主题切换。持久化到 localStorage，index.html 内联脚本防 FOUC。 */
+function ThemeToggle() {
+  const [dark, setDark] = useState<boolean>(
+    () => document.documentElement.dataset.theme === 'dark',
+  );
+
+  const toggle = () => {
+    const next = !dark;
+    setDark(next);
+    document.documentElement.dataset.theme = next ? 'dark' : 'light';
+    localStorage.setItem('xm-theme', next ? 'dark' : 'light');
+  };
+
+  return (
+    <button
+      onClick={toggle}
+      className="btn-press flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] text-t2 hover:bg-navh hover:text-t1"
+      title={dark ? '切换到日间模式' : '切换到夜间模式'}
+    >
+      {dark ? (
+        // 太阳图标
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" className="h-4 w-4 shrink-0">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+        </svg>
+      ) : (
+        // 月亮图标
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+        </svg>
+      )}
+      <span>{dark ? '日间模式' : '夜间模式'}</span>
+    </button>
   );
 }
 
@@ -158,7 +195,7 @@ function BackendStatus() {
   const engineTotal = health.data ? Object.keys(health.data.engines).length : 7;
 
   return (
-    <div className="border-t border-ink-800 px-4 py-3">
+    <div className="border-t border-line px-4 py-3">
       <div className="flex items-center gap-2 text-[11px]">
         <span
           className={`inline-block h-1.5 w-1.5 rounded-full ${
@@ -169,16 +206,16 @@ function BackendStatus() {
                 : 'bg-cinnabar-400'
           }`}
         />
-        <span className={online ? 'text-slate-400' : 'text-slate-600'}>
+        <span className={online ? 'text-t2' : 'text-t4'}>
           {health.loading ? '连接中…' : online ? '后端在线' : '后端离线'}
         </span>
         {online && (
-          <span className="ml-auto tabular text-slate-600">
+          <span className="ml-auto tabular text-t4">
             引擎 {engineOk}/{engineTotal}
           </span>
         )}
       </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-slate-700">
+      <p className="mt-2 text-[11px] leading-relaxed text-t5">
         传统术数与个人预测实验平台，
         <br />
         不是经科学验证的预知系统。
@@ -193,7 +230,7 @@ export default function App() {
   return (
     <div className="flex h-full">
       {/* 侧边导航 */}
-      <nav className="relative flex w-56 shrink-0 flex-col border-r border-ink-800 bg-ink-950">
+      <nav className="relative flex w-56 shrink-0 flex-col border-r border-line bg-page">
         {/* 顶部鎏金光晕 */}
         <div
           aria-hidden
@@ -202,19 +239,19 @@ export default function App() {
 
         <div className="relative flex items-center gap-3 px-5 py-6">
           {/* 印章式 Logo */}
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-gilt-500/30 bg-gilt-500/10 text-lg font-bold text-gilt-300">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-gilt-500/30 bg-gilt-500/10 text-lg font-bold text-gt">
             玄
           </div>
           <div>
-            <div className="text-base font-semibold tracking-[0.2em] text-slate-100">玄鉴</div>
-            <div className="text-[10px] tracking-widest text-slate-600">XUANMIRROR</div>
+            <div className="text-base font-semibold tracking-[0.2em] text-t1">玄鉴</div>
+            <div className="text-[10px] tracking-widest text-t4">XUANMIRROR</div>
           </div>
         </div>
 
         <div className="relative flex-1 space-y-4 overflow-y-auto px-3">
           {NAV_GROUPS.map((g) => (
             <div key={g.label}>
-              <div className="mb-1 px-3 text-[10px] font-medium tracking-[0.25em] text-slate-700">
+              <div className="mb-1 px-3 text-[10px] font-medium tracking-[0.25em] text-t5">
                 {g.label}
               </div>
               <ul className="space-y-0.5">
@@ -225,8 +262,8 @@ export default function App() {
                       className={({ isActive }) =>
                         `group relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] transition-all duration-200 ${
                           isActive
-                            ? 'bg-white/[0.06] font-medium text-slate-100'
-                            : 'text-slate-500 hover:bg-white/[0.03] hover:text-slate-300'
+                            ? 'bg-nava font-medium text-t1'
+                            : 'text-t3 hover:bg-navh hover:text-t1'
                         }`
                       }
                       title={n.hint}
@@ -240,7 +277,7 @@ export default function App() {
                             }`}
                           />
                           <span
-                            className={`transition-colors ${isActive ? 'text-gilt-400' : 'text-slate-600 group-hover:text-slate-400'}`}
+                            className={`transition-colors ${isActive ? 'text-gt' : 'text-t4 group-hover:text-t2'}`}
                           >
                             <n.icon />
                           </span>
@@ -255,11 +292,15 @@ export default function App() {
           ))}
         </div>
 
+        <div className="border-t border-line px-3 py-2">
+          <ThemeToggle />
+        </div>
+
         <BackendStatus />
       </nav>
 
       {/* 内容区 */}
-      <main className="relative flex-1 overflow-y-auto bg-ink-950">
+      <main className="relative flex-1 overflow-y-auto bg-page">
         {/* 背景氛围光 */}
         <div
           aria-hidden

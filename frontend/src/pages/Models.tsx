@@ -34,10 +34,10 @@ function MatrixTable({
   if (rows.length === 0) return <EmptyState>暂无数据</EmptyState>;
   return (
     <div>
-      <div className="mb-1.5 text-xs font-medium text-slate-400">{title}</div>
+      <div className="mb-1.5 text-xs font-medium text-t2">{title}</div>
       <table className="w-full text-xs">
-        <thead className="text-slate-600">
-          <tr className="border-b border-ink-800">
+        <thead className="text-t4">
+          <tr className="border-b border-line">
             <th className="py-1 text-left">维度</th>
             <th className="py-1 text-right">样本</th>
             <th className="py-1 text-right">Skill</th>
@@ -45,9 +45,9 @@ function MatrixTable({
             <th className="py-1 text-right">可靠度</th>
           </tr>
         </thead>
-        <tbody className="tabular text-slate-400">
+        <tbody className="tabular text-t2">
           {rows.map((r) => (
-            <tr key={r.key} className="border-b border-ink-800/50">
+            <tr key={r.key} className="border-b border-line">
               <td className="py-1">{keyLabel(r)}</td>
               <td className="py-1 text-right">{r.sample_size}</td>
               <td
@@ -143,7 +143,7 @@ export default function Models() {
             />
 
             <div>
-              <div className="mb-1.5 text-xs font-medium text-slate-400">
+              <div className="mb-1.5 text-xs font-medium text-t2">
                 Fusion 权重（由实证 skill 学习得到）
               </div>
               <div className="flex flex-wrap gap-2">
@@ -153,7 +153,7 @@ export default function Models() {
                   </Badge>
                 ))}
                 {Object.keys(rel.data.fusion_weights).length === 0 && (
-                  <span className="text-xs text-slate-600">
+                  <span className="text-xs text-t4">
                     尚无足够样本，全部按 1.0（不惩罚也不奖励，第 77 节弱先验）
                   </span>
                 )}

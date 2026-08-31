@@ -28,15 +28,15 @@ export default function Rules() {
         title="规则"
         desc="每条传统规则都有唯一 ID，长期统计其在各领域、各时间尺度上的真实增益。"
         right={
-          <div className="inline-flex gap-0.5 rounded-lg border border-ink-800 bg-ink-900 p-0.5">
+          <div className="inline-flex gap-0.5 rounded-lg border border-line bg-panel p-0.5">
             {['active', 'shadow', 'deprecated', 'rejected'].map((s) => (
               <button
                 key={s}
                 onClick={() => setStatus(s)}
                 className={`btn-press rounded-md px-2.5 py-1 text-xs transition ${
                   status === s
-                    ? 'bg-ink-700 text-gilt-300 shadow-card'
-                    : 'text-slate-600 hover:text-slate-400'
+                    ? 'bg-panel text-gt shadow-card'
+                    : 'text-t4 hover:text-t2'
                 }`}
               >
                 {s}
@@ -53,14 +53,14 @@ export default function Rules() {
           <EmptyState>
             暂无已登记规则。规则由各术式 Agent 在产出 Signal 时通过 rule_ids 引用，
             <br />
-            骨架阶段八字模块会生成形如 <code className="text-slate-400">BAZI-R-官-career</code> 的规则 ID。
+            骨架阶段八字模块会生成形如 <code className="text-t2">BAZI-R-官-career</code> 的规则 ID。
           </EmptyState>
         )}
 
         {(rules.data?.items.length ?? 0) > 0 && (
           <table className="w-full text-xs">
-            <thead className="text-slate-600">
-              <tr className="border-b border-ink-800">
+            <thead className="text-t4">
+              <tr className="border-b border-line">
                 <th className="py-1.5 text-left">规则 ID</th>
                 <th className="py-1.5 text-left">流派</th>
                 <th className="py-1.5 text-left">领域</th>
@@ -68,10 +68,10 @@ export default function Rules() {
                 <th className="py-1.5 text-right">版本</th>
               </tr>
             </thead>
-            <tbody className="text-slate-400">
+            <tbody className="text-t2">
               {rules.data?.items.map((r) => (
-                <tr key={r.rule_id} className="border-b border-ink-800/50">
-                  <td className="py-1.5 font-mono text-slate-300">{r.rule_id}</td>
+                <tr key={r.rule_id} className="border-b border-line">
+                  <td className="py-1.5 font-mono text-t1">{r.rule_id}</td>
                   <td className="py-1.5">
                     <Badge>{r.school}</Badge>
                   </td>
