@@ -21,6 +21,31 @@ export const cleanDescription = (description: string, eventType?: string): strin
 export const pct = (v: number | null | undefined, digits = 0): string =>
   v === null || v === undefined || Number.isNaN(v) ? '—' : `${(v * 100).toFixed(digits)}%`;
 
+/**
+ * 预测力 edge = 预测概率 - Null 基线（单位：百分点）。
+ * 正值=比随机强，负值=比随机还差，近零=无预测力。第 20.10 节 BaselineAttack / C-006。
+ */
+export const edgePp = (p: number, nullP: number | null | undefined): number | null =>
+  nullP == null ? null : (p - nullP) * 100;
+
+/** edge 文案：一眼看出这条预测相对随机基线有没有价值。 */
+export const edgeText = (p: number, nullP: number | null | undefined): string => {
+  const e = edgePp(p, nullP);
+  if (e == null) return '';
+  if (e > 0) return `超基线 +${e.toFixed(1)}pp`;
+  if (e < 0) return `低于基线 ${e.toFixed(1)}pp`;
+  return '≈ 随机';
+};
+
+/** edge 颜色：正绿 / 负红 / 近零灰。 */
+export const edgeClass = (p: number, nullP: number | null | undefined): string => {
+  const e = edgePp(p, nullP);
+  if (e == null) return 'text-t4';
+  if (e >= 1) return 'text-jade-400';
+  if (e <= -1) return 'text-cinnabar-400';
+  return 'text-t4';
+};
+
 export const num = (v: number | null | undefined, digits = 3): string =>
   v === null || v === undefined || Number.isNaN(v) ? '—' : v.toFixed(digits);
 

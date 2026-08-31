@@ -17,6 +17,8 @@ import {
   SCALE_LABEL,
   STATUS_LABEL,
   cleanDescription,
+  edgeClass,
+  edgeText,
   num,
   pct,
   shortDate,
@@ -251,9 +253,14 @@ export default function Future() {
         {preds.error && <ErrorBox message={preds.error} />}
         {!preds.loading && !preds.error && visible.length === 0 && (
           <EmptyState>
-            暂无预测。点击右上角「生成预测」跑一次闭环：
+            当前没有正式预测。
             <br />
-            扫描候选 → 盲审 → 融合 → 对抗审查 → 预算竞争 → 冻结。
+            系统只在「术数/现实信号显著超过随机基线」时才冻结预测——
+            如果今天没找到有预测力的事件，会诚实放弃，而不是硬造噪声预测。
+            <br />
+            <span className="text-t4">
+              （这是 C-006 诚实原则：若术数不比随机强，系统必须承认它没有贡献。）
+            </span>
           </EmptyState>
         )}
         <ul className="stagger space-y-3">
@@ -282,9 +289,17 @@ export default function Future() {
                       {pct(p.probability)}
                     </span>
                     {p.null_probability != null && (
-                      <span className="text-xs text-t4">
-                        Null 基线 {pct(p.null_probability)}
-                      </span>
+                      <>
+                        <span className="text-xs text-t4">
+                          Null 基线 {pct(p.null_probability)}
+                        </span>
+                        <span
+                          className={`text-xs font-medium ${edgeClass(p.probability, p.null_probability)}`}
+                          title="预测概率相对 Null 基线的差值：正值=比随机强，负值=比随机还差"
+                        >
+                          {edgeText(p.probability, p.null_probability)}
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>

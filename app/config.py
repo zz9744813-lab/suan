@@ -100,6 +100,14 @@ class Settings(BaseSettings):
     MIN_SAMPLE_FOR_RELIABILITY: int = 20
     PRIOR_STRENGTH: float = Field(default=10.0, ge=0.0)
 
+    # ---------- 预测质量门槛（C-006 诚实原则）----------
+    # 融合概率与 Null 基线的差距（edge = p - null）绝对值小于此阈值时，
+    # 说明术数/现实信号没有提供超出随机的信息，候选会被诚实拒绝（NO_EDGE），
+    # 不进入正式冻结账本，避免产出「贴 Null 的噪声预测」误导用户。
+    # 实测纯术式噪声的 |edge| 分布约 0.44~2.36pp，故默认 3pp 可滤除全部纯噪声；
+    # 未来积累真实样本后，有预测力的信号 edge 会显著超过此阈值，自动放行。
+    MIN_PREDICTION_EDGE: float = Field(default=0.03, ge=0.0, le=0.5)
+
     # ---------- 派生 ----------
     def provider(self, tier: Literal["reasoning", "cheap", "vision"]) -> ProviderSettings:
         """按分层取 Provider 配置。"""

@@ -184,6 +184,26 @@ class DailyPipeline:
                 )
             )
 
+            # ---------- 4.5 预测质量门槛（C-006 诚实原则）----------
+            # 融合概率与 Null 基线的差距（|edge|）过小，说明信号没有提供超出随机的信息，
+            # 此时诚实放弃（NO_EDGE），不产出「贴 Null 的噪声预测」误导用户。
+            # 正负 edge 都保留：|edge| 显著即代表信号提供了信息（更可能/更不可能都有意义）。
+            edge = fusion.probability - null_p
+            if abs(edge) < self.settings.MIN_PREDICTION_EDGE:
+                result.rejected.append(
+                    {
+                        "event_type": event_type,
+                        "decision": "NO_EDGE",
+                        "failed": ["BaselineAttack"],
+                        "reasons": [
+                            f"融合概率 {fusion.probability:.2%} 与 Null 基线 {null_p:.2%} "
+                            f"差距仅 {edge:+.2%}，未超过最小预测力门槛 "
+                            f"{self.settings.MIN_PREDICTION_EDGE:.0%}，诚实放弃（C-006）"
+                        ],
+                    }
+                )
+                continue
+
             # ---------- 5. CandidateAgent → 可验证预测 ----------
             cand = self._build_candidate(
                 event_type=event_type,

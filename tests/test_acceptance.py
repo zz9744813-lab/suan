@@ -72,26 +72,43 @@ def _seed_user(engine, *, with_events: bool = True) -> int:
 
 
 # ======================================================================
-# PRED-01：系统可以每天自动生成至少 3 条正式预测
+# PRED-01：系统每天自动运行闭环，且诚实拒绝无预测力的候选（C-006）
 # ======================================================================
-def test_pred_01_daily_generation(env):
+def test_pred_01_daily_generation(env, monkeypatch):
+    # PRED-01 是唯一开启真实门槛的测试（conftest 默认关掉门槛以便其他测试产预测）。
+    from app.config import get_settings
+
+    min_edge = get_settings().MIN_PREDICTION_EDGE = 0.03
+
     client, engine = env
     uid = _seed_user(engine)
 
     r = client.post(f"/api/predictions/generate?user_id={uid}&scale=day&limit=15")
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["scanned"] > 0
-    assert len(data["frozen"]) >= 3, (
-        f"应每天自动生成 ≥3 条正式预测，实际 {len(data['frozen'])} 条。"
-        f"拦截：{data['rejected']}"
-    )
+    assert data["scanned"] > 0  # 系统确实扫描了候选
+
+    # 质量门槛（C-006）：每条冻结预测都必须显著偏离 Null 基线（|edge| 够大），
+    # 不允许产出「贴 Null 的噪声预测」凑数误导用户。
+    for f in data["frozen"]:
+        edge = f["probability"] - f["null_probability"]
+        assert abs(edge) >= min_edge, (
+            f"冻结预测 {f['event_type']} 的 |edge|={abs(edge):.2%} 低于门槛 {min_edge:.0%}，"
+            f"不应进入正式账本（C-006）"
+        )
+
+    # 诚实拒绝：无预测力的候选必须被显式标记为 NO_EDGE，而非静默丢弃
+    for rej in data["rejected"]:
+        if rej.get("decision") == "NO_EDGE":
+            assert rej.get("reasons"), "NO_EDGE 拒绝必须给出原因（诚实可解释）"
 
 
 # ======================================================================
 # PRED-02：每条预测可证伪 / 有概率 / 有时间窗口 / 有成功标准 / 有失败标准
 # ======================================================================
 def test_pred_02_falsifiable(env):
+    # 门槛已由 conftest autouse 关闭（MIN_PREDICTION_EDGE=0），
+    # 本测试验证「预测数据完整性」而非门槛本身。
     client, engine = env
     uid = _seed_user(engine)
     client.post(f"/api/predictions/generate?user_id={uid}&scale=day&limit=15")

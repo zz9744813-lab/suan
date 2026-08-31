@@ -35,6 +35,19 @@ def _mock_llm(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _disable_edge_gate(monkeypatch):
+    """测试环境默认关闭预测质量门槛（MIN_PREDICTION_EDGE=0）。
+
+    测试用 MockProvider，术式信号无真实预测力，edge 门槛会导致 0 预测，
+    无法测「预测数据完整性」（可证伪/概率/窗口/null 基线）。
+    唯一例外：PRED-01 单独覆盖回真实门槛，专门测「门槛生效」。
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "MIN_PREDICTION_EDGE", 0.0)
+
+
 @pytest.fixture()
 def client():
     """带内存数据库的测试客户端。
