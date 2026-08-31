@@ -13,11 +13,16 @@ import { useAsync } from '../lib/useAsync';
  * 第 20 节 对抗性 Gate 手动测试器
  */
 
-const AXIS = {
-  axisLine: { lineStyle: { color: '#2f3745' } },
-  axisLabel: { color: '#64748b', fontSize: 11 },
-  splitLine: { lineStyle: { color: '#1c2230' } },
-};
+/** 读取当前主题，返回该主题下的 ECharts 轴/网格颜色（暗色底用深线，浅色底用浅线）。 */
+function chartColors() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  return {
+    axisLine: dark ? '#2f3745' : '#cbd5e1',
+    axisLabel: dark ? '#64748b' : '#5d6b84',
+    splitLine: dark ? '#1c2230' : '#e2e8f0',
+    reference: dark ? '#475569' : '#94a3b8',
+  };
+}
 
 function CalibrationChart({
   bins,
@@ -26,6 +31,7 @@ function CalibrationChart({
 }) {
   if (bins.length === 0) return <EmptyState>样本不足，暂无法绘制校准曲线。</EmptyState>;
 
+  const c = chartColors();
   const option = {
     backgroundColor: 'transparent',
     grid: { left: 48, right: 24, top: 24, bottom: 48 },
@@ -35,20 +41,24 @@ function CalibrationChart({
         `预测 ${(p.data[0] * 100).toFixed(0)}% / 实际 ${(p.data[1] * 100).toFixed(0)}%`,
     },
     xAxis: {
-      ...AXIS,
       type: 'value',
       min: 0,
       max: 1,
       name: '预测概率',
-      nameTextStyle: { color: '#64748b', fontSize: 11 },
+      axisLine: { lineStyle: { color: c.axisLine } },
+      axisLabel: { color: c.axisLabel, fontSize: 11 },
+      splitLine: { lineStyle: { color: c.splitLine } },
+      nameTextStyle: { color: c.axisLabel, fontSize: 11 },
     },
     yAxis: {
-      ...AXIS,
       type: 'value',
       min: 0,
       max: 1,
       name: '实际发生率',
-      nameTextStyle: { color: '#64748b', fontSize: 11 },
+      axisLine: { lineStyle: { color: c.axisLine } },
+      axisLabel: { color: c.axisLabel, fontSize: 11 },
+      splitLine: { lineStyle: { color: c.splitLine } },
+      nameTextStyle: { color: c.axisLabel, fontSize: 11 },
     },
     series: [
       {
@@ -59,7 +69,7 @@ function CalibrationChart({
           [1, 1],
         ],
         symbol: 'none',
-        lineStyle: { color: '#475569', type: 'dashed', width: 1 },
+        lineStyle: { color: c.reference, type: 'dashed', width: 1 },
         silent: true,
       },
       {
@@ -118,7 +128,7 @@ function GateTester() {
         <button
           onClick={run}
           disabled={busy}
-          className="btn-press rounded-lg bg-slate-200 px-3.5 py-1.5 text-xs font-semibold text-ink-950 hover:bg-white disabled:opacity-50"
+          className="btn-press rounded-lg bg-t1 px-3.5 py-1.5 text-xs font-semibold text-page hover:opacity-85 disabled:opacity-50"
         >
           {busy ? '检测中…' : '跑一遍 Gate'}
         </button>

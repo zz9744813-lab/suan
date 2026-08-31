@@ -230,10 +230,10 @@ export function PrimaryButton({
     <button
       {...rest}
       disabled={disabled || busy}
-      className={`btn-press inline-flex items-center gap-2 rounded-xl bg-gilt-500 px-4 py-2 text-sm font-semibold text-ink-950 hover:bg-gilt-400 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      className={`btn-press inline-flex items-center gap-2 rounded-xl bg-gilt-500 px-4 py-2 text-sm font-semibold text-[#0b0e14] hover:bg-gilt-400 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
       {busy && (
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ink-950/30 border-t-ink-950" />
+        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[#0b0e14]/30 border-t-[#0b0e14]" />
       )}
       {children}
     </button>

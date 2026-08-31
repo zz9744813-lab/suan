@@ -152,7 +152,7 @@ export default function Verify() {
                   <button
                     disabled={busy === it.prediction_id || !reply[it.prediction_id]}
                     onClick={() => submit(it.prediction_id)}
-                    className="btn-press rounded-lg bg-slate-200 px-3.5 py-1.5 text-xs font-semibold text-ink-950 hover:bg-white disabled:opacity-40"
+                    className="btn-press rounded-lg bg-t1 px-3.5 py-1.5 text-xs font-semibold text-page hover:opacity-85 disabled:opacity-40"
                   >
                     提交
                   </button>
