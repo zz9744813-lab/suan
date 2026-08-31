@@ -113,10 +113,21 @@ export default function Future() {
   const due = useAsync(() => api.duePredictions(DEFAULT_USER_ID), []);
   const health = useAsync(() => api.health(), []);
   const tree = useAsync(() => api.futureTree(DEFAULT_USER_ID), []);
+  const meta = useAsync(() => api.meta(), []);
+
+  // 冷启动校准门槛：达到该已验证样本数后才解锁正式预测（与后端 config 一致）
+  const minCalibration = (
+    (meta.data as { calibration?: { min_calibration_samples?: number } } | undefined)
+      ?.calibration?.min_calibration_samples ?? 5
+  );
+  const calibratedCount = overall.data?.sample_size ?? 0;
+  const coldStart = calibratedCount < minCalibration;
 
   const visible = (preds.data?.items ?? []).filter(
     (p) => p.time_scale === scale || scale === 'day',
   );
+  const research = visible.filter((p) => p.status === 'RESEARCH');
+  const formal = visible.filter((p) => p.status !== 'RESEARCH');
 
   const generate = async () => {
     setGenerating(true);
@@ -144,6 +155,66 @@ export default function Future() {
     ? Object.values(health.data.engines).filter((e) => e.available).length
     : 0;
   const engineTotal = health.data ? Object.keys(health.data.engines).length : 7;
+
+  const renderRow = (p: (typeof visible)[number], isResearch = false) => (
+    <li key={p.prediction_id} className="row-hover rounded-lg border border-line p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-t1">{cleanDescription(p.description, p.event_type)}</span>
+            <Badge>{DOMAIN_LABEL[p.domain] ?? p.domain}</Badge>
+            <Badge tone="info">{SCALE_LABEL[p.time_scale]}</Badge>
+            {p.visibility_mode === 'HIDDEN' && <Badge tone="warn">隐藏模式</Badge>}
+          </div>
+          <div className="mt-1 text-xs text-t4">
+            {p.event_type} · 窗口 {shortDate(p.window[0])} ~ {shortDate(p.window[1])}
+            {p.verification_due_at && ` · 验证截止 ${shortDateTime(p.verification_due_at)}`}
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <ProbBar p={p.probability} className="w-40" />
+            <span className="text-sm font-semibold tabular text-t1">{pct(p.probability)}</span>
+            {p.null_probability != null && (
+              <>
+                <span className="text-xs text-t4">Null 基线 {pct(p.null_probability)}</span>
+                <span
+                  className={`text-xs font-medium ${edgeClass(p.probability, p.null_probability)}`}
+                  title="预测概率相对 Null 基线的差值：正值=比随机强，负值=比随机还差"
+                >
+                  {edgeText(p.probability, p.null_probability)}
+                </span>
+              </>
+            )}
+          </div>
+          {isResearch && (
+            <div className="mt-2 text-xs text-amber-400/90">
+              研究样本：术式信号未参与，概率 = Null 基线。用于启动校准闭环、积累验证数据，不代表预测力。
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 text-right">
+          <Badge
+            tone={
+              p.status === 'VERIFIED'
+                ? 'good'
+                : p.status === 'RESEARCH'
+                  ? 'warn'
+                  : p.status === 'REJECTED' || p.status === 'LEAKED'
+                    ? 'bad'
+                    : 'default'
+            }
+          >
+            {STATUS_LABEL[p.status] ?? p.status}
+          </Badge>
+          <div
+            className="mt-1 font-mono text-[10px] text-t5"
+            title="冻结哈希前缀（防篡改）"
+          >
+            {p.sha256_head}
+          </div>
+        </div>
+      </div>
+    </li>
+  );
 
   return (
     <div className="space-y-5">
@@ -224,9 +295,10 @@ export default function Future() {
       <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="待验证" value={due.data?.count ?? '—'} hint="到期需用户确认" />
         <Stat
-          label="已验证"
-          value={overall.data?.sample_size ?? '—'}
-          hint="进入评分的样本"
+          label="校准进度"
+          value={`${calibratedCount}/${minCalibration}`}
+          hint={coldStart ? '达标后解锁正式预测' : '已解锁正式预测'}
+          tone={coldStart ? 'warn' : 'good'}
         />
         <Stat
           label="Skill Score"
@@ -244,88 +316,63 @@ export default function Future() {
         />
       </div>
 
-      {/* 预测列表 */}
+      {/* 冷启动研究样本 */}
+      {coldStart && (
+        <Card
+          title="研究样本"
+          subtitle={`校准进度 ${calibratedCount}/${minCalibration}：尚未积累足够验证数据，术式信号未参与预测。以下样本用于启动校准闭环，验证后系统才会学会真正预测。`}
+          right={<Badge tone="warn">冷启动模式</Badge>}
+        >
+          {preds.loading && <Loading />}
+          {preds.error && <ErrorBox message={preds.error} />}
+          {!preds.loading && !preds.error && research.length === 0 && (
+            <EmptyState>
+              暂无研究样本。
+              <br />
+              点击右上角「生成预测」，系统会从候选事件里按 Null 基线概率挑出最可能的几件，
+              作为研究样本冻结，供你在「验证」页填结果。
+            </EmptyState>
+          )}
+          <ul className="stagger space-y-3">{research.map((p) => renderRow(p, true))}</ul>
+        </Card>
+      )}
+
+      {/* 正式冻结预测 */}
       <Card
         title="正式冻结预测"
         subtitle="只有通过对抗性 Gate 并获得预算额度的预测才会出现在这里"
       >
         {preds.loading && <Loading />}
         {preds.error && <ErrorBox message={preds.error} />}
-        {!preds.loading && !preds.error && visible.length === 0 && (
+        {!preds.loading && !preds.error && formal.length === 0 && (
           <EmptyState>
-            当前没有正式预测。
-            <br />
-            系统只在「术数/现实信号显著超过随机基线」时才冻结预测——
-            如果今天没找到有预测力的事件，会诚实放弃，而不是硬造噪声预测。
-            <br />
-            <span className="text-t4">
-              （这是 C-006 诚实原则：若术数不比随机强，系统必须承认它没有贡献。）
-            </span>
+            {coldStart ? (
+              <>
+                还没有正式预测。
+                <br />
+                系统处于冷启动：术式信号未经实证、不参与融合，暂时不产出正式预测，
+                只产出「研究样本」用于积累校准数据（见上方）。
+                <br />
+                <span className="text-t4">
+                  （C-006 诚实原则：术数不比随机强时，系统必须承认它没有预测力，
+                  而不是硬造噪声预测。累计 {minCalibration} 条验证样本后自动解锁。）
+                </span>
+              </>
+            ) : (
+              <>
+                当前没有正式预测。
+                <br />
+                系统只在「术数/现实信号显著超过随机基线」时才冻结预测——
+                如果今天没找到有预测力的事件，会诚实放弃，而不是硬造噪声预测。
+                <br />
+                <span className="text-t4">
+                  （这是 C-006 诚实原则：若术数不比随机强，系统必须承认它没有贡献。）
+                </span>
+              </>
+            )}
           </EmptyState>
         )}
-        <ul className="stagger space-y-3">
-          {visible.map((p) => (
-            <li
-              key={p.prediction_id}
-              className="row-hover rounded-lg border border-line p-3"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-t1">{cleanDescription(p.description, p.event_type)}</span>
-                    <Badge>{DOMAIN_LABEL[p.domain] ?? p.domain}</Badge>
-                    <Badge tone="info">{SCALE_LABEL[p.time_scale]}</Badge>
-                    {p.visibility_mode === 'HIDDEN' && (
-                      <Badge tone="warn">隐藏模式</Badge>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs text-t4">
-                    {p.event_type} · 窗口 {shortDate(p.window[0])} ~ {shortDate(p.window[1])}
-                    {p.verification_due_at && ` · 验证截止 ${shortDateTime(p.verification_due_at)}`}
-                  </div>
-                  <div className="mt-2 flex items-center gap-3">
-                    <ProbBar p={p.probability} className="w-40" />
-                    <span className="text-sm font-semibold tabular text-t1">
-                      {pct(p.probability)}
-                    </span>
-                    {p.null_probability != null && (
-                      <>
-                        <span className="text-xs text-t4">
-                          Null 基线 {pct(p.null_probability)}
-                        </span>
-                        <span
-                          className={`text-xs font-medium ${edgeClass(p.probability, p.null_probability)}`}
-                          title="预测概率相对 Null 基线的差值：正值=比随机强，负值=比随机还差"
-                        >
-                          {edgeText(p.probability, p.null_probability)}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <Badge
-                    tone={
-                      p.status === 'VERIFIED'
-                        ? 'good'
-                        : p.status === 'REJECTED' || p.status === 'LEAKED'
-                          ? 'bad'
-                          : 'default'
-                    }
-                  >
-                    {STATUS_LABEL[p.status] ?? p.status}
-                  </Badge>
-                  <div
-                    className="mt-1 font-mono text-[10px] text-t5"
-                    title="冻结哈希前缀（防篡改）"
-                  >
-                    {p.sha256_head}
-                  </div>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <ul className="stagger space-y-3">{formal.map((p) => renderRow(p))}</ul>
       </Card>
 
       {/* 第 27 节 Future Tree：人生情景树（每周按新证据重算） */}

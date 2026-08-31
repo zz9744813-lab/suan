@@ -88,6 +88,7 @@ def due_predictions(
         .where(PredictionRecord.user_id == user_id)
         .where(PredictionRecord.status.in_([  # type: ignore[union-attr]
             PredictionStatus.FROZEN.value,
+            PredictionStatus.RESEARCH.value,  # 冷启动研究样本同样可验证，用于积累校准数据
             PredictionStatus.VERIFY_REQUIRED.value,
             PredictionStatus.WAITING_USER.value,
         ]))

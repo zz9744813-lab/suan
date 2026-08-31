@@ -108,6 +108,18 @@ class Settings(BaseSettings):
     # 未来积累真实样本后，有预测力的信号 edge 会显著超过此阈值，自动放行。
     MIN_PREDICTION_EDGE: float = Field(default=0.03, ge=0.0, le=0.5)
 
+    # ---------- 冷启动校准门槛（C-006 + 禁止 6）----------
+    # 已验证样本（prediction_scores）不足此数时，术式信号的预测力未经实证，
+    # 其 strength 是未校准的噪声。此时系统进入「冷启动研究模式」：
+    #   - 术式信号不参与融合（fusion 权重归零），避免「噪声偶然偏离 Null」产出假预测；
+    #   - 只产出「研究样本」（status=RESEARCH）用于启动验证闭环，明确告知用户
+    #     这还不代表预测力，仅用于积累校准数据。
+    # 达到此样本数后，系统自动转正式预测（术式信号恢复参与融合）。
+    MIN_CALIBRATION_SAMPLES: int = Field(default=5, ge=1)
+
+    # 冷启动研究模式下，每次最多产出的研究样本数（第 4 节预算在冷启动时的替代额度）。
+    RESEARCH_SAMPLE_LIMIT: int = Field(default=3, ge=0)
+
     # ---------- 派生 ----------
     def provider(self, tier: Literal["reasoning", "cheap", "vision"]) -> ProviderSettings:
         """按分层取 Provider 配置。"""

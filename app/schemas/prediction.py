@@ -29,6 +29,7 @@ class PredictionStatus(str, Enum):
     REJECTED = "REJECTED"        # 被对抗审查拦截（C-004 要求保留）
     REWRITE = "REWRITE"          # Gate 要求重写
     EXPERIMENTAL = "EXPERIMENTAL"  # 通过但标记为实验性，不计入主评分
+    RESEARCH = "RESEARCH"        # 冷启动研究样本：用于积累校准数据，不代表预测力
     FROZEN = "FROZEN"            # 已冻结，等待验证
     VERIFY_REQUIRED = "VERIFY_REQUIRED"  # 到期，主动要求用户验证
     WAITING_USER = "WAITING_USER"        # 用户暂未回复

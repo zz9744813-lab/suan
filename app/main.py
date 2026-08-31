@@ -97,6 +97,10 @@ def _meta_payload() -> dict:
             "rule": settings.RULE_VERSION,
             "engine": settings.ENGINE_VERSION,
         },
+        "calibration": {
+            "min_calibration_samples": settings.MIN_CALIBRATION_SAMPLES,
+            "research_sample_limit": settings.RESEARCH_SAMPLE_LIMIT,
+        },
     }
 
 

@@ -92,7 +92,10 @@ export default function Verify() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
-                    <div className="text-sm text-t1">{cleanDescription(it.description, it.event_type)}</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-t1">{cleanDescription(it.description, it.event_type)}</span>
+                      {it.status === 'RESEARCH' && <Badge tone="warn">研究样本</Badge>}
+                    </div>
                     <div className="mt-1 text-xs text-t4">
                       {it.event_type} · 窗口 {shortDateTime(it.window[0])} ~{' '}
                       {shortDateTime(it.window[1])}

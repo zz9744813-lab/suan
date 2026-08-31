@@ -132,6 +132,7 @@ export const STATUS_LABEL: Record<string, string> = {
   REJECTED: '已拦截',
   REWRITE: '待重写',
   EXPERIMENTAL: '实验性',
+  RESEARCH: '研究样本',
   FROZEN: '已冻结',
   VERIFY_REQUIRED: '待验证',
   WAITING_USER: '等待用户',

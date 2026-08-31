@@ -48,6 +48,19 @@ def _disable_edge_gate(monkeypatch):
     monkeypatch.setattr(get_settings(), "MIN_PREDICTION_EDGE", 0.0)
 
 
+@pytest.fixture(autouse=True)
+def _disable_calibration_gate(monkeypatch):
+    """测试环境默认关闭冷启动校准门槛（MIN_CALIBRATION_SAMPLES=0）。
+
+    测试用 MockProvider + 内存库，无已验证样本，冷启动门槛会导致全部
+    产出 RESEARCH 研究样本而非 FROZEN 正式预测，破坏现有「正式预测数据完整性」断言。
+    唯一例外：冷启动专项测试单独覆盖回真实门槛，测「研究样本产出」。
+    """
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "MIN_CALIBRATION_SAMPLES", 0)
+
+
 @pytest.fixture()
 def client():
     """带内存数据库的测试客户端。

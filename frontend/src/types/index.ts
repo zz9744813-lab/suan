@@ -9,6 +9,7 @@ export type TimeScale = 'day' | 'week' | 'month' | 'year';
 
 export type PredictionStatus =
   | 'CANDIDATE' | 'REJECTED' | 'REWRITE' | 'EXPERIMENTAL'
+  | 'RESEARCH'
   | 'FROZEN' | 'VERIFY_REQUIRED' | 'WAITING_USER'
   | 'VERIFIED' | 'EXPIRED_UNVERIFIED' | 'LEAKED';
 

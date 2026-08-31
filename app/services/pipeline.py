@@ -47,7 +47,7 @@ from app.prediction.budget import apply_budget, default_slots
 from app.prediction.ontology import ONTOLOGY, by_scale
 from app.reality.null_model import NullModel
 from app.reality.state import build_reality_state, persist_daily_state
-from app.schemas.prediction import Prediction, PredictionCandidate
+from app.schemas.prediction import Prediction, PredictionCandidate, PredictionStatus
 from app.schemas.signal import Domain, Signal, TimeScale, TimeWindow
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,18 @@ class DailyPipeline:
             result.notes.append("Future Scanner 未产出候选")
             return result
 
+        # ---------- 2.5 冷启动校准门槛（C-006 + 禁止 6）----------
+        # 已验证样本不足时，术式信号的预测力未经实证，其 strength 是未校准噪声。
+        # 此时进入「冷启动研究模式」：术式信号不参与融合，只产出研究样本，
+        # 避免「噪声偶然偏离 Null」产出假预测误导用户。
+        calibrated = self._calibration_sample_count()
+        cold_start = calibrated < self.settings.MIN_CALIBRATION_SAMPLES
+        if cold_start:
+            result.notes.append(
+                f"冷启动：已验证样本 {calibrated}/{self.settings.MIN_CALIBRATION_SAMPLES}，"
+                f"术式信号未经实证不参与融合，本轮仅产出研究样本（不代表预测力）"
+            )
+
         window = FreezeAgent.default_window(
             datetime(target_date.year, target_date.month, target_date.day), time_scale
         )
@@ -169,6 +181,7 @@ class DailyPipeline:
                     target_date=target_date,
                     reality_state=reality_state,
                     experiment_arm=self.experiment_arm,
+                    include_metaphysical=(not cold_start),
                 )
             except Exception as exc:
                 result.notes.append(f"{event_type} 信号收集失败：{exc}")
@@ -183,6 +196,26 @@ class DailyPipeline:
                     reliability=self._reliability_weights(),
                 )
             )
+
+            # ---------- 冷启动分支：产出研究样本，不走 edge 门槛 / Gate ----------
+            if cold_start:
+                # 研究样本的概率 = Null 基线（术式不参与，无超出随机的信息），
+                # 明确标记 RESEARCH，用于启动验证闭环积累校准数据。
+                cand = self._build_candidate(
+                    event_type=event_type,
+                    domain=domain,
+                    window=window,
+                    time_scale=time_scale,
+                    reality_state=reality_state,
+                    probability=null_p,
+                    null_probability=null_p,
+                    signals=signals,
+                )
+                if cand is None:
+                    result.notes.append(f"{event_type} 无法构造研究样本（C-001）")
+                    continue
+                result.candidates.append(cand)
+                continue
 
             # ---------- 4.5 预测质量门槛（C-006 诚实原则）----------
             # 融合概率与 Null 基线的差距（|edge|）过小，说明信号没有提供超出随机的信息，
@@ -237,15 +270,30 @@ class DailyPipeline:
             result.candidates.append(cand)
 
         # ---------- 7. Prediction Budget（第 4 节）----------
-        selected, usage = apply_budget(result.candidates, default_slots(self.settings))
+        if cold_start:
+            # 冷启动：研究样本按 Null 基线概率降序，取 RESEARCH_SAMPLE_LIMIT 条
+            research_candidates = sorted(
+                result.candidates, key=lambda c: c.probability, reverse=True
+            )[: self.settings.RESEARCH_SAMPLE_LIMIT]
+            selected = research_candidates
+            usage = {"research": len(selected)}
+            result.notes.append(
+                f"研究样本：{len(result.candidates)} 候选 → {len(selected)} 条（冷启动额度）"
+            )
+        else:
+            selected, usage = apply_budget(result.candidates, default_slots(self.settings))
+            result.notes.append(
+                f"预算竞争：{len(result.candidates)} 候选 → {len(selected)} 条获得额度"
+            )
         result.budget_usage = usage
-        result.notes.append(
-            f"预算竞争：{len(result.candidates)} 候选 → {len(selected)} 条获得额度"
-        )
 
         # ---------- 8. Freeze（第 16 节）----------
         for cand in selected:
-            pred = self._freeze(cand, fusion=None)
+            pred = self._freeze(
+                cand,
+                fusion=None,
+                status=PredictionStatus.RESEARCH.value if cold_start else None,
+            )
             if pred:
                 result.frozen.append(pred)
 
@@ -262,6 +310,7 @@ class DailyPipeline:
         target_date: date,
         reality_state: dict[str, Any],
         experiment_arm: str | None = None,
+        include_metaphysical: bool = True,
     ) -> tuple[list[Signal], float]:
         """Blind 收集各源信号。
 
@@ -272,6 +321,8 @@ class DailyPipeline:
             reality_null      → 只用 Reality + Null（排除术数）
             metaphysical_only → 只用术式 + Null（排除 Reality）
             fusion / None     → 全部信号
+
+        include_metaphysical=False → 冷启动：术式信号未经实证不参与融合。
         """
         signals: list[Signal] = []
 
@@ -331,6 +382,9 @@ class DailyPipeline:
                 continue
             # 第 34 节双盲 A 组：只用 Reality + Null，排除全部术式
             if experiment_arm == "reality_null":
+                continue
+            # 冷启动：术式信号未经实证，不参与融合（避免未校准噪声产生假 edge）
+            if not include_metaphysical:
                 continue
             try:
                 signals.extend(adapter.signals(query))
@@ -436,8 +490,37 @@ class DailyPipeline:
             return {}
 
     # ------------------------------------------------------------------
-    def _freeze(self, cand: PredictionCandidate, fusion: Any = None) -> Prediction | None:
-        """第 16 节：预注册 + 冻结 + 落库。"""
+    def _calibration_sample_count(self) -> int:
+        """已验证样本数（prediction_scores 行数），用于冷启动校准门槛。
+
+        第 78 节：样本不足时不得宣布模型有预测力。
+        只有达到 MIN_CALIBRATION_SAMPLES 后，术式信号才被允许参与融合。
+        """
+        from sqlmodel import func, select
+
+        from app.models.scoring import PredictionScore
+
+        return int(
+            self.session.exec(
+                select(func.count(PredictionScore.id)).where(
+                    PredictionScore.user_id == self.user_id
+                )
+            ).one()
+            or 0
+        )
+
+    # ------------------------------------------------------------------
+    def _freeze(
+        self,
+        cand: PredictionCandidate,
+        fusion: Any = None,
+        status: str | None = None,
+    ) -> Prediction | None:
+        """第 16 节：预注册 + 冻结 + 落库。
+
+        status=None → 正常冻结（FROZEN）；status="RESEARCH" → 冷启动研究样本。
+        研究样本保持 VISIBLE（用户需看到并验证），仅用 status 标记，不计入正式预测。
+        """
         visibility = "HIDDEN" if self.settings.EXPERIMENT_MODE == "hidden" else "VISIBLE"
 
         pred = Prediction(
@@ -477,6 +560,11 @@ class DailyPipeline:
         out = FreezeAgent().run(ctx)
         if not out.ok:
             return None
+
+        # 冷启动研究样本：freeze() 默认置 FROZEN，这里覆盖为 RESEARCH。
+        # status 不参与冻结哈希（freeze_payload 不含 status），故不影响完整性校验。
+        if status is not None:
+            pred.status = PredictionStatus(status)
 
         # 落库：predictions
         record = PredictionRecord(
