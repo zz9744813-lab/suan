@@ -1,5 +1,23 @@
 /** 格式化工具。 */
 
+/**
+ * 主描述只看"预测的那件事"，剥掉历史数据里拼接的「（event_type）」尾巴。
+ * 早期版本把 event_type 拼进 description（如「消息量激增（communication.message_volume_spike）」），
+ * 而 event_type 又在卡片下方单独展示，导致重复。这里做兼容清洗。
+ */
+export const cleanDescription = (description: string, eventType?: string): string => {
+  if (!description) return '';
+  if (eventType) {
+    const esc = eventType.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const stripped = description
+      .replace(new RegExp(`[（(]\\s*${esc}\\s*[）)]\\s*$`), '')
+      .trim();
+    if (stripped) return stripped;
+  }
+  // 兜底：去掉末尾任意括号尾巴
+  return description.replace(/[（(][^（）()]*[）)]\s*$/, '').trim() || description;
+};
+
 export const pct = (v: number | null | undefined, digits = 0): string =>
   v === null || v === undefined || Number.isNaN(v) ? '—' : `${(v * 100).toFixed(digits)}%`;
 

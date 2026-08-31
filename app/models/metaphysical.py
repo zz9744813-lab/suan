@@ -174,3 +174,33 @@ class FaceFeature(SQLModel, table=True):
     engine_version: str = "face-0.1.0"
     degraded: bool = True
     degrade_reason: Optional[str] = "V0.8 未实现"
+
+
+class FortuneReading(SQLModel, table=True):
+    """命理批示缓存（第 6.1 节命盘解读的 LLM 结果持久化）。
+
+    批示是纯展示内容，不进入 Fusion、不参与评分（与预测闭环严格区分）。
+    算过一次后落库，避免每次进命盘页都实时调 LLM（推理模型实测 2-3 分钟）。
+    出生档案任一字段变更 → profile_hash 变 → 自动重算。
+    """
+
+    __tablename__ = "fortune_readings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+
+    # 出生档案指纹：档案不变则批示不变；档案变（改生日/时辰/性别/真太阳时）则重算
+    profile_hash: str = Field(index=True, description="出生档案关键字段的 sha256")
+
+    # 确定性排盘结果（八字/大运/流年），与 reading 一起缓存
+    chart: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    # 七维度批示文本 {命格总论/事业/财运/婚恋/健康/未来5年/未来10年}
+    reading: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    # 推理链路（思考过程，可折叠展示）
+    reasoning: Optional[str] = None
+
+    model: str = ""
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)

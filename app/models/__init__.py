@@ -10,6 +10,7 @@ from .core import BirthProfile, CalendarSnapshot, User
 from .metaphysical import (
     BaziChart,
     FaceFeature,
+    FortuneReading,
     LiuyaoChart,
     MeihuaChart,
     PalmFeature,
@@ -64,6 +65,7 @@ __all__ = [
     "MeihuaChart",
     "PalmFeature",
     "FaceFeature",
+    "FortuneReading",
     # reality
     "RealityEvent",
     "DailyState",

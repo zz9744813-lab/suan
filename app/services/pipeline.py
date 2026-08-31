@@ -362,7 +362,7 @@ class DailyPipeline:
         return PredictionCandidate(
             domain=domain,
             event_type=event_type,
-            description=f"{spec.label}（{spec.event_type}）",
+            description=spec.label,
             probability=probability,
             time_scale=time_scale,
             window_start=window.start,

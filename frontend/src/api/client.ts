@@ -112,6 +112,8 @@ export interface FortuneReading {
   model: string;
   duration_ms: number;
   reasoning?: string;
+  /** 是否命中缓存（false 表示本次实时调用 LLM 生成） */
+  cached?: boolean;
   chart: {
     degraded: boolean;
     bazi: { year: string; month: string; day: string; time: string; day_master: string };
@@ -256,6 +258,6 @@ export const api = {
       body: JSON.stringify(fields),
     }),
 
-  fortuneReading: (userId: number) =>
-    get<FortuneReading>(`/api/fortune/reading?user_id=${userId}`),
+  fortuneReading: (userId: number, refresh = false) =>
+    get<FortuneReading>(`/api/fortune/reading?user_id=${userId}${refresh ? '&refresh=true' : ''}`),
 };

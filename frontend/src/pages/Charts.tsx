@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import { api, DEFAULT_USER_ID, type FortuneReading } from '../api/client';
 import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
-import { SOURCE_LABEL, pct } from '../lib/format';
+import { SOURCE_LABEL, cleanDescription, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
 /**
@@ -190,8 +190,13 @@ function FortuneSection({ data }: { data: FortuneReading }) {
             })}
           </div>
         )}
-        <div className="mt-3 text-[11px] text-t4">
+        <div className="mt-3 flex items-center gap-2 text-[11px] text-t4">
           模型 {data.model || '—'} · {((data.duration_ms ?? 0) / 1000).toFixed(1)}s
+          {data.cached && (
+            <span className="rounded border border-bd bg-panel px-1.5 py-0.5 text-t3">
+              命中缓存（秒开）
+            </span>
+          )}
         </div>
         {/* 推理链路（思考过程）可折叠展示——命理批示的推理依据，增强可解释性 */}
         {data.reasoning && (
@@ -219,8 +224,12 @@ export default function Charts() {
     [pid],
   );
 
-  // 命理批示
-  const fortune = useAsync(() => api.fortuneReading(DEFAULT_USER_ID), []);
+  // 命理批示（默认走缓存，命中则秒出；「重新生成」才强制重算）
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const fortune = useAsync(
+    () => api.fortuneReading(DEFAULT_USER_ID, refreshNonce > 0),
+    [refreshNonce],
+  );
 
   const payload = (snapshot.data?.payload ?? {}) as Record<string, any>;
 
@@ -230,7 +239,7 @@ export default function Charts() {
         title="命盘"
         desc="本命八字、大运流年与命理批示。传统术数参考，非科学预测。"
         right={
-          <PrimaryButton onClick={() => fortune.reload()} busy={fortune.loading}>
+          <PrimaryButton onClick={() => setRefreshNonce((n) => n + 1)} busy={fortune.loading}>
             {fortune.loading ? '批示生成中，约 2-3 分钟…' : '重新生成批示'}
           </PrimaryButton>
         }
@@ -368,7 +377,7 @@ export default function Charts() {
         {detail.data && (
           <div className="mt-3 space-y-3">
             <div className="flex items-center gap-2 text-sm text-t1">
-              {detail.data.description}
+              {cleanDescription(detail.data.description, detail.data.event_type)}
               <Badge>{pct(detail.data.probability)}</Badge>
               {detail.data.integrity && (
                 <Badge tone={detail.data.integrity.ok ? 'good' : 'bad'}>

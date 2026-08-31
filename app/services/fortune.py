@@ -17,6 +17,8 @@ LLM 不可用时：返回确定性排盘骨架（八字/大运/流年事实）�
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date
 from typing import Any
 
@@ -24,6 +26,7 @@ from sqlmodel import Session, select
 
 from app.core.calendar.core import CalendarCore
 from app.models.core import BirthProfile
+from app.models.metaphysical import FortuneReading
 
 
 # 未来流年展示跨度（默认 10 年）
@@ -77,6 +80,27 @@ def future_liunian(
             }
         )
     return out
+
+
+def _profile_hash(profile: BirthProfile) -> str:
+    """出生档案指纹：档案关键字段不变则批示不变。
+
+    任一字段变化（生日/时辰/性别/出生地/真太阳时/时辰是否已知）都会改变 hash，
+    从而触发批示重算。流年/大运随时间自然推移，但排盘在 build_chart_summary 里
+    用 date.today() 实时算，缓存只存"某次快照"，命中即返回快照即可。
+    """
+    key = {
+        "date": str(profile.solar_birth_date),
+        "time": profile.solar_birth_time,
+        "known": profile.birth_time_known,
+        "gender": profile.gender,
+        "place": profile.birth_place,
+        "lng": profile.longitude,
+        "lat": profile.latitude,
+        "true_solar": profile.use_true_solar_time,
+    }
+    raw = json.dumps(key, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def build_chart_summary(profile: BirthProfile) -> dict[str, Any]:
@@ -229,17 +253,52 @@ def _json_compact(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
-def generate_reading(session: Session, user_id: int) -> dict[str, Any]:
-    """生成命理批示。LLM 失败时返回确定性骨架（reading 为空 dict）。"""
+def generate_reading(session: Session, user_id: int, *, refresh: bool = False) -> dict[str, Any]:
+    """生成命理批示。LLM 失败时返回确定性骨架（reading 为空 dict）。
+
+    默认先查缓存（fortune_readings 表，按 user_id + profile_hash 命中），
+    命中直接返回，避免每次进命盘页都实时调 LLM（推理模型实测 2-3 分钟）。
+    传 refresh=True 强制重新生成并覆盖缓存。
+    """
     profile = session.exec(
         select(BirthProfile).where(BirthProfile.user_id == user_id)
     ).first()
     if profile is None:
-        return {"ok": False, "error": "未找到出生档案", "chart": None, "reading": None}
+        return {"ok": False, "error": "未找到出生档案", "chart": None, "reading": None, "cached": False}
+
+    profile_hash = _profile_hash(profile)
+
+    # 1. 命中缓存直接返回
+    if not refresh:
+        cached = session.exec(
+            select(FortuneReading)
+            .where(
+                FortuneReading.user_id == user_id,
+                FortuneReading.profile_hash == profile_hash,
+            )
+            .order_by(FortuneReading.id.desc())
+        ).first()
+        if cached is not None and cached.chart:
+            return {
+                "ok": bool(cached.reading),
+                "error": cached.error,
+                "chart": cached.chart,
+                "reading": cached.reading or None,
+                "model": cached.model,
+                "duration_ms": cached.duration_ms,
+                "reasoning": cached.reasoning or "",
+                "cached": True,
+            }
 
     chart = build_chart_summary(profile)
     if chart.get("degraded"):
-        return {"ok": False, "error": chart.get("degrade_reason"), "chart": chart, "reading": None}
+        return {
+            "ok": False,
+            "error": chart.get("degrade_reason"),
+            "chart": chart,
+            "reading": None,
+            "cached": False,
+        }
 
     from app.providers.base import LLMRequest, get_provider
 
@@ -266,6 +325,30 @@ def generate_reading(session: Session, user_id: int) -> dict[str, Any]:
     else:
         error = resp.error
 
+    # 2. 落库缓存（覆盖同 profile_hash 的旧记录，保持单条）
+    if chart:
+        old = session.exec(
+            select(FortuneReading).where(
+                FortuneReading.user_id == user_id,
+                FortuneReading.profile_hash == profile_hash,
+            )
+        ).all()
+        for o in old:
+            session.delete(o)
+        session.add(
+            FortuneReading(
+                user_id=user_id,
+                profile_hash=profile_hash,
+                chart=chart,
+                reading=reading or {},
+                reasoning=reasoning,
+                model=resp.model,
+                duration_ms=resp.duration_ms,
+                error=error,
+            )
+        )
+        session.commit()
+
     return {
         "ok": reading is not None,
         "error": error,
@@ -274,4 +357,5 @@ def generate_reading(session: Session, user_id: int) -> dict[str, Any]:
         "model": resp.model,
         "duration_ms": resp.duration_ms,
         "reasoning": reasoning,
+        "cached": False,
     }

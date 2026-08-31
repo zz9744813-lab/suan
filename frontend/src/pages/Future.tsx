@@ -16,6 +16,7 @@ import {
   DOMAIN_LABEL,
   SCALE_LABEL,
   STATUS_LABEL,
+  cleanDescription,
   num,
   pct,
   shortDate,
@@ -264,7 +265,7 @@ export default function Future() {
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-t1">{p.description}</span>
+                    <span className="text-sm text-t1">{cleanDescription(p.description, p.event_type)}</span>
                     <Badge>{DOMAIN_LABEL[p.domain] ?? p.domain}</Badge>
                     <Badge tone="info">{SCALE_LABEL[p.time_scale]}</Badge>
                     {p.visibility_mode === 'HIDDEN' && (

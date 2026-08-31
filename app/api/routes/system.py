@@ -385,13 +385,15 @@ def calendar_snapshot(
 @router.get("/fortune/reading")
 def fortune_reading(
     user_id: int = Query(...),
+    refresh: bool = Query(False, description="true 时强制重新生成并覆盖缓存"),
     session: Session = Depends(get_session),
 ):
     """传统术数命盘解读 + 未来运势批示。
 
     与预测闭环严格区分：这是纯展示，不进入 Fusion、不参与评分。
     第 6.1 节：程序排盘，LLM 只做解读（禁止自行算盘）。
+    结果按 user_id + 出生档案指纹缓存，命中直接返回（cached=True）。
     """
     from app.services.fortune import generate_reading
 
-    return generate_reading(session, user_id=user_id)
+    return generate_reading(session, user_id=user_id, refresh=refresh)
