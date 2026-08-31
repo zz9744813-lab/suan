@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -76,8 +78,8 @@ app.add_middleware(
 
 
 # ----------------------------------------------------------------------
-@app.get("/", tags=["meta"])
-def root():
+def _meta_payload() -> dict:
+    """安全声明 + 版本元信息（第 65 节：系统必须声明安全边界）。"""
     settings = get_settings()
     return {
         "name": "玄鉴 XuanMirror",
@@ -96,6 +98,16 @@ def root():
             "engine": settings.ENGINE_VERSION,
         },
     }
+
+
+@app.get("/", tags=["meta"])
+def root():
+    # 有前端构建产物时优先返回前端首页，否则返回 JSON 元信息
+    if _frontend_dist is not None:
+        from fastapi.responses import FileResponse
+
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+    return _meta_payload()
 
 
 @app.get("/health", tags=["meta"])
@@ -123,7 +135,8 @@ def health_alias():
 
 @app.get("/api/meta", tags=["meta"], include_in_schema=False)
 def meta_alias():
-    return root()
+    # 始终返回 JSON 安全声明（与根路径不同，根路径在打包后返回前端首页）
+    return _meta_payload()
 
 
 # ----------------------------------------------------------------------
@@ -138,3 +151,48 @@ from app.api.routes import (  # noqa: E402
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(system.router, prefix="/api", tags=["system"])
+
+
+# ----------------------------------------------------------------------
+# 前端静态文件挂载（打包成 exe 后，后端直接服务前端，无需 Vite dev server）
+# ----------------------------------------------------------------------
+def _get_frontend_dist() -> str | None:
+    """定位前端构建产物目录（index.html + assets/）。
+
+    打包后从 PyInstaller 的 _MEIPASS 临时目录取；开发时从项目 frontend/dist 取。
+    找不到（无构建产物）返回 None，此时后端照常提供纯 API。
+    """
+    if getattr(sys, "frozen", False):
+        candidates = [os.path.join(sys._MEIPASS, "dist")]  # type: ignore[attr-defined]
+    else:
+        candidates = [
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist"),
+        ]
+    for d in candidates:
+        if os.path.isfile(os.path.join(d, "index.html")):
+            return d
+    return None
+
+
+_frontend_dist = _get_frontend_dist()
+
+if _frontend_dist is not None:
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    # 静态资源（js/css/图片）按真实文件路径服务
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(_frontend_dist, "assets")),
+        name="assets",
+    )
+
+    # SPA fallback：前端路由（/future、/charts…）都返回 index.html
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_fallback(full_path: str):
+        # 未命中的 API 请求不该落到前端首页，保持 404
+        if full_path.startswith("api/"):
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))

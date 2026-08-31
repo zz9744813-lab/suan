@@ -18,8 +18,11 @@ from datetime import datetime
 # 元信息与引擎
 # ======================================================================
 def test_root_notice(client):
-    """第 65 节：系统必须声明安全边界。"""
-    r = client.get("/")
+    """第 65 节：系统必须声明安全边界。
+
+    根路径打包后返回前端首页（HTML），JSON 安全声明通过 /api/meta 始终可达。
+    """
+    r = client.get("/api/meta")
     assert r.status_code == 200
     body = r.json()
     assert "不是经科学验证的预知系统" in body["notice"]
