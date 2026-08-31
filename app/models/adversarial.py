@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON, Column, Text
@@ -89,7 +91,7 @@ class AdversarialTest(SQLModel, table=True):
     agent_run_id: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class AdversarialFinding(SQLModel, table=True):
@@ -116,7 +118,7 @@ class AdversarialFinding(SQLModel, table=True):
     candidate_pool_size: Optional[int] = None
     published_count: Optional[int] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
     # 第 31 节月度审计：CherryPick / Selective Reporting 检测
     audit_month: Optional[str] = Field(default=None, index=True)

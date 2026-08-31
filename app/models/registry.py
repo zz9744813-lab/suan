@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON, Column, Text
@@ -45,7 +47,7 @@ class Rule(SQLModel, table=True):
     # 规则定义（YAML 反序列化后的结构）
     definition: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class RuleVersion(SQLModel, table=True):
@@ -60,7 +62,7 @@ class RuleVersion(SQLModel, table=True):
     definition: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     change_note: str = ""
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class RuleMetric(SQLModel, table=True):
@@ -79,7 +81,7 @@ class RuleMetric(SQLModel, table=True):
     brier_with: Optional[float] = None
     brier_without: Optional[float] = None
 
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
 
 
 class AgentRun(SQLModel, table=True):
@@ -106,7 +108,7 @@ class AgentRun(SQLModel, table=True):
     input_json: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
     output_json: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow)
     finished_at: Optional[datetime] = None
     duration_ms: Optional[int] = None
 
@@ -141,7 +143,7 @@ class AgentOutput(SQLModel, table=True):
     # 原始文本（仅供审计与 collusion 检测，不进入 Fusion）
     raw_text: Optional[str] = Field(default=None, sa_column=Column(Text))
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class PromptVersion(SQLModel, table=True):
@@ -158,7 +160,7 @@ class PromptVersion(SQLModel, table=True):
 
     is_active: bool = False
     change_note: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ModelVersion(SQLModel, table=True):
@@ -183,4 +185,4 @@ class ModelVersion(SQLModel, table=True):
     current_brier: Optional[float] = None
     regression_alert: bool = False
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

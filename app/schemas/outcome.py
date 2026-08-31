@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+
+from app.utils import utcnow
 from enum import Enum
 from typing import Any
 
@@ -34,7 +36,7 @@ class OutcomeRequest(BaseModel):
 
     request_id: str = Field(default_factory=lambda: f"R-{uuid.uuid4().hex[:12]}")
     prediction_id: str
-    asked_at: datetime = Field(default_factory=datetime.utcnow)
+    asked_at: datetime = Field(default_factory=utcnow)
     user_reply: str | None = Field(
         default=None, description="用户自然语言回复，如「下午突然让我去处理一个事情」"
     )
@@ -79,7 +81,7 @@ class Outcome(BaseModel):
         default=0.0, ge=0.0, le=1.0, description="三方 Judge 分歧度，用于 ConfirmationBiasAttack"
     )
 
-    judged_at: datetime = Field(default_factory=datetime.utcnow)
+    judged_at: datetime = Field(default_factory=utcnow)
     judge_model_version: str = "unknown"
     judge_prompt_version: str = "unknown"
 

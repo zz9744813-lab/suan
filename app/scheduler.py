@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
+
+from app.utils import utcnow
 from typing import Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -75,7 +77,7 @@ def job_verify_reminder(engine: object) -> None:
     注意：不是「已经到期才提醒」，而是「今天到期今晚提醒」——
     否则 21:00 运行时窗口（23:59 结束）还没到，永远提醒不出来。
     """
-    now = datetime.utcnow()
+    now = utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
 

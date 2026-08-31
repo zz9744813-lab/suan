@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON, Column, Text
@@ -29,7 +31,7 @@ class OutcomeRequestRecord(SQLModel, table=True):
     request_id: str = Field(unique=True, index=True)
     prediction_id: str = Field(index=True)
 
-    asked_at: datetime = Field(default_factory=datetime.utcnow)
+    asked_at: datetime = Field(default_factory=utcnow)
     answered_at: Optional[datetime] = None
 
     # 第 60 节：支持自然语言回复与快捷选项
@@ -61,7 +63,7 @@ class OutcomeRecord(SQLModel, table=True):
     needs_confirmation: bool = False
     disagreement: float = 0.0
 
-    judged_at: datetime = Field(default_factory=datetime.utcnow)
+    judged_at: datetime = Field(default_factory=utcnow)
     judge_model_version: str = "unknown"
     judge_prompt_version: str = "unknown"
 
@@ -85,7 +87,7 @@ class OutcomeEvidence(SQLModel, table=True):
     reasoning: str = Field(default="", sa_column=Column(Text))
 
     agent_run_id: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class PredictionScore(SQLModel, table=True):
@@ -120,7 +122,7 @@ class PredictionScore(SQLModel, table=True):
     source_types: list[str] = Field(default_factory=list, sa_type=JSON)
     rule_ids: list[str] = Field(default_factory=list, sa_type=JSON)
 
-    scored_at: datetime = Field(default_factory=datetime.utcnow)
+    scored_at: datetime = Field(default_factory=utcnow)
 
 
 class CalibrationBin(SQLModel, table=True):
@@ -148,4 +150,4 @@ class CalibrationBin(SQLModel, table=True):
     # 分组维度（第 52 节 Accuracy Lab 按术式/领域/尺度筛选）
     group_key: str = Field(default="overall", index=True, description="overall / ziwei / career / day / ...")
 
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)

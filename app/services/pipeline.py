@@ -24,6 +24,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+
+from app.utils import utcnow
 from typing import Any
 
 from sqlmodel import Session
@@ -150,16 +152,24 @@ class DailyPipeline:
             result.notes.append("Future Scanner 未产出候选")
             return result
 
-        # ---------- 2.5 冷启动校准门槛（C-006 + 禁止 6）----------
+        # ---------- 2.5 校准阶段门槛（C-006 + 禁止 6）----------
         # 已验证样本不足时，术式信号的预测力未经实证，其 strength 是未校准噪声。
-        # 此时进入「冷启动研究模式」：术式信号不参与融合，只产出研究样本，
-        # 避免「噪声偶然偏离 Null」产出假预测误导用户。
+        # 三个阶段：
+        #   cold    (<MIN_CALIBRATION_SAMPLES)：术式不参与融合，产出 p=Null 的研究样本；
+        #   explore (<MIN_FORMAL_SAMPLES)    ：术式以弱先验参与融合，产出仍标记 RESEARCH
+        #             （不代表预测力），但完整记录各源信号，验证后为每术式积累实证样本；
+        #   formal  (≥MIN_FORMAL_SAMPLES)    ：edge 门槛 + 对抗 Gate + 学习到的融合权重。
         calibrated = self._calibration_sample_count()
-        cold_start = calibrated < self.settings.MIN_CALIBRATION_SAMPLES
-        if cold_start:
+        phase = self._calibration_phase(calibrated)
+        if phase == "cold":
             result.notes.append(
                 f"冷启动：已验证样本 {calibrated}/{self.settings.MIN_CALIBRATION_SAMPLES}，"
                 f"术式信号未经实证不参与融合，本轮仅产出研究样本（不代表预测力）"
+            )
+        elif phase == "explore":
+            result.notes.append(
+                f"实证期：已验证样本 {calibrated}/{self.settings.MIN_FORMAL_SAMPLES}，"
+                f"术式信号以弱先验参与融合并完整留痕，产出仍为研究样本（不代表预测力）"
             )
 
         window = FreezeAgent.default_window(
@@ -181,7 +191,7 @@ class DailyPipeline:
                     target_date=target_date,
                     reality_state=reality_state,
                     experiment_arm=self.experiment_arm,
-                    include_metaphysical=(not cold_start),
+                    include_metaphysical=(phase != "cold"),
                 )
             except Exception as exc:
                 result.notes.append(f"{event_type} 信号收集失败：{exc}")
@@ -197,17 +207,18 @@ class DailyPipeline:
                 )
             )
 
-            # ---------- 冷启动分支：产出研究样本，不走 edge 门槛 / Gate ----------
-            if cold_start:
-                # 研究样本的概率 = Null 基线（术式不参与，无超出随机的信息），
-                # 明确标记 RESEARCH，用于启动验证闭环积累校准数据。
+            # ---------- 研究期分支（cold / explore）：产出研究样本，不走 edge 门槛 / Gate ----------
+            if phase != "formal":
+                # cold：概率 = Null 基线（术式未参与，无超出随机的信息）。
+                # explore：概率 = 术式弱先验融合结果（信号完整留痕供实证，但系统
+                # 仍不声称预测力，明标 RESEARCH）。
                 cand = self._build_candidate(
                     event_type=event_type,
                     domain=domain,
                     window=window,
                     time_scale=time_scale,
                     reality_state=reality_state,
-                    probability=null_p,
+                    probability=null_p if phase == "cold" else fusion.probability,
                     null_probability=null_p,
                     signals=signals,
                 )
@@ -270,15 +281,15 @@ class DailyPipeline:
             result.candidates.append(cand)
 
         # ---------- 7. Prediction Budget（第 4 节）----------
-        if cold_start:
-            # 冷启动：研究样本按 Null 基线概率降序，取 RESEARCH_SAMPLE_LIMIT 条
+        if phase != "formal":
+            # 研究期：研究样本按概率降序，取 RESEARCH_SAMPLE_LIMIT 条
             research_candidates = sorted(
                 result.candidates, key=lambda c: c.probability, reverse=True
             )[: self.settings.RESEARCH_SAMPLE_LIMIT]
             selected = research_candidates
             usage = {"research": len(selected)}
             result.notes.append(
-                f"研究样本：{len(result.candidates)} 候选 → {len(selected)} 条（冷启动额度）"
+                f"研究样本：{len(result.candidates)} 候选 → {len(selected)} 条（研究期额度）"
             )
         else:
             selected, usage = apply_budget(result.candidates, default_slots(self.settings))
@@ -292,7 +303,7 @@ class DailyPipeline:
             pred = self._freeze(
                 cand,
                 fusion=None,
-                status=PredictionStatus.RESEARCH.value if cold_start else None,
+                status=PredictionStatus.RESEARCH.value if phase != "formal" else None,
             )
             if pred:
                 result.frozen.append(pred)
@@ -490,6 +501,20 @@ class DailyPipeline:
             return {}
 
     # ------------------------------------------------------------------
+    def _calibration_phase(self, calibrated: int) -> str:
+        """校准阶段判定：cold（基线校准）/ explore（信号实证）/ formal（正式预测）。
+
+        第 78 节：样本不足时不得宣布模型有预测力。
+        只有达到 MIN_FORMAL_SAMPLES 后，系统才进入正式预测
+        （edge 门槛 + 对抗 Gate + 学习到的融合权重）。
+        """
+        if calibrated < self.settings.MIN_CALIBRATION_SAMPLES:
+            return "cold"
+        if calibrated < self.settings.MIN_FORMAL_SAMPLES:
+            return "explore"
+        return "formal"
+
+    # ------------------------------------------------------------------
     def _calibration_sample_count(self) -> int:
         """已验证样本数（prediction_scores 行数），用于冷启动校准门槛。
 
@@ -635,7 +660,7 @@ class DailyPipeline:
                 agent_outputs=[],
                 input_snapshot=pred.input_snapshot or {},
                 sha256=pred.prediction_hash or "",
-                frozen_at=pred.frozen_at or datetime.utcnow(),
+                frozen_at=pred.frozen_at or utcnow(),
             )
         )
         self.session.commit()

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+
+from app.utils import utcnow
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -82,7 +84,7 @@ def due_predictions(
     session: Session = Depends(get_session),
 ):
     """第 59 节：到期主动进入 VERIFY_REQUIRED，等待用户验证。"""
-    now = datetime.utcnow()
+    now = utcnow()
     rows = session.exec(
         select(PredictionRecord)
         .where(PredictionRecord.user_id == user_id)
@@ -334,7 +336,7 @@ def verify_prediction(
         prediction_id=prediction_id,
         user_reply=user_reply,
         quick_answer=quick_answer,
-        answered_at=datetime.utcnow(),
+        answered_at=utcnow(),
         ambiguous=bool(collected.output.get("ambiguous")),
     )
     session.add(req)
@@ -495,6 +497,14 @@ def _score(session: Session, row: PredictionRecord, outcome: float) -> None:
         else None
     )
 
+    # 第 26 节：可靠度矩阵按 (source, domain, scale) 学习，必须记录本条预测
+    # 实际参与融合的信号来源与规则；否则 by_source() 永远为空，skill 回喂环断掉。
+    sig_rows = session.exec(
+        select(SignalRecord).where(SignalRecord.prediction_id == row.prediction_id)
+    ).all()
+    source_types = sorted({s.source_type for s in sig_rows})
+    rule_ids = sorted({rid for s in sig_rows for rid in (s.rule_ids or [])})
+
     session.add(
         PredictionScore(
             prediction_id=row.prediction_id,
@@ -508,6 +518,8 @@ def _score(session: Session, row: PredictionRecord, outcome: float) -> None:
             skill_contribution=contribution,
             domain=row.domain,
             time_scale=row.time_scale,
+            source_types=source_types,
+            rule_ids=rule_ids,
         )
     )
     session.commit()

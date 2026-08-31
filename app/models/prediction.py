@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON, Column, Text
@@ -54,7 +56,7 @@ class ForecastCandidate(SQLModel, table=True):
     budget_granted: bool = False
     budget_rank: Optional[int] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     model_version: str = "unknown"
 
 
@@ -94,7 +96,7 @@ class SignalRecord(SQLModel, table=True):
     degraded: bool = False
     degrade_reason: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class PredictionRecord(SQLModel, table=True):
@@ -127,7 +129,7 @@ class PredictionRecord(SQLModel, table=True):
     status: str = Field(default="FROZEN", index=True)
     visibility_mode: str = Field(default="VISIBLE", description="第 35 节 Hidden Prediction Mode")
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     frozen_at: Optional[datetime] = None
     verification_due_at: Optional[datetime] = Field(default=None, index=True)
 
@@ -162,7 +164,7 @@ class PredictionVersion(SQLModel, table=True):
     sha256: str = ""
 
     revision_reason: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class PredictionFreeze(SQLModel, table=True):
@@ -188,7 +190,7 @@ class PredictionFreeze(SQLModel, table=True):
     input_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
     sha256: str = Field(index=True)
-    frozen_at: datetime = Field(default_factory=datetime.utcnow)
+    frozen_at: datetime = Field(default_factory=utcnow)
 
     # 第 20.7 节：事后校验时记录
     last_integrity_check_at: Optional[datetime] = None

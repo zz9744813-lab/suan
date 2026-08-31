@@ -99,6 +99,7 @@ def _meta_payload() -> dict:
         },
         "calibration": {
             "min_calibration_samples": settings.MIN_CALIBRATION_SAMPLES,
+            "min_formal_samples": settings.MIN_FORMAL_SAMPLES,
             "research_sample_limit": settings.RESEARCH_SAMPLE_LIMIT,
         },
     }

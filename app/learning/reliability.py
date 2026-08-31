@@ -187,20 +187,30 @@ class ReliabilityMatrix:
         规则：
             skill > 0  → 权重 > 1（放大）
             skill <= 0 → 权重 < 1（压制），但不为负
-            skill 未知 → 1.0（尚未学到信息，不惩罚也不奖励）
+            skill 未知 / 无数据 → 0.5（弱先验下限）
 
-        禁止 6：初始只允许弱先验，因此权重被限制在 [0.5, 2.0]。
+        禁止 6「初始只允许弱先验」的落实：未实证的信号源不能按「全可信」进融合
+        （旧实现 skill=None → 1.0 曾导致「噪声偶然偏离 Null」的假 edge 穿透
+        质量门槛）。因此本方法为所有已知信号源都给出权重：
+        有实证 cell 的按 skill 映射；没有的落在允许带 [0.5, 2.0] 的下限，
+        直到验证数据把 skill 学出来。
         """
-        weights: dict[str, float] = {}
+        from app.schemas.signal import SourceType
+
+        cell_by_source: dict[str, ReliabilityCell] = {}
         for cell in self.by_source():
             system = cell.dimensions.get("system")
-            if not system:
-                continue
-            if cell.skill is None:
-                weights[system] = 1.0
+            if system:
+                cell_by_source[system] = cell
+
+        weights: dict[str, float] = {}
+        for src in SourceType:
+            cell = cell_by_source.get(src.value)
+            if cell is None or cell.skill is None:
+                weights[src.value] = 0.5
                 continue
             # 线性映射：skill ∈ [-0.5, 0.5] → weight ∈ [0.5, 1.5]
-            weights[system] = min(2.0, max(0.5, 1.0 + cell.skill * 2.0))
+            weights[src.value] = min(2.0, max(0.5, 1.0 + cell.skill * 2.0))
         return weights
 
     def matrix(self) -> dict:

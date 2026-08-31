@@ -10,6 +10,8 @@ import {
   PageHeader,
   PrimaryButton,
   ProbBar,
+  ProgressBar,
+  Segmented,
   Stat,
 } from '../components/ui';
 import {
@@ -101,8 +103,104 @@ function PipelineSteps({ active, done }: { active: boolean; done: boolean }) {
   );
 }
 
+/**
+ * 校准旅程：三阶段（基线校准 → 信号实证 → 正式预测）。
+ * 冷启动校准分层方案的对外呈现 —— 系统在哪个阶段、为什么、还差多少，全部透明。
+ */
+type Phase = 'cold' | 'explore' | 'formal';
+
+function CalibrationJourney({
+  phase,
+  calibrated,
+  minCalibration,
+  minFormal,
+}: {
+  phase: Phase;
+  calibrated: number;
+  minCalibration: number;
+  minFormal: number;
+}) {
+  const steps: { key: Phase; label: string; desc: string; target: number | null }[] = [
+    { key: 'cold', label: '基线校准', desc: '建立真实频率基线', target: minCalibration },
+    { key: 'explore', label: '信号实证', desc: '术式弱先验参与留痕', target: minFormal },
+    { key: 'formal', label: '正式预测', desc: '可靠度权重已实证', target: null },
+  ];
+  const idx = phase === 'cold' ? 0 : phase === 'explore' ? 1 : 2;
+  const target = steps[idx].target;
+
+  return (
+    <div>
+      <div className="flex items-stretch">
+        {steps.map((s, i) => {
+          const done = i < idx;
+          const current = i === idx;
+          return (
+            <div key={s.key} className="flex min-w-0 flex-1 items-center">
+              <div className="flex min-w-[86px] flex-1 flex-col items-center gap-1.5 text-center">
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full border text-[10px] font-semibold transition-all duration-500 ${
+                    done
+                      ? 'border-gilt-400 bg-gilt-500/15 text-gt'
+                      : current
+                        ? 'status-dot border-gilt-400 bg-gilt-500/20 text-gt shadow-[0_0_12px_-2px_rgba(217,185,106,0.6)]'
+                        : 'border-line bg-panel text-t5'
+                  }`}
+                >
+                  {done ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                      <path d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    i + 1
+                  )}
+                </span>
+                <div>
+                  <div
+                    className={`text-xs font-medium transition-colors duration-300 ${
+                      current ? 'text-t1' : done ? 'text-t2' : 'text-t5'
+                    }`}
+                  >
+                    {s.label}
+                  </div>
+                  <div className="mt-0.5 hidden text-[10px] text-t5 md:block">{s.desc}</div>
+                </div>
+              </div>
+              {i < steps.length - 1 && (
+                <div className="relative mx-1 h-px flex-1 bg-line">
+                  <div
+                    className={`absolute inset-y-0 left-0 bg-gilt-500/60 transition-all duration-700 ${
+                      done ? 'w-full' : 'w-0'
+                    }`}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {target != null && (
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-baseline justify-between text-xs">
+            <span className="text-t3">
+              {phase === 'cold'
+                ? '已验证样本（Null 基线校准中，术式尚未参与）'
+                : '已验证样本（术式弱先验参与，积累实证中）'}
+            </span>
+            <span className="tabular font-semibold text-t1">
+              {calibrated}
+              <span className="text-t4">/{target}</span>
+            </span>
+          </div>
+          <ProgressBar value={calibrated} max={target} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Future() {
-  const [scale, setScale] = useState<string>('day');
+  const [scale, setScale] = useState<(typeof SCALES)[number]['key']>('day');
   const [generating, setGenerating] = useState(false);
   const [notes, setNotes] = useState<string[] | null>(null);
   const [notesOpen, setNotesOpen] = useState(true);
@@ -115,13 +213,28 @@ export default function Future() {
   const tree = useAsync(() => api.futureTree(DEFAULT_USER_ID), []);
   const meta = useAsync(() => api.meta(), []);
 
-  // 冷启动校准门槛：达到该已验证样本数后才解锁正式预测（与后端 config 一致）
-  const minCalibration = (
-    (meta.data as { calibration?: { min_calibration_samples?: number } } | undefined)
-      ?.calibration?.min_calibration_samples ?? 5
-  );
+  // 校准阶段门槛：三阶段（cold 基线校准 → explore 信号实证 → formal 正式预测）
+  const calibration = (
+    meta.data as
+      | {
+          calibration?: {
+            min_calibration_samples?: number;
+            min_formal_samples?: number;
+          };
+        }
+      | undefined
+  )?.calibration;
+  const minCalibration = calibration?.min_calibration_samples ?? 5;
+  const minFormal = calibration?.min_formal_samples ?? 20;
   const calibratedCount = overall.data?.sample_size ?? 0;
-  const coldStart = calibratedCount < minCalibration;
+  const phase: Phase =
+    calibratedCount < minCalibration
+      ? 'cold'
+      : calibratedCount < minFormal
+        ? 'explore'
+        : 'formal';
+  const phaseTarget = phase === 'cold' ? minCalibration : minFormal;
+  const researching = phase !== 'formal';
 
   const visible = (preds.data?.items ?? []).filter(
     (p) => p.time_scale === scale || scale === 'day',
@@ -186,8 +299,13 @@ export default function Future() {
             )}
           </div>
           {isResearch && (
-            <div className="mt-2 text-xs text-amber-400/90">
-              研究样本：术式信号未参与，概率 = Null 基线。用于启动校准闭环、积累验证数据，不代表预测力。
+            <div className="mt-2 flex items-start gap-1.5 text-xs text-amber-400/90">
+              <span className="mt-0.5 h-1 w-1 shrink-0 rounded-full bg-amber-400" />
+              <span>
+                {phase === 'explore'
+                  ? '研究样本（实证期）：术式信号以弱先验参与并完整留痕，验证后将转化为各术式的可靠度实证。尚不代表预测力。'
+                  : '研究样本（冷启动）：术式信号未参与，概率 = Null 基线。用于启动校准闭环、积累验证数据，不代表预测力。'}
+              </span>
             </div>
           )}
         </div>
@@ -274,31 +392,39 @@ export default function Future() {
         </Card>
       )}
 
+      {/* 校准旅程（研究期显示）：三阶段可感知，诚实且可预期 */}
+      {researching && (
+        <Card
+          title="校准旅程"
+          subtitle="系统在当前阶段的每次克制，都是为了让「正式预测」四个字有实证支撑"
+          right={<Badge tone="warn">{phase === 'cold' ? '冷启动' : '信号实证'}</Badge>}
+        >
+          <CalibrationJourney
+            phase={phase}
+            calibrated={calibratedCount}
+            minCalibration={minCalibration}
+            minFormal={minFormal}
+          />
+        </Card>
+      )}
+
       {/* 尺度切换：分段控件 */}
-      <div className="inline-flex gap-0.5 rounded-lg border border-line bg-panel p-0.5">
-        {SCALES.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setScale(s.key)}
-            className={`btn-press rounded-md px-3.5 py-1.5 text-xs font-medium tracking-wide ${
-              scale === s.key
-                ? 'bg-panel text-gt shadow-card'
-                : 'text-t4 hover:text-t2'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      <Segmented options={SCALES} value={scale} onChange={setScale} />
 
       {/* 概览指标 */}
       <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="待验证" value={due.data?.count ?? '—'} hint="到期需用户确认" />
         <Stat
-          label="校准进度"
-          value={`${calibratedCount}/${minCalibration}`}
-          hint={coldStart ? '达标后解锁正式预测' : '已解锁正式预测'}
-          tone={coldStart ? 'warn' : 'good'}
+          label={researching ? '校准进度' : '校准样本'}
+          value={`${calibratedCount}/${phaseTarget}`}
+          hint={
+            phase === 'cold'
+              ? '基线校准中 · 达标后进入信号实证'
+              : phase === 'explore'
+                ? '信号实证中 · 达标后解锁正式预测'
+                : '已解锁正式预测'
+          }
+          tone={phase === 'formal' ? 'good' : 'warn'}
         />
         <Stat
           label="Skill Score"
@@ -316,12 +442,18 @@ export default function Future() {
         />
       </div>
 
-      {/* 冷启动研究样本 */}
-      {coldStart && (
+      {/* 研究期研究样本 */}
+      {researching && (
         <Card
           title="研究样本"
-          subtitle={`校准进度 ${calibratedCount}/${minCalibration}：尚未积累足够验证数据，术式信号未参与预测。以下样本用于启动校准闭环，验证后系统才会学会真正预测。`}
-          right={<Badge tone="warn">冷启动模式</Badge>}
+          subtitle={
+            phase === 'cold'
+              ? `校准进度 ${calibratedCount}/${minCalibration}：尚未积累足够验证数据，术式信号未参与预测。以下样本用于启动校准闭环，验证后系统才会学会真正预测。`
+              : `实证进度 ${calibratedCount}/${minFormal}：术式信号以弱先验权重参与融合并完整留痕，每条验证都在为对应术式积累实证。`
+          }
+          right={
+            <Badge tone="warn">{phase === 'cold' ? '冷启动模式' : '实证研究模式'}</Badge>
+          }
         >
           {preds.loading && <Loading />}
           {preds.error && <ErrorBox message={preds.error} />}
@@ -329,7 +461,7 @@ export default function Future() {
             <EmptyState>
               暂无研究样本。
               <br />
-              点击右上角「生成预测」，系统会从候选事件里按 Null 基线概率挑出最可能的几件，
+              点击右上角「生成预测」，系统会从候选事件里挑出最值得观察的几件，
               作为研究样本冻结，供你在「验证」页填结果。
             </EmptyState>
           )}
@@ -346,16 +478,17 @@ export default function Future() {
         {preds.error && <ErrorBox message={preds.error} />}
         {!preds.loading && !preds.error && formal.length === 0 && (
           <EmptyState>
-            {coldStart ? (
+            {researching ? (
               <>
                 还没有正式预测。
                 <br />
-                系统处于冷启动：术式信号未经实证、不参与融合，暂时不产出正式预测，
-                只产出「研究样本」用于积累校准数据（见上方）。
+                {phase === 'cold'
+                  ? '系统处于基线校准期：术式信号未经实证、不参与融合，只产出「研究样本」（见上方）。'
+                  : '系统处于信号实证期：术式以弱先验参与融合并留痕，但暂不产出正式预测，只产出「研究样本」。'}
                 <br />
                 <span className="text-t4">
                   （C-006 诚实原则：术数不比随机强时，系统必须承认它没有预测力，
-                  而不是硬造噪声预测。累计 {minCalibration} 条验证样本后自动解锁。）
+                  而不是硬造噪声预测。累计 {minFormal} 条验证样本后自动解锁正式预测。）
                 </span>
               </>
             ) : (

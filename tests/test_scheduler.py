@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from app.utils import utcnow
+
 import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -55,7 +57,7 @@ def test_verify_reminder_marks_due(engine):
         s.commit()
         s.refresh(u)
 
-        today = datetime.utcnow().date()
+        today = utcnow().date()
         window_start = datetime(today.year, today.month, today.day, 0, 0, 0)
         s.add(
             PredictionRecord(
@@ -97,7 +99,7 @@ def test_verify_reminder_ignores_future(engine):
         s.commit()
         s.refresh(u)
 
-        future = datetime.utcnow() + timedelta(days=5)
+        future = utcnow() + timedelta(days=5)
         s.add(
             PredictionRecord(
                 prediction_id="P-SCHED-2",

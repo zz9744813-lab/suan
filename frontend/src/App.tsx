@@ -238,13 +238,15 @@ export default function App() {
         />
 
         <div className="relative flex items-center gap-3 px-5 py-6">
-          {/* 印章式 Logo */}
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-gilt-500/30 bg-gilt-500/10 text-lg font-bold text-gt">
-            玄
+          {/* 印章式 Logo：鎏金锥形环 + 玄字 */}
+          <div className="relative flex h-9 w-9 items-center justify-center">
+            <div className="absolute inset-0 rounded-xl bg-[conic-gradient(from_210deg,#ecd9a0,#8a6d10,#d9b96a,#5c490c,#ecd9a0)] opacity-95 shadow-[0_0_18px_-2px_rgba(201,162,39,0.5)]" />
+            <div className="absolute inset-[1.5px] rounded-[10px] bg-page" />
+            <span className="text-gilt-grad relative text-lg font-bold leading-none">玄</span>
           </div>
           <div>
             <div className="text-base font-semibold tracking-[0.2em] text-t1">玄鉴</div>
-            <div className="text-[10px] tracking-widest text-t4">XUANMIRROR</div>
+            <div className="text-[10px] tracking-[0.25em] text-t4">XUANMIRROR</div>
           </div>
         </div>
 
@@ -262,7 +264,7 @@ export default function App() {
                       className={({ isActive }) =>
                         `group relative flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] transition-all duration-200 ${
                           isActive
-                            ? 'bg-nava font-medium text-t1'
+                            ? 'bg-nava font-medium text-t1 shadow-[inset_0_1px_0_0_var(--card-hl)]'
                             : 'text-t3 hover:bg-navh hover:text-t1'
                         }`
                       }
@@ -272,16 +274,18 @@ export default function App() {
                         <>
                           {/* 激活时左侧鎏金指示条 */}
                           <span
-                            className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-gilt-400 transition-all duration-200 ${
+                            className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-gilt-400 shadow-[0_0_6px_rgba(217,185,106,0.7)] transition-all duration-200 ${
                               isActive ? 'opacity-100' : 'opacity-0'
                             }`}
                           />
                           <span
-                            className={`transition-colors ${isActive ? 'text-gt' : 'text-t4 group-hover:text-t2'}`}
+                            className={`transition-all duration-200 group-hover:translate-x-0.5 ${isActive ? 'text-gt' : 'text-t4 group-hover:text-t2'}`}
                           >
                             <n.icon />
                           </span>
-                          <span className="flex-1">{n.label}</span>
+                          <span className="flex-1 transition-transform duration-200 group-hover:translate-x-0.5">
+                            {n.label}
+                          </span>
                         </>
                       )}
                     </NavLink>

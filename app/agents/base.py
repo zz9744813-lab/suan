@@ -29,6 +29,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any
 
 from sqlmodel import Session
@@ -143,7 +145,7 @@ class BaseAgent(ABC):
             except Exception as exc:  # pragma: no cover
                 error = f"{self.name} 输出解析失败：{exc}"
 
-        finished = datetime.utcnow()
+        finished = utcnow()
         run_row = AgentRun(
             run_id=run_id,
             agent=self.name,
@@ -222,7 +224,7 @@ class DeterministicAgent(BaseAgent):
             prompt_version=get_settings().PROMPT_VERSION,
             input_json={"payload_keys": sorted(ctx.payload)},
             output_json=output,
-            finished_at=datetime.utcnow(),
+            finished_at=utcnow(),
             error=error,
             saw_other_agents=False,
             prediction_candidate_id=ctx.prediction_candidate_id,

@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON, Column, Text
@@ -50,7 +52,7 @@ class LearningHypothesis(SQLModel, table=True):
     target_rule_ids: list[str] = Field(default_factory=list, sa_type=JSON)
 
     status: str = Field(default="proposed", index=True, description="proposed / shadow / promoted / rejected")
-    proposed_at: datetime = Field(default_factory=datetime.utcnow)
+    proposed_at: datetime = Field(default_factory=utcnow)
 
 
 class ShadowExperiment(SQLModel, table=True):
@@ -73,7 +75,7 @@ class ShadowExperiment(SQLModel, table=True):
     # 候选规则配置
     candidate_config: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow)
     target_sample_size: int = Field(default=50, description="第 24 节：50 / 100 个样本后再评审")
     current_sample_size: int = 0
 
@@ -110,7 +112,7 @@ class ModelPromotion(SQLModel, table=True):
     improvement: Optional[float] = None
     p_value: Optional[float] = None
 
-    promoted_at: datetime = Field(default_factory=datetime.utcnow)
+    promoted_at: datetime = Field(default_factory=utcnow)
     promoted_by: str = Field(default="system", description="system / user")
 
     # 第 79 节：升级后性能下降需自动 Regression Alert
@@ -141,7 +143,7 @@ class AblationResult(SQLModel, table=True):
     log_loss: Optional[float] = None
     skill_score: Optional[float] = None
 
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
 
 
 class ExperimentRun(SQLModel, table=True):
@@ -161,7 +163,7 @@ class ExperimentRun(SQLModel, table=True):
     mode: str = Field(index=True, description="blind_ab / hidden / normal")
     arm: str = Field(index=True, description="A_reality_null / B_metaphysical_only / C_fusion / null_only")
 
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow)
     ended_at: Optional[datetime] = None
 
     sample_size: int = 0

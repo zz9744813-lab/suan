@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+
+from app.utils import utcnow
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -251,7 +253,7 @@ def run_blind_experiment(
                 run_id=f"BLIND-{uuid.uuid4().hex[:8]}",
                 mode="blind_ab",
                 arm=label,
-                started_at=datetime.utcnow(),
+                started_at=utcnow(),
                 sample_size=len(r.frozen),
                 note="三组盲跑（第 34 节）",
             )

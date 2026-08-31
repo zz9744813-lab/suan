@@ -18,6 +18,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.utils import utcnow
+
 from sqlmodel import Session, select
 
 from app.calibration.scoring import ScoreRow, aggregate
@@ -111,7 +113,7 @@ def run_ablation(session: Session, *, user_id: int | None = None) -> dict[str, A
                 brier=agg.brier,
                 log_loss=agg.log_loss,
                 skill_score=agg.skill_score,
-                computed_at=datetime.utcnow(),
+                computed_at=utcnow(),
             )
         )
     session.commit()

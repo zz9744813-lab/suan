@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -42,7 +44,7 @@ class RealityEvent(SQLModel, table=True):
     # 关联到产出该事件的预测（可为空：现实事件不必来自预测）
     prediction_id: Optional[str] = Field(default=None, index=True)
 
-    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+    recorded_at: datetime = Field(default_factory=utcnow)
 
 
 class DailyState(SQLModel, table=True):
@@ -69,7 +71,7 @@ class DailyState(SQLModel, table=True):
     study_minutes: Optional[int] = None
     event_count: Optional[int] = None
 
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
 
 
 class UserPlan(SQLModel, table=True):
@@ -92,4 +94,4 @@ class UserPlan(SQLModel, table=True):
     status: str = Field(default="planned", description="planned / done / cancelled")
     note: str = ""
 
-    recorded_at: datetime = Field(default_factory=datetime.utcnow)
+    recorded_at: datetime = Field(default_factory=utcnow)

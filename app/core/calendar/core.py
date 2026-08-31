@@ -22,6 +22,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
+
+from app.utils import utcnow
 from typing import Any
 
 from sqlmodel import Session
@@ -128,7 +130,7 @@ class CalendarCore:
         deterministic：相同输入永远返回相同结果。
         """
         if target_date is None:
-            target_date = datetime.utcnow().date()
+            target_date = utcnow().date()
 
         if not self.available:
             return self._degraded("lunar-python 未安装，请 pip install lunar-python")

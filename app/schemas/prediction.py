@@ -14,6 +14,8 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
+
+from app.utils import utcnow
 from enum import Enum
 from typing import Any
 
@@ -147,7 +149,7 @@ class Prediction(BaseModel):
     status: PredictionStatus = PredictionStatus.FROZEN
     visibility_mode: VisibilityMode = VisibilityMode.VISIBLE
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     frozen_at: datetime | None = None
     verification_due_at: datetime | None = Field(
         default=None, description="第 59 节：到期主动进入 VERIFY_REQUIRED"
@@ -214,7 +216,7 @@ class Prediction(BaseModel):
 
     def freeze(self) -> "Prediction":
         """冻结预测：写入 frozen_at、计算哈希、置为 FROZEN。"""
-        self.frozen_at = datetime.utcnow()
+        self.frozen_at = utcnow()
         self.prediction_hash = self.compute_hash()
         self.status = PredictionStatus.FROZEN
         if self.verification_due_at is None:

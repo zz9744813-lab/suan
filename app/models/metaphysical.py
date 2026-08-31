@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -42,7 +44,7 @@ class _ChartBase(SQLModel):
     )
     degrade_reason: Optional[str] = None
 
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
 
 
 class ZiweiChart(_ChartBase, table=True):
@@ -132,7 +134,7 @@ class PalmFeature(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
 
     hand: str = Field(default="right", description="left / right")
-    captured_at: datetime = Field(default_factory=datetime.utcnow)
+    captured_at: datetime = Field(default_factory=utcnow)
 
     # 第 8.1 节 PalmFeatures：结构化几何特征，而非图像
     features: dict[str, Any] = Field(
@@ -161,7 +163,7 @@ class FaceFeature(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
-    captured_at: datetime = Field(default_factory=datetime.utcnow)
+    captured_at: datetime = Field(default_factory=utcnow)
 
     features: dict[str, Any] = Field(
         default_factory=dict,
@@ -203,4 +205,4 @@ class FortuneReading(SQLModel, table=True):
     duration_ms: Optional[int] = None
     error: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

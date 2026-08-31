@@ -114,10 +114,17 @@ class Settings(BaseSettings):
     #   - 术式信号不参与融合（fusion 权重归零），避免「噪声偶然偏离 Null」产出假预测；
     #   - 只产出「研究样本」（status=RESEARCH）用于启动验证闭环，明确告知用户
     #     这还不代表预测力，仅用于积累校准数据。
-    # 达到此样本数后，系统自动转正式预测（术式信号恢复参与融合）。
     MIN_CALIBRATION_SAMPLES: int = Field(default=5, ge=1)
 
-    # 冷启动研究模式下，每次最多产出的研究样本数（第 4 节预算在冷启动时的替代额度）。
+    # 实证阶段门槛：样本数达到 MIN_CALIBRATION_SAMPLES 但仍不足此数时，
+    # 系统进入「实证研究模式」——术式信号以弱先验权重参与融合（禁止 6），
+    # 产出仍标记 RESEARCH（system 不声称预测力），但完整记录各术式信号，
+    # 验证后可为每个术式源积累实证样本，喂养可靠度矩阵。
+    # 达到此样本数后转正式预测（edge 门槛 + 对抗 Gate + 学习到的融合权重）。
+    # 默认值与 ReliabilityMatrix.MIN_SAMPLE（第 78 节）对齐。
+    MIN_FORMAL_SAMPLES: int = Field(default=20, ge=1)
+
+    # 冷启动/实证研究模式下，每次最多产出的研究样本数（第 4 节预算在研究期的替代额度）。
     RESEARCH_SAMPLE_LIMIT: int = Field(default=3, ge=0)
 
     # ---------- 派生 ----------

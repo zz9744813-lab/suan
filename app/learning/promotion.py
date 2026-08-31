@@ -30,6 +30,8 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import datetime
+
+from app.utils import utcnow
 from typing import Any
 
 from sqlmodel import Session, select
@@ -231,7 +233,7 @@ def check_regression(
     regressed = current_brier > last.brier_after
     if regressed:
         last.regression_alert = True
-        last.rolled_back_at = datetime.utcnow()
+        last.rolled_back_at = utcnow()
         session.add(last)
         session.commit()
     return regressed

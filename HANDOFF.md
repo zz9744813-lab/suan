@@ -24,11 +24,12 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `74 passed, 2 skipped`（7.2s，全绿） |
+| 测试 | `82 passed, 2 skipped`（10s，全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**37 张表** |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
 | 对抗审查 | 14 种攻击 + 串联 Gate |
+| 校准架构 | **三阶段**（2026-08-31 第二轮治本）：cold(<5) 基线校准 → explore(5~19) 信号弱先验实证 → formal(≥20) 正式预测 |
 | 命理批示 | `GET /api/fortune/reading` —— 大运/流年 + 七维度 LLM 批示（2026-08-30 新增） |
 | 出生档案 | 创建 + `PUT /api/users/{id}/profile` 更新（之前只有 create，2026-08-30 补） |
 | 前端 | React + TS + Vite，8 个一级页面 |
@@ -272,6 +273,9 @@ RealityState 扫描 → 候选事件(candidates)
 9. **iztro-py 时辰索引**非小时（第 4.5 节）。
 10. **qiyovo 中转站间歇软错误**（2026-08-30）——HTTP 200 + body `{"code":502,"message":"..."}`。`OpenAICompatibleProvider.complete()` 已检测并重试，**别把这段防护删了**。
 11. **出生档案接口只有 create 没有 update**（2026-08-30）——已补 `PUT /api/users/{id}/profile`。
+12. **`_score()` 不写 `source_types` → 可靠度矩阵 by_source 永远为空，学习闭环结构性断链**（2026-08-31 第二轮治本修复）：验证评分时必须从 SignalRecord 归集该预测的信号源/规则落进 `prediction_scores`，否则「Skill 回喂 Fusion」永远空转。
+13. **`fusion_weights()` 对 skill=None 源曾返回 1.0（全可信）**——违反禁止 6「初始只允许弱先验」，是「噪声偶然偏离 Null 造出假 edge」的根因。现为 0.5 弱先验下限，并对全部已知源显式给权重。配合**校准三阶段**（config `MIN_CALIBRATION_SAMPLES=5` / `MIN_FORMAL_SAMPLES=20`）：cold 不出术式、explore 弱先验参与但只产 RESEARCH 留痕、formal 正式预测。测试默认两个门槛都为 0（conftest 关闭），专项测试在 `tests/test_calibration_gate.py`（7 例）。
+14. **`datetime.utcnow()` 已全面弃用**——统一用 `app.utils.utcnow()`（naive UTC，语义不变）。新代码别再写 `datetime.utcnow()`。
 
 ---
 
@@ -285,7 +289,7 @@ RealityState 扫描 → 候选事件(candidates)
 
 3. **【高】掌纹/面相无测试样例**：这两个 CV 引擎需要 `AdapterQuery.image_path` 传本地照片才产出信号，目前测试没覆盖真实图片路径。建议造 1-2 张样例图（手部/人脸）进 `tests/fixtures/`，补真实 CV 的 golden case。
 
-4. **【中】清理 deprecation warnings**：`datetime.utcnow()` 在 Python 3.13 已弃用，跑测试有 1287 个 warnings（主要在 `app/scheduler.py` 和 `tests/test_scheduler.py`）。改成 `datetime.now(timezone.utc)`。
+4. ~~**【中】清理 deprecation warnings**~~ ✅ 已做（2026-08-31）：`datetime.utcnow()` 全部替换为 `app.utils.utcnow()`（21 个文件），警告 1369 → 1（仅余 FastAPI TestClient 自身提示）。
 
 5. **【中】前端新功能入口核对**：后端已实现 Future Tree / Counterfactual / 双盲实验 / Obsidian 导出 / 报告，但前端只补了 Future 页。核对 `frontend/src/pages/` 是否缺「实验」「导出」「报告」的入口，需要就补页面 + `api/client.ts` 的调用。
 

@@ -8,32 +8,39 @@
    index.html 内联脚本提前设置避免首屏闪色（FOUC）。
    ============================================================ */
 :root {
-  /* 日间 */
-  --p: #f2f3f6; /* 页面底 */
+  /* 日间：暖白纸感 + 墨青文字 */
+  --p: #f4f4f0; /* 页面底：暖白 */
   --card: #ffffff; /* 卡片底 */
-  --panel: #e9ecf1; /* 内嵌面板底 */
-  --line: #dfe3ea; /* 分隔线 */
-  --bd: rgba(15, 23, 42, 0.1); /* 通用边框 */
-  --t1: #1a2233; /* 主文字 */
-  --t2: #46536b; /* 次文字 */
-  --t3: #5d6b84; /* 说明文字 */
-  --t4: #8a94a8; /* 弱文字 */
-  --t5: #aeb7c6; /* 极弱文字 */
-  --gt: #8f7414; /* 鎏金文字（日间加深保证对比） */
-  --navh: rgba(15, 23, 42, 0.05); /* 导航 hover */
-  --nava: rgba(15, 23, 42, 0.09); /* 导航 active */
+  --panel: #eceee9; /* 内嵌面板底 */
+  --line: #e2e4dc; /* 分隔线 */
+  --bd: rgba(26, 32, 27, 0.1); /* 通用边框 */
+  --t1: #1b2019; /* 主文字 */
+  --t2: #49524a; /* 次文字 */
+  --t3: #5f6b60; /* 说明文字 */
+  --t4: #8b948a; /* 弱文字 */
+  --t5: #b2b9af; /* 极弱文字 */
+  --gt: #8a6d10; /* 鎏金文字（日间加深保证对比） */
+  --glow-gold: rgba(201, 162, 39, 0.1); /* 鎏金氛围光 */
+  --navh: rgba(26, 32, 27, 0.05); /* 导航 hover */
+  --nava: rgba(26, 32, 27, 0.08); /* 导航 active */
   --in: #ffffff; /* 输入框底 */
-  --sk1: #e6e9ef; /* 骨架屏 */
-  --sk2: #f3f5f8;
-  --prob-bg: #e3e7ee;
-  --card-hover-bd: rgba(15, 23, 42, 0.18);
-  --card-hover-bg: rgba(15, 23, 42, 0.015);
-  --row-hover-bg: rgba(15, 23, 42, 0.04);
-  --row-hover-bd: rgba(15, 23, 42, 0.12);
+  --sk1: #e8eae4; /* 骨架屏 */
+  --sk2: #f4f5f1;
+  --prob-bg: #e4e6df;
+  --card-hl: rgba(255, 255, 255, 0.9); /* 卡片顶部高光 */
+  --card-hover-bd: rgba(26, 32, 27, 0.18);
+  --card-hover-bg: rgba(26, 32, 27, 0.015);
+  --row-hover-bg: rgba(26, 32, 27, 0.04);
+  --row-hover-bd: rgba(26, 32, 27, 0.12);
   --glow-focus: rgba(201, 162, 39, 0.45);
   --shadow-card:
-    0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px -12px rgba(15, 23, 42, 0.18);
-  --shadow-lift: 0 2px 4px rgba(15, 23, 42, 0.06), 0 16px 40px -16px rgba(15, 23, 42, 0.28);
+    0 1px 0 0 rgba(255, 255, 255, 0.7) inset,
+    0 1px 2px rgba(26, 32, 27, 0.05),
+    0 8px 24px -12px rgba(26, 32, 27, 0.16);
+  --shadow-lift:
+    0 1px 0 0 rgba(255, 255, 255, 0.7) inset,
+    0 2px 4px rgba(26, 32, 27, 0.06),
+    0 20px 44px -18px rgba(26, 32, 27, 0.3);
 
   /* tailwind ink / slate 调色板的 R G B 数字（无 rgb() 包装）*/
   /* 数字越大越亮。日间：ink 浅、slate 深；夜间：反之。 */
@@ -59,32 +66,37 @@
 }
 
 [data-theme='dark'] {
-  --p: #08090d;
-  --card: #11151f;
-  --panel: #0d1017;
-  --line: rgba(255, 255, 255, 0.07);
+  /* 夜间：深石墨 + 微暖底韵，鎏金点缀带光晕 */
+  --p: #0a0b10;
+  --card: #12151d;
+  --panel: #0d1018;
+  --line: rgba(255, 255, 255, 0.06);
   --bd: rgba(255, 255, 255, 0.08);
-  --t1: #e2e8f0;
-  --t2: #94a3b8;
-  --t3: #64748b;
-  --t4: #475569;
-  --t5: #334155;
+  --t1: #e4e9f2;
+  --t2: #98a2b8;
+  --t3: #67718a;
+  --t4: #4a536b;
+  --t5: #363f55;
   --gt: #ecd9a0;
-  --navh: rgba(255, 255, 255, 0.03);
-  --nava: rgba(255, 255, 255, 0.06);
-  --in: rgba(8, 9, 13, 0.6);
-  --sk1: #131722;
-  --sk2: #1a1f2c;
-  --prob-bg: #1a1f2c;
-  --card-hover-bd: rgba(255, 255, 255, 0.12);
+  --glow-gold: rgba(217, 185, 106, 0.14);
+  --navh: rgba(255, 255, 255, 0.035);
+  --nava: rgba(255, 255, 255, 0.065);
+  --in: rgba(10, 11, 16, 0.6);
+  --sk1: #151926;
+  --sk2: #1c2233;
+  --prob-bg: #1b2130;
+  --card-hl: rgba(255, 255, 255, 0.05);
+  --card-hover-bd: rgba(255, 255, 255, 0.13);
   --card-hover-bg: rgba(255, 255, 255, 0.02);
-  --row-hover-bg: rgba(255, 255, 255, 0.03);
+  --row-hover-bg: rgba(255, 255, 255, 0.035);
   --row-hover-bd: rgba(255, 255, 255, 0.09);
   --glow-focus: rgba(217, 185, 106, 0.55);
   --shadow-card:
-    0 1px 0 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px -12px rgba(0, 0, 0, 0.65);
   --shadow-lift:
-    0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 16px 40px -16px rgba(0, 0, 0, 0.75);
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 20px 44px -18px rgba(0, 0, 0, 0.8);
 
   /* 夜间：ink 深、slate 亮 */
   --ink-950: 8 9 13;
@@ -103,7 +115,7 @@
   --slate-800: 30 41 59;
   --slate-900: 15 23 42;
   --slate-950: 2 6 23;
-  --surface: 17 21 31;
+  --surface: 18 22 32;
 
   color-scheme: dark;
 }
@@ -122,12 +134,14 @@ body {
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'tnum';
   transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 ::selection {
-  background: rgba(217, 185, 106, 0.28);
+  background: rgba(217, 185, 106, 0.32);
   color: inherit;
 }
 
@@ -137,8 +151,8 @@ body {
   scrollbar-color: var(--t5) transparent;
 }
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 *::-webkit-scrollbar-thumb {
   background: var(--t5);
@@ -162,7 +176,7 @@ body {
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -200,8 +214,18 @@ body {
   }
 }
 
+/* 主按钮的鎏金流光扫过 */
+@keyframes sheen {
+  from {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(240%) skewX(-18deg);
+  }
+}
+
 .animate-fade-up {
-  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .animate-fade-in {
@@ -210,7 +234,7 @@ body {
 
 /* 错峰入场：配合 style={{ animationDelay }} 使用 */
 .stagger > * {
-  animation: fade-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .stagger > *:nth-child(1) { animation-delay: 0.02s; }
 .stagger > *:nth-child(2) { animation-delay: 0.06s; }
@@ -235,19 +259,57 @@ body {
   animation: pulse-dot 2.2s ease-in-out infinite;
 }
 
+/* ---------- 材质 ---------- */
+
+/* 玻璃拟态面板（浮层 / 顶栏） */
+.glass {
+  background: color-mix(in srgb, var(--card) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+
+/* 鎏金渐变文字（英雄数字 / 标题点缀） */
+.text-gilt-grad {
+  background: linear-gradient(135deg, #f2e2ae 0%, #d9b96a 45%, #a8842a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+[data-theme='light'] .text-gilt-grad {
+  background: linear-gradient(135deg, #a8842a 0%, #8a6d10 60%, #6e560c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* 卡片顶部高光描边（配合 shadow 的 inset 高光，制造「抬升」感） */
+.card-sheen {
+  position: relative;
+}
+.card-sheen::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--card-hl), transparent);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
 /* ---------- 概率条（方案第 29.1 节：一眼看出高低） ---------- */
 .prob-bar {
   position: relative;
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: var(--prob-bg);
   overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 .prob-bar > div {
   height: 100%;
   border-radius: 999px;
+  box-shadow: 0 0 8px -1px currentColor;
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -259,34 +321,71 @@ body {
 /* ---------- 通用交互动效 ---------- */
 .btn-press {
   transition:
-    transform 0.12s ease,
+    transform 0.15s cubic-bezier(0.22, 1, 0.36, 1),
     background-color 0.2s ease,
     border-color 0.2s ease,
     color 0.2s ease,
-    box-shadow 0.2s ease,
+    box-shadow 0.25s ease,
+    filter 0.2s ease,
     opacity 0.2s ease;
 }
 .btn-press:not(:disabled):active {
-  transform: scale(0.98);
+  transform: scale(0.96);
+}
+
+/* 鎏金主按钮：微渐变 + 顶部高光 + hover 浮起 + 流光扫过 */
+.btn-gilt {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, #e0c074 0%, #c9a227 100%);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 16px -6px rgba(201, 162, 39, 0.45);
+  color: #241d05;
+}
+.btn-gilt:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.4) inset,
+    0 10px 24px -8px rgba(201, 162, 39, 0.55);
+}
+.btn-gilt::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+  pointer-events: none;
+}
+.btn-gilt:hover:not(:disabled)::after {
+  animation: sheen 0.9s ease;
 }
 
 .card-hover {
   transition:
-    border-color 0.25s ease,
-    box-shadow 0.25s ease,
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 0.25s ease;
+    border-color 0.3s ease,
+    box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.3s ease;
 }
 .card-hover:hover {
   border-color: var(--card-hover-bd);
   background-color: var(--card-hover-bg);
 }
 
+/* 可交互卡片：hover 上浮 */
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
 .row-hover {
   transition:
-    background-color 0.18s ease,
-    border-color 0.18s ease,
-    transform 0.18s ease;
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
 }
 .row-hover:hover {
   background-color: var(--row-hover-bg);
@@ -297,23 +396,26 @@ body {
 .input-glow {
   transition:
     border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    box-shadow 0.2s ease,
+    background-color 0.2s ease;
 }
 .input-glow:focus {
   border-color: var(--glow-focus);
-  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.14);
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.16);
   outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up,
   .animate-fade-in,
-  .stagger > * {
+  .stagger > *,
+  .btn-gilt::after {
     animation: none;
   }
   .prob-bar > div,
   .btn-press,
   .card-hover,
+  .card-lift,
   .row-hover {
     transition: none;
   }

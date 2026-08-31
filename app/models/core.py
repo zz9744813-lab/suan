@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+
+from app.utils import utcnow
 from typing import Any, Optional
 
 from sqlalchemy import JSON
@@ -101,4 +103,4 @@ class CalendarSnapshot(SQLModel, table=True):
     payload: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
 
     engine_version: str = "calendar-0.1.0"
-    computed_at: datetime = Field(default_factory=datetime.utcnow)
+    computed_at: datetime = Field(default_factory=utcnow)
