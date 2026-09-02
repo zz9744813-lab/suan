@@ -397,3 +397,22 @@ def fortune_reading(
     from app.services.fortune import generate_reading
 
     return generate_reading(session, user_id=user_id, refresh=refresh)
+
+
+@router.get("/fortune/reading/{system}")
+def fortune_reading_system(
+    system: str,
+    user_id: int = Query(...),
+    refresh: bool = Query(False, description="true 时强制重新生成并覆盖缓存"),
+    session: Session = Depends(get_session),
+):
+    """分术式命理批示（当前支持 ziwei）。
+
+    与 /fortune/reading（八字）并列。独立接口便于前端两条解读并行加载，
+    各自缓存互不影响（system_fortune_readings 表，按 system+档案指纹缓存）。
+    """
+    if system != "ziwei":
+        raise HTTPException(404, f"暂不支持术式批示：{system}（当前仅 ziwei）")
+    from app.services.fortune import generate_ziwei_reading
+
+    return generate_ziwei_reading(session, user_id=user_id, refresh=refresh)

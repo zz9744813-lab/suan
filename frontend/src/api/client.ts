@@ -260,4 +260,34 @@ export const api = {
 
   fortuneReading: (userId: number, refresh = false) =>
     get<FortuneReading>(`/api/fortune/reading?user_id=${userId}${refresh ? '&refresh=true' : ''}`),
+
+  /** 分术式批示（当前支持 ziwei）。与八字批示并行加载，各自缓存。 */
+  fortuneReadingZiwei: (userId: number, refresh = false) =>
+    get<ZiweiReading>(
+      `/api/fortune/reading/ziwei?user_id=${userId}${refresh ? '&refresh=true' : ''}`,
+    ),
 };
+
+/** 紫微批示：十二宫盘面 + 六维度解读 */
+export interface ZiweiReading {
+  ok: boolean;
+  error: string | null;
+  model?: string;
+  duration_ms?: number;
+  reasoning?: string;
+  cached?: boolean;
+  chart: {
+    degraded?: boolean;
+    palaces: {
+      name: string;
+      ganzhi: string;
+      dalimit: [number, number] | null;
+      major_stars: { name: string; brightness: string; mutagen: string }[];
+    }[];
+    soul_palace: string;
+    body_palace: string;
+    soul_branch: string;
+    prompt_text?: string;
+  } | null;
+  reading: Record<string, string> | null;
+}

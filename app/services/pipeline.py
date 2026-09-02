@@ -165,13 +165,17 @@ class DailyPipeline:
                 f"术式信号以弱先验参与融合并完整留痕，产出仍为研究样本（不代表预测力）"
             )
 
-        # ---------- 3. Scan ----------
-        # 研究期直接走 Event Ontology（不调用 LLM）：研究样本的目的是启动验证闭环，
-        # 整条路径必须秒级完成，不能被中转站延迟绑架。正式期才用 LLM 扫描器。
-        if phase == "formal":
-            scanned = self.scan(target_date, scale=scale, limit=limit)
-        else:
-            scanned = self._ontology_scan(scale=scale, limit=limit)
+        # ---------- 3. 研究期：多尺度批量采样（全程零 LLM，秒级）----------
+        if phase != "formal":
+            return self._run_research(
+                result=result,
+                target_date=target_date,
+                reality_state=reality_state,
+                phase=phase,
+            )
+
+        # ---------- 4. 正式期 ---------- 
+        scanned = self.scan(target_date, scale=scale, limit=limit)
         result.scanned = len(scanned)
         if not scanned:
             result.notes.append("Future Scanner 未产出候选")
@@ -249,50 +253,40 @@ class DailyPipeline:
                 result.notes.append(f"{event_type} 无法构造可证伪候选（C-001）")
                 continue
 
-            # ---------- 4.4 Adversarial Gate（第 21 节，仅正式期）----------
-            if phase == "formal":
-                gate_result = AdversarialGate().run(
-                    self._attack_context(cand, null_p, fusion, len(scanned))
+            # ---------- 4.4 Adversarial Gate（第 21 节）----------
+            gate_result = AdversarialGate().run(
+                self._attack_context(cand, null_p, fusion, len(scanned))
+            )
+            if gate_result.decision in {"REJECT", "REWRITE"}:
+                result.rejected.append(
+                    {
+                        "event_type": event_type,
+                        "decision": gate_result.decision,
+                        "failed": [o.attack for o in gate_result.failed],
+                        "reasons": [o.reason for o in gate_result.failed][:3],
+                    }
                 )
-                if gate_result.decision in {"REJECT", "REWRITE"}:
-                    result.rejected.append(
-                        {
-                            "event_type": event_type,
-                            "decision": gate_result.decision,
-                            "failed": [o.attack for o in gate_result.failed],
-                            "reasons": [o.reason for o in gate_result.failed][:3],
-                        }
-                    )
-                    continue
+                continue
 
             provisional.append((cand, null_p, fusion))
 
         result.candidates = [c for c, _, _ in provisional]
 
         # ---------- 5. Prediction Budget（第 4 节）----------
-        if phase != "formal":
-            shortlisted = sorted(
-                provisional, key=lambda e: e[0].probability, reverse=True
-            )[: self.settings.RESEARCH_SAMPLE_LIMIT]
-            usage = {"research": len(shortlisted)}
-            result.notes.append(
-                f"研究样本：{len(provisional)} 候选 → {len(shortlisted)} 条（研究期额度）"
-            )
-        else:
-            candidates_only = [c for c, _, _ in provisional]
-            selected, usage = apply_budget(candidates_only, default_slots(self.settings))
-            by_id = {c.candidate_id: entry for entry in provisional for c in [entry[0]]}
-            shortlisted = [by_id[c.candidate_id] for c in selected]
-            result.notes.append(
-                f"预算竞争：{len(provisional)} 候选 → {len(shortlisted)} 条获得额度"
-            )
+        candidates_only = [c for c, _, _ in provisional]
+        selected, usage = apply_budget(candidates_only, default_slots(self.settings))
+        by_id = {c.candidate_id: entry for entry in provisional for c in [entry[0]]}
+        shortlisted = [by_id[c.candidate_id] for c in selected]
         result.budget_usage = usage
+        result.notes.append(
+            f"预算竞争：{len(provisional)} 候选 → {len(shortlisted)} 条获得额度"
+        )
 
-        # ---------- 6. LLM 措辞增强（仅正式期，并发执行）----------
+        # ---------- 6. LLM 措辞增强（并发执行）----------
         # C-005：LLM 只润色描述与成败标准，probability 一律丢弃（权威在融合）。
         # 中转站慢：并发 4 路，LLM 失败/放弃时保留确定性版本。
         final_entries = shortlisted
-        if phase == "formal" and shortlisted:
+        if shortlisted:
             final_entries, n_refined = self._refine_with_llm(
                 shortlisted,
                 window=window,
@@ -306,11 +300,110 @@ class DailyPipeline:
 
         # ---------- 7. Freeze（第 16 节）----------
         for cand, _, _ in final_entries:
-            pred = self._freeze(
-                cand,
-                fusion=None,
-                status=PredictionStatus.RESEARCH.value if phase != "formal" else None,
+            pred = self._freeze(cand, fusion=None)
+            if pred:
+                result.frozen.append(pred)
+
+        return result
+
+    # ==================================================================
+    # 研究期多尺度采样（cold / explore 共用，全程零 LLM）
+    # ==================================================================
+
+    # 日 / 周 / 月的研究样本配额：让用户同时看到「明天 / 本周 / 本月」的样本
+    RESEARCH_SCALE_PLAN: tuple[tuple[str, int], ...] = (
+        ("day", 3),
+        ("week", 2),
+        ("month", 1),
+    )
+
+    def _run_research(
+        self,
+        *,
+        result: PipelineResult,
+        target_date: date,
+        reality_state: dict[str, Any],
+        phase: str,
+    ) -> PipelineResult:
+        """研究期主流程：多尺度 Ontology 扫描 → 信号 → 融合 → 按尺度配额冻结。
+
+        全程零 LLM：研究样本的使命是启动验证闭环，必须秒级完成。
+        概率权威：cold 强制 Null 基线；explore 为弱先验融合结果。
+        """
+        all_provisional: list[PredictionCandidate] = []
+        chosen: list[tuple[PredictionCandidate, float, Any]] = []
+        by_scale_count: dict[str, int] = {}
+
+        for scale_name, quota in self.RESEARCH_SCALE_PLAN:
+            scale = SCALE_BY_NAME.get(scale_name, TimeScale.DAY)
+            window = FreezeAgent.default_window(
+                datetime(target_date.year, target_date.month, target_date.day), scale
             )
+            scanned = self._ontology_scan(
+                scale=scale_name, limit=max(quota * 4, self.settings.RESEARCH_SAMPLE_LIMIT)
+            )
+            result.scanned += len(scanned)
+
+            per_scale: list[tuple[PredictionCandidate, float, Any]] = []
+            for item in scanned:
+                event_type = item.get("event_type", "")
+                spec = ONTOLOGY.get(event_type)
+                domain = _domain(item.get("domain", "") or (spec.domain if spec else ""))
+                try:
+                    signals, null_p = self._collect_signals(
+                        event_type=event_type,
+                        domain=domain,
+                        window=window,
+                        time_scale=scale,
+                        target_date=target_date,
+                        reality_state=reality_state,
+                        experiment_arm=self.experiment_arm,
+                        include_metaphysical=(phase != "cold"),
+                    )
+                except Exception as exc:
+                    result.notes.append(f"{event_type} 信号收集失败：{exc}")
+                    continue
+
+                fusion = fuse(
+                    FusionInput(
+                        signals=signals,
+                        null_probability=null_p,
+                        time_scale=scale,
+                        reliability=self._reliability_weights(),
+                    )
+                )
+                cand = self._provisional_candidate(
+                    event_type=event_type,
+                    domain=domain,
+                    window=window,
+                    time_scale=scale,
+                    probability=null_p if phase == "cold" else fusion.probability,
+                    signals=signals,
+                )
+                if cand is None:
+                    continue
+                all_provisional.append(cand)
+                per_scale.append((cand, null_p, fusion))
+
+            # 按概率降序取该尺度配额
+            per_scale.sort(key=lambda e: e[0].probability, reverse=True)
+            picked = per_scale[:quota]
+            chosen.extend(picked)
+            by_scale_count[scale_name] = len(picked)
+
+        if not chosen:
+            result.notes.append("研究期扫描未产出可证伪候选")
+            return result
+
+        result.candidates = all_provisional
+        result.budget_usage = {"research": len(chosen), **by_scale_count}
+        result.notes.append(
+            f"研究期多尺度：{' / '.join(f'{k} {v}' for k, v in by_scale_count.items())}，"
+            f"共 {len(chosen)} 条研究样本（零 LLM，秒级）"
+        )
+
+        for cand, _, _ in chosen:
+            pred = self._freeze(cand, fusion=None, status=PredictionStatus.RESEARCH.value)
             if pred:
                 result.frozen.append(pred)
 
@@ -429,6 +522,24 @@ class DailyPipeline:
         ]
 
     # ------------------------------------------------------------------
+    _WEEKDAY_ZH = "一二三四五六日"
+
+    def _describe_event(
+        self, label: str, window: TimeWindow, time_scale: TimeScale
+    ) -> str:
+        """把时间窗口写进描述，让每条研究样本/候选一眼可读：何时、何事。"""
+        s, e = window.start, window.end
+        wd = f"周{self._WEEKDAY_ZH[s.weekday()]}"
+        if time_scale == TimeScale.DAY:
+            when = f"{s.month}月{s.day}日（{wd}）"
+        elif time_scale == TimeScale.WEEK:
+            when = f"{s.month}月{s.day}日 ~ {e.month}月{e.day}日这一周"
+        elif time_scale == TimeScale.MONTH:
+            when = f"{s.year}年{s.month}月"
+        else:
+            when = f"{s.year}年"
+        return f"{when}{label}"
+
     def _provisional_candidate(
         self,
         *,
@@ -443,6 +554,7 @@ class DailyPipeline:
 
         预测的「最小可证伪骨架」必须能独立于 LLM 存在（C-001）：
         描述/成功失败标准/裁定规则全部来自 Ontology；概率永远来自融合方。
+        描述用「何时 + 何事」句式，不靠 LLM 也言之有物。
         """
         spec = ONTOLOGY.get(event_type)
         if spec is None:
@@ -450,7 +562,7 @@ class DailyPipeline:
         return PredictionCandidate(
             domain=domain,
             event_type=event_type,
-            description=spec.label,
+            description=self._describe_event(spec.label, window, time_scale),
             probability=probability,
             time_scale=time_scale,
             window_start=window.start,

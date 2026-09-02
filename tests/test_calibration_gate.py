@@ -88,9 +88,31 @@ def test_cold_start_produces_research_samples(client, user_id, _real_gates):
 
 
 def test_cold_start_respects_sample_limit(client, user_id, _real_gates):
-    """冷启动：研究样本数不超过 RESEARCH_SAMPLE_LIMIT。"""
+    """冷启动：研究样本按多尺度配额产出（日 3 / 周 2 / 月 1）。"""
     data = _generate(client, user_id)
-    assert len(data["frozen"]) <= 3, data["frozen"]
+    assert len(data["frozen"]) <= 6, data["frozen"]
+
+
+def test_research_multi_scale(client, user_id, _real_gates):
+    """研究期多尺度：同一时间轴铺开 day / week / month 的样本（用户视角：
+    不只明天，还有这一周、这个月）。"""
+    _generate(client, user_id)
+    items = client.get(f"/api/predictions?user_id={user_id}").json()["items"]
+    assert items
+    scales = {it["time_scale"] for it in items if it["status"] == "RESEARCH"}
+    assert {"day", "week", "month"}.issubset(scales), scales
+
+    # 描述要说清「何时 + 何事」：日带星期，周带区间，月带年月
+    for it in items:
+        if it["status"] != "RESEARCH":
+            continue
+        d = it["description"]
+        if it["time_scale"] == "day":
+            assert "周" in d and "月" in d and "日" in d, d
+        elif it["time_scale"] == "week":
+            assert "这一周" in d, d
+        elif it["time_scale"] == "month":
+            assert "年" in d and "月" in d, d
 
 
 def test_cold_start_probability_equals_null(client, user_id, _real_gates):

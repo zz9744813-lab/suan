@@ -33,6 +33,48 @@ from app.models.metaphysical import FortuneReading
 FUTURE_YEARS = 10
 
 
+def _complete_with_fallback(prompt: str, *, max_tokens: int = 3000):
+    """批示生成：reasoning 层优先，失败自动回退 cheap 层。
+
+    qiyovo 中转站的 reasoning 模型（deepseek-v4-flash）会整段长时间 500/挂起
+    （实测一次连续 5×180s 全部超时），而 cheap 层（minimax-m3）响应正常。
+    批示是传统术数展示文本、不进 Fusion/不评分，用 cheap 兜底不会产生
+    校准口径问题，但能避免用户看到「批示全是失败」。
+    """
+    from app.providers.base import LLMRequest, LLMResponse, get_provider
+
+    req = LLMRequest(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+        # 推理模型思考链路也计入 completion tokens，与正文共享额度。
+        # 思考过长会挤掉正文导致截断——已用「简要思考」约束 + 3000 兜底。
+        max_tokens=max_tokens,
+    )
+    # 交互式批示要快失败：get_provider 每次新建实例，这里的调参不影响别的调用方。
+    # 中转站整体故障时 2 次尝试足以区分「瞬时抖动」与「不可用」（默认 5 次 ×180s
+    # 用户要等一刻钟才看到结果），然后交给 cheap 兜底。
+    reasoning = get_provider("reasoning")
+    reasoning.max_retries = 2  # type: ignore[attr-defined]
+    resp = reasoning.complete(req)
+    if resp.ok:
+        return resp
+    fb = get_provider("cheap")
+    if not fb.configured:
+        return resp
+    fb.max_retries = 3  # type: ignore[attr-defined]
+    fb._timeout = 120.0  # type: ignore[attr-defined]
+    fb_resp = fb.complete(req)
+    if fb_resp.ok:
+        return fb_resp
+    return LLMResponse(
+        content="",
+        provider=resp.provider,
+        tier="reasoning",
+        duration_ms=resp.duration_ms + fb_resp.duration_ms,
+        error=f"{resp.error}；回退 cheap 层也失败：{fb_resp.error}",
+    )
+
+
 def _zodiac(year_ganzhi: str) -> str:
     """年干支 → 生肖。"""
     dizhi = "子丑寅卯辰巳午未申酉戌亥"
@@ -189,13 +231,16 @@ def _reading_prompt(chart: dict[str, Any]) -> str:
     )
 
 
-def _parse_reading(text: str) -> dict[str, str] | None:
+def _parse_reading(text: str, keys: list[str] | None = None) -> dict[str, str] | None:
     """解析批示文本 → {字段: 内容}。
 
     兼容两种输出：
       1. JSON（模型偶尔会输出）；
       2. 「字段：内容」的冒号式文本（deepseek-v4-flash 实测常用此格式）。
+    keys 默认八字批示字段；紫微等其他术式传自己的字段表。
     """
+    if keys is None:
+        keys = READING_KEYS
     text = (text or "").strip()
     if not text:
         return None
@@ -212,7 +257,7 @@ def _parse_reading(text: str) -> dict[str, str] | None:
     try:
         data = json.loads(candidate)
         if isinstance(data, dict):
-            out = {k: str(data.get(k, "")).strip() for k in READING_KEYS}
+            out = {k: str(data.get(k, "")).strip() for k in keys}
             return out if any(out.values()) else None
     except (json.JSONDecodeError, ValueError):
         pass
@@ -221,7 +266,7 @@ def _parse_reading(text: str) -> dict[str, str] | None:
     out: dict[str, str] = {}
     # 找到每个字段在文本中的起始位置
     positions: list[tuple[int, str]] = []
-    for key in READING_KEYS:
+    for key in keys:
         # 支持全角/半角冒号
         for sep in ("：", ":"):
             idx = text.find(f"{key}{sep}")
@@ -300,21 +345,10 @@ def generate_reading(session: Session, user_id: int, *, refresh: bool = False) -
             "cached": False,
         }
 
-    from app.providers.base import LLMRequest, get_provider
-
     reading: dict[str, Any] | None = None
     error: str | None = None
     reasoning: str = ""
-    provider = get_provider("reasoning")
-    resp = provider.complete(
-        LLMRequest(
-            messages=[{"role": "user", "content": _reading_prompt(chart)}],
-            temperature=0.5,
-            # 推理模型思考链路也计入 completion tokens，与正文共享额度。
-            # 思考过长会挤掉正文导致截断——已用「简要思考」约束 + 3000 兜底。
-            max_tokens=3000,
-        )
-    )
+    resp = _complete_with_fallback(_reading_prompt(chart))
     if resp.ok:
         reasoning = resp.reasoning
         parsed = _parse_reading(resp.content)
@@ -353,6 +387,205 @@ def generate_reading(session: Session, user_id: int, *, refresh: bool = False) -
         "ok": reading is not None,
         "error": error,
         "chart": chart,
+        "reading": reading,
+        "model": resp.model,
+        "duration_ms": resp.duration_ms,
+        "reasoning": reasoning,
+        "cached": False,
+    }
+
+
+# ======================================================================
+# 紫微斗数批示（与八字并列的第二条解读线）
+#
+# 与八字批示同一原则：程序排盘（iztro-py），LLM 只做解读不排盘；
+# 纯展示，不进入 Fusion、不参与评分；结果按出生档案指纹缓存。
+# ======================================================================
+
+from app.models.metaphysical import SystemFortuneReading
+
+ZIWEI_READING_KEYS = ["命身总论", "事业官禄", "财帛", "夫妻感情", "迁移际遇", "大限走势"]
+
+_HEAVENLY = {
+    "jiaHeavenly": "甲", "yiHeavenly": "乙", "bingHeavenly": "丙", "dingHeavenly": "丁",
+    "wuHeavenly": "戊", "jiHeavenly": "己", "gengHeavenly": "庚", "xinHeavenly": "辛",
+    "renHeavenly": "壬", "guiHeavenly": "癸",
+}
+_EARTHLY = {
+    "ziEarthly": "子", "chouEarthly": "丑", "yinEarthly": "寅", "maoEarthly": "卯",
+    "chenEarthly": "辰", "siEarthly": "巳", "wuEarthly": "午", "weiEarthly": "未",
+    "shenEarthly": "申", "youEarthly": "酉", "xuEarthly": "戌", "haiEarthly": "亥",
+}
+
+
+def _hour_to_time_index(hour: int) -> int:
+    """小时 → iztro 时辰索引（0-12，含子初），与 ZiweiAdapter 同一口径。"""
+    return min((hour + 1) // 2, 12)
+
+
+def build_ziwei_summary(profile: BirthProfile) -> dict[str, Any]:
+    """紫微排盘（确定性，iztro-py）→ 十二宫盘面 + LLM 精简输入。"""
+    from iztro_py import astro
+
+    try:
+        hh, _mm = (profile.solar_birth_time or "00:00").split(":")
+        hour = int(hh)
+    except (ValueError, AttributeError):
+        hour = 0
+    gender = "男" if profile.gender == "male" else "女"
+
+    chart = astro.by_solar(
+        profile.solar_birth_date.isoformat(), _hour_to_time_index(hour), gender
+    )
+
+    palaces: list[dict[str, Any]] = []
+    for p in chart.palaces:
+        stars = []
+        for s in p.major_stars or []:
+            stars.append(
+                {
+                    "name": s.translate_name(),
+                    "brightness": s.brightness or "",
+                    "mutagen": s.mutagen or "",
+                }
+            )
+        dec = getattr(p, "decadal", None)
+        palaces.append(
+            {
+                "name": p.translate_name(),
+                "ganzhi": (
+                    _HEAVENLY.get(getattr(p, "heavenly_stem", ""), "")
+                    + _EARTHLY.get(getattr(p, "earthly_branch", ""), "")
+                ),
+                "dalimit": list(dec.range) if dec and getattr(dec, "range", None) else None,
+                "major_stars": stars,
+            }
+        )
+
+    soul = chart.get_soul_palace()
+    body = chart.get_body_palace()
+    lines = []
+    for pl in palaces:
+        stars_txt = "、".join(
+            s["name"] + (f"（{s['brightness']}）" if s["brightness"] else "")
+            + (f"化{s['mutagen'][0] if s['mutagen'] else ''}" if s["mutagen"] else "")
+            for s in pl["major_stars"]
+        ) or "无主星"
+        dl = f"｜大限 {pl['dalimit'][0]}-{pl['dalimit'][1]}" if pl["dalimit"] else ""
+        lines.append(f"{pl['name']}（{pl['ganzhi']}）：{stars_txt}{dl}")
+
+    return {
+        "degraded": False,
+        "palaces": palaces,
+        "soul_palace": soul.translate_name() if soul else "",
+        "body_palace": body.translate_name() if body else "",
+        "soul_branch": _EARTHLY.get(
+            getattr(chart, "earthly_branch_of_soul_palace", ""), ""
+        ),
+        "prompt_text": "\n".join(lines),
+    }
+
+
+def _ziwei_prompt(summary: dict[str, Any], birth_time_known: bool) -> str:
+    keys = "\n".join(f"{k}：" for k in ZIWEI_READING_KEYS)
+    return (
+        f"你是紫微斗数传统命理参考解读。以下是已由确定性程序排好的紫微斗数命盘"
+        f"（十二宫主星，你不得自行改算）。\n\n"
+        f"# 命盘\n命宫落：{summary['soul_palace']}（{summary['soul_branch']}宫）｜"
+        f"身宫落：{summary['body_palace']}\n{summary['prompt_text']}\n\n"
+        f"# 最终输出格式（严格按此格式，每行一项，冒号后是结论正文）\n{keys}\n\n"
+        f"# 约束\n"
+        f"- 每项 2~4 句通俗中文，不堆砌术语。\n"
+        f"- 简要思考即可，重点放在结论正文，不要长篇推理。\n"
+        f"- 「大限走势」按各宫大限年龄段简述趋势。\n"
+        f"- 这是传统术数参考，非科学预测，不得诊断疾病、预测死亡、"
+        f"替代医疗/法律/财务建议。\n"
+        + ("" if birth_time_known else "- 出生时辰未知：命身总论里需说明命宫定位存疑。\n")
+    )
+
+
+def generate_ziwei_reading(
+    session: Session, user_id: int, *, refresh: bool = False
+) -> dict[str, Any]:
+    """生成紫微批示。结构对齐 generate_reading：缓存命中即回。"""
+    profile = session.exec(
+        select(BirthProfile).where(BirthProfile.user_id == user_id)
+    ).first()
+    if profile is None:
+        return {"ok": False, "error": "未找到出生档案", "chart": None, "reading": None, "cached": False}
+
+    profile_hash = _profile_hash(profile)
+
+    if not refresh:
+        cached = session.exec(
+            select(SystemFortuneReading)
+            .where(
+                SystemFortuneReading.user_id == user_id,
+                SystemFortuneReading.system == "ziwei",
+                SystemFortuneReading.profile_hash == profile_hash,
+            )
+            .order_by(SystemFortuneReading.id.desc())
+        ).first()
+        if cached is not None and cached.chart:
+            return {
+                "ok": bool(cached.reading),
+                "error": cached.error,
+                "chart": cached.chart,
+                "reading": cached.reading or None,
+                "model": cached.model,
+                "duration_ms": cached.duration_ms,
+                "reasoning": cached.reasoning or "",
+                "cached": True,
+            }
+
+    try:
+        summary = build_ziwei_summary(profile)
+    except Exception as exc:  # 排盘失败（iztro 异常等）
+        return {"ok": False, "error": f"紫微排盘失败：{exc}", "chart": None,
+                "reading": None, "cached": False}
+
+    reading: dict[str, Any] | None = None
+    error: str | None = None
+    reasoning: str = ""
+    resp = _complete_with_fallback(_ziwei_prompt(summary, profile.birth_time_known))
+    if resp.ok:
+        reasoning = resp.reasoning
+        parsed = _parse_reading(resp.content, keys=ZIWEI_READING_KEYS)
+        if parsed:
+            reading = parsed
+        else:
+            error = "LLM 输出无法解析为批示文本（已按确定性盘面降级）"
+    else:
+        error = resp.error
+
+    old = session.exec(
+        select(SystemFortuneReading).where(
+            SystemFortuneReading.user_id == user_id,
+            SystemFortuneReading.system == "ziwei",
+            SystemFortuneReading.profile_hash == profile_hash,
+        )
+    ).all()
+    for o in old:
+        session.delete(o)
+    session.add(
+        SystemFortuneReading(
+            user_id=user_id,
+            system="ziwei",
+            profile_hash=profile_hash,
+            chart=summary,
+            reading=reading or {},
+            reasoning=reasoning,
+            model=resp.model,
+            duration_ms=resp.duration_ms,
+            error=error,
+        )
+    )
+    session.commit()
+
+    return {
+        "ok": reading is not None,
+        "error": error,
+        "chart": summary,
         "reading": reading,
         "model": resp.model,
         "duration_ms": resp.duration_ms,

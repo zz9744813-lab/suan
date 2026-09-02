@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
-import { api, DEFAULT_USER_ID, type FortuneReading } from '../api/client';
-import { Badge, Card, EmptyState, ErrorBox, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
+import { api, DEFAULT_USER_ID, type FortuneReading, type ZiweiReading } from '../api/client';
+import { Badge, Card, EmptyState, ErrorBox, GhostButton, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
 import { SOURCE_LABEL, cleanDescription, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
 
@@ -43,8 +43,7 @@ const READING_META: { key: string; label: string; icon: string }[] = [
 ];
 
 /** 命理批示区块（大运时间轴 + 流年 + 批示卡片） */
-function FortuneSection({ data }: { data: FortuneReading }) {
-  const chart = data.chart;
+function FortuneSection({ data }: { data: FortuneReading }) {  const chart = data.chart;
   if (!chart) {
     return <ErrorBox message={data.error ?? '命盘排盘失败'} />;
   }
@@ -214,6 +213,161 @@ function FortuneSection({ data }: { data: FortuneReading }) {
   );
 }
 
+/** 紫微批示的六个维度 */
+const ZIWEI_DIMS: { key: string; icon: string; wide?: boolean }[] = [
+  { key: '命身总论', icon: '命', wide: true },
+  { key: '事业官禄', icon: '禄' },
+  { key: '财帛', icon: '财' },
+  { key: '夫妻感情', icon: '姻' },
+  { key: '迁移际遇', icon: '迁' },
+  { key: '大限走势', icon: '限', wide: true },
+];
+
+/** 紫微十二宫的经典盘位：按宫位地支固定在 4×4 盘面上，中宫放概要 */
+const PALACE_POS: Record<string, [number, number]> = {
+  巳: [0, 0], 午: [0, 1], 未: [0, 2], 申: [0, 3],
+  辰: [1, 0], 酉: [1, 3],
+  卯: [2, 0], 戌: [2, 3],
+  寅: [3, 0], 丑: [3, 1], 子: [3, 2], 亥: [3, 3],
+};
+
+function ZiweiSection({
+  data,
+  loading,
+  error,
+  onRefresh,
+}: {
+  data?: ZiweiReading | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  const chart = data?.chart;
+  return (
+    <Card
+      title="紫微斗数命盘"
+      subtitle="十二宫盘面由 iztro-py 确定性排盘；批示为传统术数参考，非科学预测"
+      right={
+        <GhostButton onClick={onRefresh} disabled={loading}>
+          {loading ? '生成中…' : '重算紫微批示'}
+        </GhostButton>
+      }
+    >
+      {loading && <Loading label="正在排紫微盘并生成批示（首次约 2-3 分钟，之后命中缓存秒开）…" />}
+      {error && <ErrorBox message={error} />}
+      {!loading && !error && chart && (
+        <div className="space-y-4">
+          {/* 经典 4×4 十二宫盘（窄屏横向滚动） */}
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[640px] grid-cols-4 gap-px overflow-hidden rounded-xl border border-line bg-line">
+            {chart.palaces.map((p) => {
+              const branch = p.ganzhi.slice(-1);
+              const pos = PALACE_POS[branch];
+              const isSoul = p.name === chart.soul_palace;
+              const isBody = p.name === chart.body_palace;
+              return (
+                <div
+                  key={p.name}
+                  style={
+                    pos ? { gridRowStart: pos[0] + 1, gridColumnStart: pos[1] + 1 } : undefined
+                  }
+                  className={`card-hover min-h-[92px] bg-card p-2.5 ${
+                    isSoul ? 'bg-gilt-500/[0.06]' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs font-medium ${isSoul ? 'text-gt' : 'text-t2'}`}>
+                      {p.name}
+                    </span>
+                    <span className="text-[10px] tabular text-t5">{p.ganzhi}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-x-1.5 gap-y-1">
+                    {p.major_stars.length === 0 && (
+                      <span className="text-[10px] text-t5">无主星</span>
+                    )}
+                    {p.major_stars.map((s, i) => (
+                      <span
+                        key={i}
+                        className="text-xs text-t1"
+                        title={`${s.name}${s.brightness ? ` · ${s.brightness}` : ''}${s.mutagen ? ` · 化${s.mutagen}` : ''}`}
+                      >
+                        {s.name}
+                        {s.brightness && (
+                          <span className="text-[9px] text-t4">{s.brightness}</span>
+                        )}
+                        {s.mutagen && (
+                          <span className="ml-0.5 rounded border border-gilt-500/40 bg-gilt-500/10 px-0.5 text-[9px] text-gt">
+                            {s.mutagen}
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-1 flex items-center gap-1">
+                    {isSoul && <Badge tone="gilt">命</Badge>}
+                    {isBody && <Badge>身</Badge>}
+                    {p.dalimit && (
+                      <span className="text-[9px] tabular text-t5">
+                        大限 {p.dalimit[0]}-{p.dalimit[1]}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {/* 中宫：命宫/身宫摘要 */}
+            <div className="col-span-2 row-span-2 flex flex-col items-center justify-center gap-2 bg-panel p-4 text-center">
+              <div className="text-[10px] tracking-[0.3em] text-t4">紫微斗数</div>
+              <div className="text-sm text-t2">
+                命宫 <span className="font-semibold text-gt">{chart.soul_palace || '—'}</span>
+                {chart.soul_branch && `（${chart.soul_branch}宫）`}
+              </div>
+              <div className="text-sm text-t2">
+                身宫 <span className="font-semibold text-t1">{chart.body_palace || '—'}</span>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          {/* 六维度批示 */}
+          {data?.reading ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              {ZIWEI_DIMS.map((d) => {
+                const text = data.reading?.[d.key];
+                if (!text) return null;
+                return (
+                  <div
+                    key={d.key}
+                    className={`rounded-xl border border-bd bg-panel p-4 ${d.wide ? 'md:col-span-2' : ''}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md border border-gilt-500/30 bg-gilt-500/10 text-xs font-semibold text-gt">
+                        {d.icon}
+                      </span>
+                      <span className="text-sm font-medium text-t1">{d.key}</span>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-t2">{text}</p>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <ErrorBox message={data?.error ?? '批示生成失败（可重试）'} />
+          )}
+          <div className="flex items-center gap-2 text-[11px] text-t4">
+            模型 {data?.model || '—'} · {((data?.duration_ms ?? 0) / 1000).toFixed(1)}s
+            {data?.cached && (
+              <span className="rounded border border-bd bg-panel px-1.5 py-0.5 text-t3">
+                命中缓存（秒开）
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Charts() {
   const engines = useAsync(() => api.engines(), []);
   const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -231,13 +385,20 @@ export default function Charts() {
     [refreshNonce],
   );
 
+  // 紫微批示（独立缓存与刷新，与八字批示并行加载互不阻塞）
+  const [ziweiNonce, setZiweiNonce] = useState(0);
+  const ziwei = useAsync(
+    () => api.fortuneReadingZiwei(DEFAULT_USER_ID, ziweiNonce > 0),
+    [ziweiNonce],
+  );
+
   const payload = (snapshot.data?.payload ?? {}) as Record<string, any>;
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="命盘"
-        desc="本命八字、大运流年与命理批示。传统术数参考，非科学预测。"
+        desc="本命八字、紫微十二宫、大运流年与批示。传统术数参考，非科学预测。"
         right={
           <PrimaryButton onClick={() => setRefreshNonce((n) => n + 1)} busy={fortune.loading}>
             {fortune.loading ? '批示生成中，约 2-3 分钟…' : '重新生成批示'}
@@ -251,6 +412,14 @@ export default function Charts() {
       {!fortune.loading && !fortune.error && fortune.data && (
         <FortuneSection data={fortune.data} />
       )}
+
+      {/* 紫微批示（与八字并列的第二条解读线） */}
+      <ZiweiSection
+        data={ziwei.data}
+        loading={ziwei.loading}
+        error={ziwei.error}
+        onRefresh={() => setZiweiNonce((n) => n + 1)}
+      />
 
       {/* 术式引擎 */}
       <Card

@@ -206,3 +206,31 @@ class FortuneReading(SQLModel, table=True):
     error: Optional[str] = None
 
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class SystemFortuneReading(SQLModel, table=True):
+    """分术式命理批示缓存（紫微等其他术式；八字沿用 FortuneReading）。
+
+    与 FortuneReading 并存而不是加列：SQLite 在线加列对旧库不友好，
+    新表由 create_all 直接创建，对老库零迁移成本。
+    批示是纯展示内容，不进入 Fusion、不参与评分（与预测闭环严格区分）。
+    """
+
+    __tablename__ = "system_fortune_readings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    system: str = Field(index=True, description="术式标识，如 ziwei")
+
+    # 出生档案指纹：档案不变则批示不变；档案变（改生日/时辰/性别/真太阳时）则重算
+    profile_hash: str = Field(index=True)
+
+    chart: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    reading: dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    reasoning: Optional[str] = None
+
+    model: str = ""
+    duration_ms: Optional[int] = None
+    error: Optional[str] = None
+
+    created_at: datetime = Field(default_factory=utcnow)

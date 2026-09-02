@@ -24,16 +24,17 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `83 passed, 2 skipped`（14s，全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
-| 数据库 | SQLite，**37 张表** |
+| 测试 | `87 passed, 2 skipped`（15s，全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 数据库 | SQLite，**38 张表**（+`system_fortune_readings` 紫微批示缓存） |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
 | 对抗审查 | 14 种攻击 + 串联 Gate |
 | 校准架构 | **三阶段**（2026-08-31 第二轮治本）：cold(<5) 基线校准 → explore(5~19) 信号弱先验实证 → formal(≥20) 正式预测 |
-| 命理批示 | `GET /api/fortune/reading` —— 大运/流年 + 七维度 LLM 批示（2026-08-30 新增） |
+| 研究期多尺度 | `RESEARCH_SCALE_PLAN = 日3/周2/月1`（2026-09-02）：研究期每轮扫三个时间尺度，描述自动带日期（「9月3日（周四）…」/「9月3日~9月9日这一周…」/「2026年9月…」） |
+| 命理批示 | 八字 `GET /api/fortune/reading`；紫微 `GET /api/fortune/reading/{system}`（ziwei，2026-09-02 新增）。reasoning 层失败自动回退 cheap 层（见坑 15） |
 | 出生档案 | 创建 + `PUT /api/users/{id}/profile` 更新（之前只有 create，2026-08-30 补） |
-| 前端 | React + TS + Vite，8 个一级页面 |
-| git 远端 | `zz9744813-lab/suan` main @ `dc416fa`，本地=远端，工作区干净 |
+| 前端 | React + TS + Vite，8 个一级页面（未来页=按应验日分组、验证页=批复式、命盘页=八字+紫微十二宫盘） |
+| git 远端 | `zz9744813-lab/suan` main |
 | 原 NovelForge | 完整镜像备份在 `F:\agi\_suan_backup\suan.git`（含 5 分支+5 PR） |
 
 **重要**：这是「方案 v1.0 按验收标准全部实现并测试通过」的状态，但**不是长期跑过的生产系统**——预测样本量目前为 0，可靠度矩阵、校准曲线、Shadow 学习都还是「代码在、没数据喂」的状态。见第 12 节「待优化方向」。
@@ -276,6 +277,7 @@ RealityState 扫描 → 候选事件(candidates)
 12. **`_score()` 不写 `source_types` → 可靠度矩阵 by_source 永远为空，学习闭环结构性断链**（2026-08-31 第二轮治本修复）：验证评分时必须从 SignalRecord 归集该预测的信号源/规则落进 `prediction_scores`，否则「Skill 回喂 Fusion」永远空转。
 13. **`fusion_weights()` 对 skill=None 源曾返回 1.0（全可信）**——违反禁止 6「初始只允许弱先验」，是「噪声偶然偏离 Null 造出假 edge」的根因。现为 0.5 弱先验下限，并对全部已知源显式给权重。配合**校准三阶段**（config `MIN_CALIBRATION_SAMPLES=5` / `MIN_FORMAL_SAMPLES=20`）：cold 不出术式、explore 弱先验参与但只产 RESEARCH 留痕、formal 正式预测。测试默认两个门槛都为 0（conftest 关闭），专项测试在 `tests/test_calibration_gate.py`（7 例）。
 14. **`datetime.utcnow()` 已全面弃用**——统一用 `app.utils.utcnow()`（naive UTC，语义不变）。新代码别再写 `datetime.utcnow()`。
+15. **qiyovo reasoning 模型（deepseek-v4-flash）会整段长时间不可用**（2026-09-02 实测：连续 5×180s 全部超时；另一次小请求直接 500），而 cheap 层（minimax-m3）正常。`fortune.py._complete_with_fallback()`：批示类调用 reasoning 只试 2 次（快失败，别让用户等 5×180s），失败自动回退 cheap，双失败时错误信息同时带两层原因、确定性盘面照常返回。只改实例属性（`get_provider` 每次新建，不影响管线调用方）。**别把 reasoning 重试数调回去**，否则 UI 点「重算批示」最长卡一刻钟。
 
 ---
 
