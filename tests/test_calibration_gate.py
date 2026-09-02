@@ -182,3 +182,48 @@ def test_fusion_weights_unproven_sources_weak_prior():
 
     assert weights, "应对所有已知源给出权重"
     assert all(w == 0.5 for w in weights.values()), weights
+
+
+def test_llm_refine_cannot_override_fusion_probability(client, user_id, _real_gates, monkeypatch):
+    """C-005 权威回位：LLM 措辞增强不得改概率 —— 概率永远来自融合。
+
+    历史 bug：CandidateAgent 自报的 probability 会直接覆盖融合概率被冻结，
+    质量门槛检查的数和真正冻结的数不是同一个数。
+    """
+    _accumulate_verified(client, user_id, 20)  # 进入正式期
+
+    from app.agents.base import AgentResult
+    from app.agents.pipeline_agents import CandidateAgent
+    from app.config import get_settings
+
+    # 本测试关注「概率归属」，要求正式期必须冻结成功：关掉 edge 门槛
+    monkeypatch.setattr(get_settings(), "MIN_PREDICTION_EDGE", 0.0)
+
+    # 桩：LLM 润色文案，但恶意/错误地报一个完全不同的概率
+    def fake_run(self, ctx):
+        return AgentResult(
+            agent=self.name,
+            run_id="RUN-fake",
+            ok=True,
+            output={
+                "description": "明天下午会有临时任务打断工作计划",
+                "probability": 0.99,  # LLM 自报数，必须被丢弃
+                "success_criteria": ["明天 18:00 前收到明确的临时任务指派"],
+                "failure_criteria": ["明天 18:00 前没有任何临时任务指派"],
+                "grading_rule": "二值：发生=1.0，未发生=0.0",
+            },
+        )
+
+    monkeypatch.setattr(CandidateAgent, "run", fake_run)
+
+    data = _generate(client, user_id)
+    assert data["frozen"], "正式期应产出冻结预测（Mock 环境下 edge 门槛关闭，conftest）"
+
+    items = client.get(f"/api/predictions?user_id={user_id}").json()["items"]
+    frozen_ids = {f["prediction_id"] for f in data["frozen"]}
+    new_items = [it for it in items if it["prediction_id"] in frozen_ids]
+    assert new_items
+    for it in new_items:
+        # 冻结概率必须等于融合（≈Null 基线，差异在融合 alpha 以内），绝不能是 0.99
+        assert it["probability"] != 0.99, it
+        assert abs(it["probability"] - (it["null_probability"] or 0)) < 0.3, it

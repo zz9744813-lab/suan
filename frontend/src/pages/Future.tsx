@@ -346,7 +346,11 @@ export default function Future() {
               引擎 {engineOk}/{engineTotal} 可用
             </Badge>
             <PrimaryButton onClick={generate} busy={generating}>
-              {generating ? '生成中，约需一分钟…' : '生成预测'}
+              {generating
+                ? phase === 'formal'
+                  ? '生成中，LLM 正在评审候选…'
+                  : '生成中，秒级完成…'
+                : '生成预测'}
             </PrimaryButton>
           </>
         }
@@ -357,7 +361,9 @@ export default function Future() {
         title="预测闭环"
         subtitle={
           generating
-            ? '正在逐站推进，LLM 评审约需一分钟…'
+            ? phase === 'formal'
+              ? '正在逐站推进，LLM 评审入选候选（已并发，约一两分钟）…'
+              : '研究期全程确定性计算，不依赖 LLM，秒级完成…'
             : runDone
               ? '本轮闭环已跑完，以下为运行记录'
               : '每条正式预测都必须走完这七站'

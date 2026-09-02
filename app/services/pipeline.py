@@ -145,14 +145,7 @@ class DailyPipeline:
             self.session, user_id=self.user_id, target_date=target_date
         )
 
-        # ---------- 2. Scan ----------
-        scanned = self.scan(target_date, scale=scale, limit=limit)
-        result.scanned = len(scanned)
-        if not scanned:
-            result.notes.append("Future Scanner 未产出候选")
-            return result
-
-        # ---------- 2.5 校准阶段门槛（C-006 + 禁止 6）----------
+        # ---------- 2. 校准阶段门槛（C-006 + 禁止 6）----------
         # 已验证样本不足时，术式信号的预测力未经实证，其 strength 是未校准噪声。
         # 三个阶段：
         #   cold    (<MIN_CALIBRATION_SAMPLES)：术式不参与融合，产出 p=Null 的研究样本；
@@ -172,11 +165,26 @@ class DailyPipeline:
                 f"术式信号以弱先验参与融合并完整留痕，产出仍为研究样本（不代表预测力）"
             )
 
+        # ---------- 3. Scan ----------
+        # 研究期直接走 Event Ontology（不调用 LLM）：研究样本的目的是启动验证闭环，
+        # 整条路径必须秒级完成，不能被中转站延迟绑架。正式期才用 LLM 扫描器。
+        if phase == "formal":
+            scanned = self.scan(target_date, scale=scale, limit=limit)
+        else:
+            scanned = self._ontology_scan(scale=scale, limit=limit)
+        result.scanned = len(scanned)
+        if not scanned:
+            result.notes.append("Future Scanner 未产出候选")
+            return result
+
         window = FreezeAgent.default_window(
             datetime(target_date.year, target_date.month, target_date.day), time_scale
         )
 
-        # ---------- 3. 逐候选：Blind Agents ----------
+        # ---------- 4. 确定性通道（无 LLM）：信号 → 融合 → 门槛 → 临时候选 → Gate ----------
+        # 核心原则（C-005 + 禁止 6）：概率永远来自确定性融合/Null 基线；
+        # LLM 只在正式期对入选候选做「措辞增强」，永远不许自己报数。
+        provisional: list[tuple[PredictionCandidate, float, Any]] = []
         for item in scanned:
             event_type = item.get("event_type", "")
             spec = ONTOLOGY.get(event_type)
@@ -197,7 +205,7 @@ class DailyPipeline:
                 result.notes.append(f"{event_type} 信号收集失败：{exc}")
                 continue
 
-            # ---------- 4. Fusion（第 12 节：只消费结构化 Signal）----------
+            # ---------- 4.1 Fusion（第 12 节：只消费结构化 Signal）----------
             fusion = fuse(
                 FusionInput(
                     signals=signals,
@@ -207,99 +215,97 @@ class DailyPipeline:
                 )
             )
 
-            # ---------- 研究期分支（cold / explore）：产出研究样本，不走 edge 门槛 / Gate ----------
-            if phase != "formal":
-                # cold：概率 = Null 基线（术式未参与，无超出随机的信息）。
-                # explore：概率 = 术式弱先验融合结果（信号完整留痕供实证，但系统
-                # 仍不声称预测力，明标 RESEARCH）。
-                cand = self._build_candidate(
-                    event_type=event_type,
-                    domain=domain,
-                    window=window,
-                    time_scale=time_scale,
-                    reality_state=reality_state,
-                    probability=null_p if phase == "cold" else fusion.probability,
-                    null_probability=null_p,
-                    signals=signals,
-                )
-                if cand is None:
-                    result.notes.append(f"{event_type} 无法构造研究样本（C-001）")
+            # 概率权威判定：cold 强制 Null 基线；explore / formal 为融合概率
+            p_final = null_p if phase == "cold" else fusion.probability
+
+            # ---------- 4.2 预测质量门槛（C-006 诚实原则，仅正式期）----------
+            if phase == "formal":
+                edge = fusion.probability - null_p
+                if abs(edge) < self.settings.MIN_PREDICTION_EDGE:
+                    result.rejected.append(
+                        {
+                            "event_type": event_type,
+                            "decision": "NO_EDGE",
+                            "failed": ["BaselineAttack"],
+                            "reasons": [
+                                f"融合概率 {fusion.probability:.2%} 与 Null 基线 {null_p:.2%} "
+                                f"差距仅 {edge:+.2%}，未超过最小预测力门槛 "
+                                f"{self.settings.MIN_PREDICTION_EDGE:.0%}，诚实放弃（C-006）"
+                            ],
+                        }
+                    )
                     continue
-                result.candidates.append(cand)
-                continue
 
-            # ---------- 4.5 预测质量门槛（C-006 诚实原则）----------
-            # 融合概率与 Null 基线的差距（|edge|）过小，说明信号没有提供超出随机的信息，
-            # 此时诚实放弃（NO_EDGE），不产出「贴 Null 的噪声预测」误导用户。
-            # 正负 edge 都保留：|edge| 显著即代表信号提供了信息（更可能/更不可能都有意义）。
-            edge = fusion.probability - null_p
-            if abs(edge) < self.settings.MIN_PREDICTION_EDGE:
-                result.rejected.append(
-                    {
-                        "event_type": event_type,
-                        "decision": "NO_EDGE",
-                        "failed": ["BaselineAttack"],
-                        "reasons": [
-                            f"融合概率 {fusion.probability:.2%} 与 Null 基线 {null_p:.2%} "
-                            f"差距仅 {edge:+.2%}，未超过最小预测力门槛 "
-                            f"{self.settings.MIN_PREDICTION_EDGE:.0%}，诚实放弃（C-006）"
-                        ],
-                    }
-                )
-                continue
-
-            # ---------- 5. CandidateAgent → 可验证预测 ----------
-            cand = self._build_candidate(
+            # ---------- 4.3 临时候选（Ontology 确定性构造，保证 C-001 可证伪）----------
+            cand = self._provisional_candidate(
                 event_type=event_type,
                 domain=domain,
                 window=window,
                 time_scale=time_scale,
-                reality_state=reality_state,
-                probability=fusion.probability,
-                null_probability=null_p,
+                probability=p_final,
                 signals=signals,
             )
             if cand is None:
                 result.notes.append(f"{event_type} 无法构造可证伪候选（C-001）")
                 continue
 
-            # ---------- 6. Adversarial Gate（第 21 节）----------
-            gate_result = AdversarialGate().run(
-                self._attack_context(cand, null_p, fusion, len(scanned))
-            )
-            if gate_result.decision in {"REJECT", "REWRITE"}:
-                result.rejected.append(
-                    {
-                        "event_type": event_type,
-                        "decision": gate_result.decision,
-                        "failed": [o.attack for o in gate_result.failed],
-                        "reasons": [o.reason for o in gate_result.failed][:3],
-                    }
+            # ---------- 4.4 Adversarial Gate（第 21 节，仅正式期）----------
+            if phase == "formal":
+                gate_result = AdversarialGate().run(
+                    self._attack_context(cand, null_p, fusion, len(scanned))
                 )
-                continue
+                if gate_result.decision in {"REJECT", "REWRITE"}:
+                    result.rejected.append(
+                        {
+                            "event_type": event_type,
+                            "decision": gate_result.decision,
+                            "failed": [o.attack for o in gate_result.failed],
+                            "reasons": [o.reason for o in gate_result.failed][:3],
+                        }
+                    )
+                    continue
 
-            result.candidates.append(cand)
+            provisional.append((cand, null_p, fusion))
 
-        # ---------- 7. Prediction Budget（第 4 节）----------
+        result.candidates = [c for c, _, _ in provisional]
+
+        # ---------- 5. Prediction Budget（第 4 节）----------
         if phase != "formal":
-            # 研究期：研究样本按概率降序，取 RESEARCH_SAMPLE_LIMIT 条
-            research_candidates = sorted(
-                result.candidates, key=lambda c: c.probability, reverse=True
+            shortlisted = sorted(
+                provisional, key=lambda e: e[0].probability, reverse=True
             )[: self.settings.RESEARCH_SAMPLE_LIMIT]
-            selected = research_candidates
-            usage = {"research": len(selected)}
+            usage = {"research": len(shortlisted)}
             result.notes.append(
-                f"研究样本：{len(result.candidates)} 候选 → {len(selected)} 条（研究期额度）"
+                f"研究样本：{len(provisional)} 候选 → {len(shortlisted)} 条（研究期额度）"
             )
         else:
-            selected, usage = apply_budget(result.candidates, default_slots(self.settings))
+            candidates_only = [c for c, _, _ in provisional]
+            selected, usage = apply_budget(candidates_only, default_slots(self.settings))
+            by_id = {c.candidate_id: entry for entry in provisional for c in [entry[0]]}
+            shortlisted = [by_id[c.candidate_id] for c in selected]
             result.notes.append(
-                f"预算竞争：{len(result.candidates)} 候选 → {len(selected)} 条获得额度"
+                f"预算竞争：{len(provisional)} 候选 → {len(shortlisted)} 条获得额度"
             )
         result.budget_usage = usage
 
-        # ---------- 8. Freeze（第 16 节）----------
-        for cand in selected:
+        # ---------- 6. LLM 措辞增强（仅正式期，并发执行）----------
+        # C-005：LLM 只润色描述与成败标准，probability 一律丢弃（权威在融合）。
+        # 中转站慢：并发 4 路，LLM 失败/放弃时保留确定性版本。
+        final_entries = shortlisted
+        if phase == "formal" and shortlisted:
+            final_entries, n_refined = self._refine_with_llm(
+                shortlisted,
+                window=window,
+                time_scale=time_scale,
+                reality_state=reality_state,
+                pool_size=len(scanned),
+            )
+            result.notes.append(
+                f"LLM 措辞增强：{n_refined}/{len(shortlisted)} 条（概率由融合决定，不受 LLM 影响）"
+            )
+
+        # ---------- 7. Freeze（第 16 节）----------
+        for cand, _, _ in final_entries:
             pred = self._freeze(
                 cand,
                 fusion=None,
@@ -405,43 +411,40 @@ class DailyPipeline:
         return signals, null_p
 
     # ------------------------------------------------------------------
-    def _build_candidate(
+    def _ontology_scan(self, *, scale: str, limit: int) -> list[dict[str, Any]]:
+        """研究期扫描：直接从 Event Ontology 取候选（确定性，不调 LLM）。
+
+        研究样本的目的是启动验证闭环，候选来源必须是确定性、秒级的——
+        不能被中转站延迟绑架。正式期才使用 FutureScannerAgent 的 LLM 扫描。
+        """
+        return [
+            {
+                "event_type": spec.event_type,
+                "domain": spec.domain,
+                "description": spec.label,
+                "why_falsifiable": "；".join(spec.success_criteria),
+                "source": "ontology",
+            }
+            for spec in by_scale(scale)[:limit]
+        ]
+
+    # ------------------------------------------------------------------
+    def _provisional_candidate(
         self,
         *,
         event_type: str,
         domain: Domain,
         window: TimeWindow,
         time_scale: TimeScale,
-        reality_state: dict[str, Any],
         probability: float,
-        null_probability: float,
         signals: list[Signal],
     ) -> PredictionCandidate | None:
-        """CandidateAgent 生成可验证预测；LLM 不可用时回落 Ontology。"""
+        """由 Event Ontology 构造确定性候选（第 56 节）。
+
+        预测的「最小可证伪骨架」必须能独立于 LLM 存在（C-001）：
+        描述/成功失败标准/裁定规则全部来自 Ontology；概率永远来自融合方。
+        """
         spec = ONTOLOGY.get(event_type)
-
-        ctx = AgentContext(
-            user_id=self.user_id,
-            session=self.session,
-            target_event=event_type,
-            domain=domain.value,
-            payload={
-                "window": window,
-                "window_text": f"{window.start.isoformat()} ~ {window.end.isoformat()}",
-                "time_scale": time_scale,
-                "null_probability": null_probability,
-                "reality_state": reality_state,
-            },
-        )
-
-        cand = CandidateAgent().build_candidate(
-            ctx, window=window, time_scale=time_scale, signals=signals
-        )
-
-        if cand is not None:
-            return cand
-
-        # 回落：直接用 Ontology 定义（第 56 节），保证可证伪
         if spec is None:
             return None
         return PredictionCandidate(
@@ -457,6 +460,108 @@ class DailyPipeline:
             grading_rule=spec.grading_rule,
             signals=signals,
         )
+
+    # ------------------------------------------------------------------
+    def _refine_with_llm(
+        self,
+        entries: list[tuple[PredictionCandidate, float, Any]],
+        *,
+        window: TimeWindow,
+        time_scale: TimeScale,
+        reality_state: dict[str, Any],
+        pool_size: int,
+    ) -> tuple[list[tuple[PredictionCandidate, float, Any]], int]:
+        """正式期措辞增强：并发调用 CandidateAgent（仅对已获额度的候选）。
+
+        原则（C-005）：
+        - 概率权威在融合侧，LLM 自报的 probability 一律丢弃；
+        - 只采纳 description / criteria / grading_rule，且必须重过 Gate；
+        - LLM 失败/放弃时保留确定性版本（管线不被中转站绑架）。
+
+        并发安全：SQLModel Session 非线程安全，每个 worker 用独立 Session
+        （绑定同一 engine；测试的 StaticPool 下共享同一内存库连接）。
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        def work(
+            entry: tuple[PredictionCandidate, float, Any],
+        ) -> tuple[PredictionCandidate, float, Any]:
+            cand, null_p, fusion = entry
+            try:
+                refined = self._refine_one(
+                    cand,
+                    null_p=null_p,
+                    fusion=fusion,
+                    window=window,
+                    time_scale=time_scale,
+                    reality_state=reality_state,
+                    pool_size=pool_size,
+                )
+                if refined is not None:
+                    return (refined, null_p, fusion)
+            except Exception as exc:
+                logger.warning("措辞增强失败（%s）：%s", cand.event_type, exc)
+            return entry
+
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="xm-refine") as pool:
+            out = list(pool.map(work, entries))
+        n_refined = sum(
+            1 for (c, _, _), (orig, _, _) in zip(out, entries) if c is not orig
+        )
+        return out, n_refined
+
+    def _refine_one(
+        self,
+        cand: PredictionCandidate,
+        *,
+        null_p: float,
+        fusion: Any,
+        window: TimeWindow,
+        time_scale: TimeScale,
+        reality_state: dict[str, Any],
+        pool_size: int,
+    ) -> PredictionCandidate | None:
+        with Session(self.session.get_bind()) as tsession:
+            ctx = AgentContext(
+                user_id=self.user_id,
+                session=tsession,
+                target_event=cand.event_type,
+                domain=cand.domain.value,
+                payload={
+                    "window": window,
+                    "window_text": f"{window.start.isoformat()} ~ {window.end.isoformat()}",
+                    "time_scale": time_scale,
+                    "null_probability": null_p,
+                    "reality_state": reality_state,
+                },
+            )
+            res = CandidateAgent().run(ctx)
+
+        if not res.ok or res.output.get("abstain"):
+            return None
+
+        desc = str(res.output.get("description") or "").strip()
+        succ = [str(x) for x in (res.output.get("success_criteria") or []) if str(x).strip()]
+        fail = [str(x) for x in (res.output.get("failure_criteria") or []) if str(x).strip()]
+        if not desc or not succ or not fail:
+            return None
+
+        refined = cand.model_copy(
+            update={
+                "description": desc,
+                "success_criteria": succ,
+                "failure_criteria": fail,
+                "grading_rule": str(res.output.get("grading_rule") or cand.grading_rule),
+            }
+        )
+
+        # 措辞变了必须重过对抗 Gate（第 21 节）；不过则保留确定性版本
+        gate_result = AdversarialGate().run(
+            self._attack_context(refined, null_p, fusion, pool_size)
+        )
+        if gate_result.decision in {"REJECT", "REWRITE"}:
+            return None
+        return refined
 
     # ------------------------------------------------------------------
     def _attack_context(

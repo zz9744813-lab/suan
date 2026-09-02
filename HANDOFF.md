@@ -24,7 +24,7 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `82 passed, 2 skipped`（10s，全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 测试 | `83 passed, 2 skipped`（14s，全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**37 张表** |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
@@ -285,7 +285,7 @@ RealityState 扫描 → 候选事件(candidates)
 
 1. **【高】开启调度器跑真实闭环**：`.env` 里 `SCHEDULER_ENABLED=true`，让系统 23:40 真跑每日管线，开始积累真实样本。目前样本量为 0，学习闭环/可靠度矩阵/校准曲线全是「空转」状态——没有真实数据，整个系统的核心价值（自我校准）体现不出来。
 
-2. **【高】LLM 调用并发化**：`DailyPipeline` 里候选的 LLM 调用是**串行**的，中转站又慢（50s/次），全量跑约 10+ 分钟。改成并发（httpx AsyncClient / ThreadPool）能把每日管线压到 1-2 分钟。
+2. ~~**【高】LLM 调用并发化**~~ ✅ 已做（2026-08-31 第三轮）：管线重排为「确定性先行」——研究期（cold/explore）**零 LLM**（扫描走 Ontology，秒出）；正式期只对预算入选候选并发润色（ThreadPoolExecutor×4，每 worker 独立 Session），LLM 失败回落确定性版本。注意：**概率权威在融合侧**，CandidateAgent 自报的 probability 一律丢弃（C-005），改这条前先读诊断报告第 10 节。
 
 3. **【高】掌纹/面相无测试样例**：这两个 CV 引擎需要 `AdapterQuery.image_path` 传本地照片才产出信号，目前测试没覆盖真实图片路径。建议造 1-2 张样例图（手部/人脸）进 `tests/fixtures/`，补真实 CV 的 golden case。
 
