@@ -35,6 +35,56 @@ const SCALES = [
   { key: 'year', label: '90 天' },
 ] as const;
 
+/* ---------- 按日分组：预测的组织主线是「哪一天 → 发生什么事」 ---------- */
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'] as const;
+
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+function groupByDueDay<
+  T extends { verification_due_at?: string | null; window: [string, string] },
+>(items: T[]): [string, T[]][] {
+  // 按「预测指向的那一天」（应验窗口起点）分组 —— 用户心智是「某天会发生什么事」
+  const map = new Map<string, T[]>();
+  for (const it of items) {
+    const key = (it.window[0] ?? '').slice(0, 10) || '未知日期';
+    map.set(key, [...(map.get(key) ?? []), it]);
+  }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+function DayHeader({ dateKey }: { dateKey: string }) {
+  const d = new Date(`${dateKey}T00:00:00`);
+  const invalid = Number.isNaN(d.getTime());
+  const today = localDayKey(new Date());
+  const tomorrow = localDayKey(new Date(Date.now() + 86400_000));
+  const rel = dateKey === today ? '今天' : dateKey === tomorrow ? '明天' : null;
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-lg border border-gilt-500/25 bg-gilt-500/[0.07]">
+        <span className="tabular text-[13px] font-bold leading-none text-gt">
+          {invalid ? '—' : d.getDate()}
+        </span>
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-medium text-t1">
+          {invalid ? dateKey : `${d.getMonth() + 1}月${d.getDate()}日`}
+        </span>
+        {!invalid && <span className="text-xs text-t4">周{WEEKDAYS[d.getDay()]}</span>}
+        {rel && (
+          <span className="rounded-full border border-gilt-500/30 bg-gilt-500/10 px-1.5 py-px text-[10px] font-medium text-gt">
+            {rel}
+          </span>
+        )}
+      </div>
+      <div className="h-px flex-1 bg-gradient-to-r from-line to-transparent" />
+    </div>
+  );
+}
+
 /** 预测闭环七步（对应系统流水线） */
 const PIPELINE = [
   { key: 'scan', label: '扫描', desc: '候选事件' },
@@ -471,7 +521,14 @@ export default function Future() {
               作为研究样本冻结，供你在「验证」页填结果。
             </EmptyState>
           )}
-          <ul className="stagger space-y-3">{research.map((p) => renderRow(p, true))}</ul>
+          <div className="stagger space-y-5">
+            {groupByDueDay(research).map(([day, list]) => (
+              <div key={day} className="space-y-2.5">
+                <DayHeader dateKey={day} />
+                <ul className="space-y-2.5">{list.map((p) => renderRow(p, true))}</ul>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 
@@ -511,7 +568,14 @@ export default function Future() {
             )}
           </EmptyState>
         )}
-        <ul className="stagger space-y-3">{formal.map((p) => renderRow(p))}</ul>
+        <div className="stagger space-y-5">
+          {groupByDueDay(formal).map(([day, list]) => (
+            <div key={day} className="space-y-2.5">
+              <DayHeader dateKey={day} />
+              <ul className="space-y-2.5">{list.map((p) => renderRow(p))}</ul>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {/* 第 27 节 Future Tree：人生情景树（每周按新证据重算） */}
