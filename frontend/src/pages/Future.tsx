@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { api, DEFAULT_USER_ID } from '../api/client';
-import { AlmanacDial, ColorSwatches, DOMAIN_ACCENT } from '../components/almanac';
+import { AlmanacDial, ColorSwatches, DOMAIN_ACCENT, Sparkles } from '../components/almanac';
 import { DivinationStage } from '../components/rituals';
 import {
   Badge,
@@ -458,7 +458,7 @@ export default function Future() {
             <Badge tone={engineOk > 0 ? 'good' : 'warn'}>
               引擎 {engineOk}/{engineTotal} 可用
             </Badge>
-            <PrimaryButton onClick={generate} busy={generating}>
+            <PrimaryButton className="btn-aura" onClick={generate} busy={generating}>
               {generating
                 ? phase === 'formal'
                   ? '生成中，LLM 正在评审候选…'
@@ -472,7 +472,7 @@ export default function Future() {
       {/* 今日锦囊：老黄历（确定性历法派生）+ 幸运元素 + 情缘星 */}
       {daily.data && (
         <Card
-          className="aura-gilt overflow-hidden"
+          className="frame-flow overflow-hidden"
           title={`今日锦囊 · ${daily.data.day_ganzhi}日 · ${daily.data.lunar_date}`}
           subtitle={`值神 ${daily.data.day_god} · 冲${daily.data.chong} 煞${daily.data.sha_direction} · 传统民俗参考`}
           right={
@@ -481,6 +481,9 @@ export default function Future() {
             ) : undefined
           }
         >
+          {/* 鎏金氛围光 + 星点明灭（aura-gilt 若与流光边框同设会被覆盖，改作内嵌层） */}
+          <div aria-hidden className="aura-gilt pointer-events-none absolute inset-0" />
+          <Sparkles count={9} seed={11} />
           <div className="flex flex-col-reverse gap-4 md:flex-row md:items-start">
             <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 md:grid-cols-2">
               <div>
@@ -555,6 +558,7 @@ export default function Future() {
 
       {/* 闭环流水线：页面视觉锚点 */}
       <Card
+        className="frame-flow"
         title="预测闭环"
         subtitle={
           generating

@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from 'react';
 
-import { MiniTaiji, WUXING_COLOR, wuxingOfGan, wuxingOfZhi } from './almanac';
+import { MiniTaiji, Sparkles, WUXING_COLOR, wuxingOfGan, wuxingOfZhi } from './almanac';
 
 export type EngineKey =
   | 'bazi'
@@ -343,7 +343,8 @@ export function DivinationStage({ active, done }: { active: boolean; done: boole
       <div className="flex shrink-0 items-center justify-center">
         {finished ? (
           <div className="flex flex-col items-center gap-2">
-            <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-gilt-500/40 bg-gilt-500/[0.07] text-gt">
+            <div className="taiji-halo relative flex h-24 w-24 items-center justify-center rounded-xl border border-gilt-500/40 bg-gilt-500/[0.07] text-gt">
+              <Sparkles count={4} seed={3} />
               <span className="block" style={{ animation: 'spin360 18s linear infinite' }}>
                 <MiniTaiji size={52} />
               </span>

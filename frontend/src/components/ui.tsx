@@ -59,7 +59,7 @@ export function PageHeader({
   return (
     <header className="flex items-end justify-between gap-4 pb-1">
       <div className="min-w-0">
-        <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-t1">
+        <h1 className="text-flow text-[26px] font-semibold leading-tight tracking-tight">
           {title}
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-t3">{desc}</p>
@@ -115,7 +115,7 @@ export function Stat({
     warn: 'bg-amber-500',
   }[tone];
   return (
-    <div className="card-hover card-lift card-sheen relative overflow-hidden rounded-2xl border border-bd bg-card px-5 py-4 shadow-card">
+    <div className="card-hover card-lift card-sheen card-shine relative overflow-hidden rounded-2xl border border-bd bg-card px-5 py-4 shadow-card">
       <div className={`absolute inset-x-0 top-0 h-0.5 ${barClass} opacity-70`} />
       <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-t3">
         {label}

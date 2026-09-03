@@ -629,6 +629,125 @@ body {
   animation: scan-y 2.7s ease-in-out infinite;
 }
 
+/* ---------- 元素特效增强（鎏金流光体系） ---------- */
+
+/* 星点明灭：散落在卡片角落的 ✦（由 <Sparkles> 播种定位） */
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.12;
+    transform: scale(0.55) rotate(0deg);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1) rotate(90deg);
+  }
+}
+.sparkle {
+  position: absolute;
+  color: var(--gt);
+  text-shadow: 0 0 8px rgba(217, 185, 106, 0.85);
+  animation: twinkle var(--tw-dur, 2.8s) ease-in-out infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 主卡流光边框：鎏金沿框缓行一周（@property 不支持时退化为静态鎏金描边） */
+@property --frame-a {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes frame-rotate {
+  to {
+    --frame-a: 360deg;
+  }
+}
+.frame-flow {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    conic-gradient(
+      from var(--frame-a),
+      transparent 0deg 74%,
+      rgba(201, 162, 39, 0.65) 83%,
+      rgba(246, 231, 178, 0.95) 87%,
+      rgba(201, 162, 39, 0.65) 91%,
+      transparent 98%
+    ) border-box;
+  animation: frame-rotate 6s linear infinite;
+}
+
+/* 鎏金呼吸光环（主 CTA 按钮 / 收录太极盒共用） */
+@keyframes aura-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.35) inset,
+      0 6px 16px -6px rgba(201, 162, 39, 0.45),
+      0 0 0 0 rgba(201, 162, 39, 0.4);
+  }
+  60% {
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.35) inset,
+      0 6px 16px -6px rgba(201, 162, 39, 0.45),
+      0 0 0 7px rgba(201, 162, 39, 0);
+  }
+}
+.btn-aura {
+  animation: aura-pulse 2.8s ease-out infinite;
+}
+.taiji-halo {
+  animation: aura-pulse 3.2s ease-out infinite;
+}
+
+/* 数据卡悬停光泽扫过 */
+.card-shine {
+  position: relative;
+  overflow: hidden;
+}
+.card-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  background: linear-gradient(100deg, transparent, rgba(217, 185, 106, 0.16), transparent);
+  transform: translateX(-160%) skewX(-14deg);
+  pointer-events: none;
+}
+@media (hover: hover) {
+  .card-shine:hover::after {
+    animation: sheen 0.85s ease;
+  }
+}
+
+/* 页面大标题：鎏金流光掠过 */
+@keyframes text-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+.text-flow {
+  background-image: linear-gradient(
+    105deg,
+    var(--t1) 20%,
+    var(--gt) 42%,
+    #f3e3ac 50%,
+    var(--gt) 58%,
+    var(--t1) 80%
+  );
+  background-size: 280% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-flow 8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up,
   .animate-fade-in,
@@ -637,6 +756,12 @@ body {
   .dial-spin,
   .taiji-spin,
   .badge-glow-sweep::after,
+  .sparkle,
+  .frame-flow,
+  .btn-aura,
+  .taiji-halo,
+  .card-shine::after,
+  .text-flow,
   .ritual-coin,
   .ritual-yao,
   .ritual-reel,

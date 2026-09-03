@@ -82,31 +82,24 @@ C:\Users\6\.workbuddy\binaries\python\envs\default\Scripts\pip.exe
 - **但你写新代码时注意**：如果用 `requests`、`curl`、`aiohttp` 或任何新的 HTTP 客户端，必须显式禁用代理。`curl` 加 `--noproxy "*"`，`httpx` 加 `trust_env=False`。
 - 排查网络问题时先怀疑这个，别先怀疑代码。
 
-### 4.4 LLM 中转站（qiyovo.com:3000）
+### 4.4 LLM 中转站（107.172.138.14:3000，2026-09-03 起）
 
 配置在 `.env`（已在 `.gitignore`，不入库，key 别提交）：
 
-- `107.172.138.14:3000` **已失效**（Invalid token），别再用。
-- **`qiyovo.com:3000` 可用**，key 在本地 `.env` 里。
-- 三模型系统化实测结论（2026-08-31，同 prompt × 3 轮，中转站空闲时段）：
+- **`107.172.138.14:3000` 当前在用**（2026-09-03 用户换回此站，此前一度失效）。repo `.env` 与 `dist/.env` 两份要同步改——exe 读的是 dist 那份，PyInstaller 不会覆盖它。
+- 2026-09-03 本站台模型实测（UTF-8 体 + 充足 max_tokens，命理题）：
 
-| 模型 | 成功率 | 延迟 | 类型 | 结论 |
-|---|---|---|---|---|
-| `deepseek-v4-flash` | 3/3 | 2.5-7.5s | 推理（reasoning+content 分离） | **reasoning 层主力** |
-| `minimax-m3` | 3/3 | 10-12s | 非推理，直接出答案 | **cheap 层**（分担负载） |
-| `glm-5.2` | 3/3 | 3.7-4.1s | 推理，思考极长 | 备用：**必须 max_tokens≥800**，否则思考吃光额度 content 为空 |
+| 模型 | 延迟 | 类型 | 结论 |
+|---|---|---|---|
+| `glm-5.3-flash` | ~35s | 推理（reasoning+content 分离） | **reasoning 层** |
+| `agnes-2.5-flash` | ~4s | 轻推理，答得准 | **cheap 层** |
+| `moonshotai/kimi-k3` | ~37s | 正文好但慢 | 备用 |
+| `deepseek-v4-flash` | 60s 超时 | — | **此站不可用，别选** |
+| `glm-5.3` | 返回空（supported_endpoint_types 为空） | — | **别选** |
 
-- **历史误判澄清**（2026-08-30 曾判 minimax 147s / glm 空内容"不可用"）：
-  - minimax 147s 是**中转站过载时段的偶发**，空闲时段 10-12s 稳定；
-  - glm "空内容"是 **ping 测试 max_tokens=8 太小**——推理模型思考链路把额度吃光，
-    `finish_reason=length`，正文没开始写就被截断。**测推理模型必须给足 max_tokens。**
-- 中转站**整体成功率随时段波动（约 60%~100%）**：过载时段软错误频发，provider 已做
-  5 次重试 + 四种失败模式检测兜底（见 `app/providers/base.py`）。
-- 这个中转站有**四个已经踩过的坑**，改 Provider/Agent 代码时别重踩：
-  1. **默认返回 SSE 流式**——即使请求里 `stream=false`，它也可能回 `text/event-stream`，`resp.json()` 会崩。代码里已做 SSE 兼容解析（解析 `data:` 行）。
-  2. **`response_format: json_object` 会让它挂起**——所以 Agent 一律用 prompt 约束 JSON 输出 + 宽容解析（`app/providers/base.py` 的 `LLMResponse.json()` 会剥代码块、提取首个 JSON 子串）。
-  3. **长 prompt（>1k tokens）要 50s+**——术式 Agent 用 `_summarize_chart()` 把全量盘面精简到 ~350 tokens 才调 LLM。**新增任何 LLM 调用时先想：prompt 是不是太长了？**
-  4. **间歇性软错误**——HTTP 200 + 包体是 `{"code":502,"message":"..."}` / `{"error":...}` / 空 choices / 空 content，共四种。`OpenAICompatibleProvider.complete()` 已检测并重试（`max_retries=5`，超时 180s）。**别把这段防护删了。**
+- 旧站 `qiyovo.com:3000` 已于 2026-09-03 下线弃用；其 2026-08-31 实测表与坑（SSE 兼容、`response_format` 挂起、软错误重试）对本站**依然可能适用**——这些防护都在 provider 层，与本站无关，别删。
+- **推理模型必须给足 max_tokens**（glm 系思考会吃掉额度，不够则 content 为空）——这是历次踩坑的铁律。
+- **Windows 下 curl 直接传中文 JSON 会变 GBK 乱码**，模型只会回「乱码，请重发」。手测中转站时：把 JSON 写成 UTF-8 文件再 `--data-binary @file` 并带 `charset=utf-8`。
 
 ### 4.5 术数引擎的历史排坑结论
 

@@ -5,6 +5,7 @@ import {
   BRIGHTNESS_CLS,
   MiniTaiji,
   MUTAGEN_CLS,
+  Sparkles,
   WUXING_COLOR,
   wuxingOfGan,
   wuxingOfZhi,
@@ -87,6 +88,7 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
     <div className="space-y-5">
       {/* 四柱 + 五行 + 十神 */}
       <Card
+        className="frame-flow"
         title="本命八字"
         subtitle={`日主 ${chart.day_master} · 命宫 ${chart.ming_gong || '—'} · ${
           chart.birth_time_known ? '时辰已确认' : '时辰未知（时柱存疑）'
@@ -314,6 +316,7 @@ function ZiweiSection({
   const chart = data?.chart;
   return (
     <Card
+      className="frame-flow"
       title="紫微斗数命盘"
       subtitle="十二宫盘面由 iztro-py 确定性排盘；批示为传统术数参考，非科学预测"
       right={
@@ -394,8 +397,9 @@ function ZiweiSection({
                 </div>
               );
             })}
-            {/* 中宫：命宫/身宫摘要 + 太极静饰 */}
-            <div className="col-span-2 row-span-2 flex flex-col items-center justify-center gap-2.5 bg-panel p-4 text-center">
+            {/* 中宫：命宫/身宫摘要 + 太极静饰 + 星点明灭 */}
+            <div className="relative col-span-2 row-span-2 flex flex-col items-center justify-center gap-2.5 bg-panel p-4 text-center">
+              <Sparkles count={6} seed={9} className="opacity-70" />
               <MiniTaiji size={44} />
               <div className="text-[10px] tracking-[0.3em] text-t4">紫微斗数</div>
               <div className="text-sm text-t2">

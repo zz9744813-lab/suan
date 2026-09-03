@@ -1,3 +1,6 @@
+import { useMemo } from 'react';
+import type { CSSProperties } from 'react';
+
 /**
  * 玄学视觉组件：罗盘（AlmanacDial）+ 幸运色色卡（ColorSwatches）+ 域色主题（DOMAIN_ACCENT）。
  * 全部纯 SVG/CSS，无外部资源；动效已接入 prefers-reduced-motion（见 index.css）。
@@ -289,5 +292,54 @@ export function MiniTaiji({ size = 34, className = '' }: { size?: number; classN
       <circle cx="20" cy="10.5" r="2.4" fill="var(--t1)" opacity="0.85" />
       <circle cx="20" cy="29.5" r="2.4" fill="var(--card)" />
     </svg>
+  );
+}
+
+/** 星点明灭层：以 seed 确定性散布 ✦，卡片角落的氛围光尘（纯 CSS 动画，reduced-motion 下静止） */
+export function Sparkles({
+  count = 10,
+  seed = 1,
+  className = '',
+}: {
+  count?: number;
+  seed?: number;
+  className?: string;
+}) {
+  const stars = useMemo(() => {
+    // mulberry32：同一 seed 永远同一布局，避免每次渲染星点跳位
+    let s = seed >>> 0;
+    const rnd = () => {
+      s |= 0;
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    return Array.from({ length: count }, () => ({
+      left: 3 + rnd() * 94,
+      top: 4 + rnd() * 86,
+      size: 7 + rnd() * 6,
+      delay: rnd() * 3.4,
+      dur: 2.2 + rnd() * 2.6,
+    }));
+  }, [count, seed]);
+  return (
+    <div aria-hidden className={`pointer-events-none absolute inset-0 overflow-hidden ${className}`}>
+      {stars.map((s, i) => (
+        <span
+          key={i}
+          className="sparkle"
+          style={{
+            left: `${s.left}%`,
+            top: `${s.top}%`,
+            fontSize: s.size,
+            animationDelay: `${s.delay}s`,
+            ['--tw-dur' as string]: `${s.dur}s`,
+          } as CSSProperties}
+        >
+          ✦
+        </span>
+      ))}
+    </div>
   );
 }
