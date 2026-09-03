@@ -9,6 +9,7 @@ import {
   wuxingOfGan,
   wuxingOfZhi,
 } from '../components/almanac';
+import { RitualLoading } from '../components/rituals';
 import { Badge, Card, EmptyState, ErrorBox, GhostButton, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
 import { SOURCE_LABEL, cleanDescription, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -321,7 +322,7 @@ function ZiweiSection({
         </GhostButton>
       }
     >
-      {loading && <Loading label="正在排紫微盘并生成批示（首次约 2-3 分钟，之后命中缓存秒开）…" />}
+      {loading && <RitualLoading engine="ziwei" label="正在排紫微盘并生成批示（首次约 2-3 分钟，之后命中缓存秒开）…" />}
       {error && <ErrorBox message={error} />}
       {!loading && !error && chart && (
         <div className="space-y-4">
@@ -486,7 +487,7 @@ export default function Charts() {
       />
 
       {/* 命理批示（核心展示） */}
-      {fortune.loading && <Loading label="正在排盘并生成命理批示（推理模型思考 + 正文，约 2-3 分钟，请耐心等待）…" />}
+      {fortune.loading && <RitualLoading engine="bazi" label="正在排盘并生成命理批示（推理模型思考 + 正文，约 2-3 分钟，请耐心等待）…" />}
       {fortune.error && <ErrorBox message={fortune.error} />}
       {!fortune.loading && !fortune.error && fortune.data && (
         <FortuneSection data={fortune.data} />

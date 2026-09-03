@@ -264,6 +264,8 @@ def rich_description(
     signals: list[Signal],
     almanac: dict[str, Any] | None,
     include_claim: bool = True,
+    probability: float | None = None,
+    null_probability: float | None = None,
 ) -> str:
     """把候选渲染成多行详批（确定性，秒出，无 LLM）。"""
     when = when_text(scale, window_start, window_end)
@@ -305,9 +307,33 @@ def rich_description(
         if peach:
             lines.append(f"情缘提示：当日起算日引动本命{'、'.join(peach)}，宜主动社交。")
 
+    # 概率口径：与「何时何事」断言同等地位地陈述证据强度（C-006）。
+    # 断言可以是强命题，但数字必须同步摆出 —— 信号没抬高概率时直说持平，
+    # 不允许「读上去板上钉钉、数字上毫无增量」的割裂感。
+    if probability is not None and null_probability is not None:
+        diff = probability - null_probability
+        p_pct, n_pct = round(probability * 100), round(null_probability * 100)
+        if abs(diff) < 0.005:
+            lines.append(
+                f"概率口径：本轮信号未明显抬高发生概率（{p_pct}%，与基线 {n_pct}% 持平），"
+                "按平常心对待即可。"
+            )
+        elif diff > 0:
+            lines.append(
+                f"概率口径：信号将概率由基线 {n_pct}% 抬至 {p_pct}%"
+                f"（+{round(diff * 100)} 个百分点）。"
+            )
+        else:
+            lines.append(
+                f"概率口径：信号评估（{p_pct}%）低于日常基线（{n_pct}%），以基线为准。"
+            )
+
     lines.append("建议：" + narrative.advice)
-    if cross.metaphysical_oppose > 0:
-        lines.append("注意：" + narrative.caution)
+    # 注意项无条件展示：caution 是务实防错，不是凶断；无反向信号时也不缺席，
+    # 避免「全篇只有好话」的单侧观感。
+    oppose_names = "、".join(cross.opposing.keys())
+    head = f"注意（{oppose_names} 示警）" if oppose_names else "注意"
+    lines.append(f"{head}：{narrative.caution}")
 
     # 幸运元素（窗口起始日的五行锦囊）
     if almanac:
@@ -377,4 +403,6 @@ def narrative_for_record(session: Session, record: Any, signal_rows: list[Any]) 
         signals=signals_from_rows(signal_rows),
         almanac=almanac,
         include_claim=False,  # 卡片标题行已有断言本体，不重复
+        probability=record.probability,
+        null_probability=record.null_probability,
     )

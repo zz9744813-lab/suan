@@ -460,6 +460,175 @@ body {
     radial-gradient(420px 200px at 88% 0%, var(--glow-gold), transparent 70%);
 }
 
+/* ---------- 术式推演仪式动效 ---------- */
+
+/* 六爻铜钱：绕横轴连翻转 */
+@keyframes coin-flip {
+  from {
+    transform: rotateX(0deg);
+  }
+  to {
+    transform: rotateX(360deg);
+  }
+}
+.ritual-coin {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: coin-flip 0.9s linear infinite;
+}
+
+/* 六爻爻线：逐爻落定 → 摇散（负 direction 由 per-line delay 错峰） */
+@keyframes yao-cycle {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.25);
+  }
+  9% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  94%,
+  100% {
+    opacity: 0;
+    transform: scaleX(0.7);
+  }
+}
+.ritual-yao {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: yao-cycle 3.9s ease-in-out infinite;
+}
+
+/* 梅花：数字卷帘连续滚动 */
+@keyframes reel-roll {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.ritual-reel {
+  animation: reel-roll 1.9s linear infinite;
+}
+
+/* 卦象/点位：呼吸显影 */
+@keyframes glyph-breathe {
+  0%,
+  100% {
+    opacity: 0.22;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ritual-flicker {
+  animation: glyph-breathe 1.8s ease-in-out infinite;
+}
+
+/* 八字立柱：换字瞬间 X 轴翻牌（配合 React key 重挂载） */
+@keyframes char-flip {
+  from {
+    transform: rotateX(70deg);
+    opacity: 0.45;
+  }
+  to {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}
+.ritual-charflip {
+  animation: char-flip 0.14s ease-out;
+  backface-visibility: hidden;
+}
+
+/* 奇门：八门外环缓转 + 宫格巡回点亮 */
+.qimen-ring {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: spin360 21s linear infinite;
+}
+@keyframes qcell-cycle {
+  0%,
+  100% {
+    fill-opacity: 0.06;
+  }
+  12% {
+    fill-opacity: 0.55;
+  }
+  24% {
+    fill-opacity: 0.1;
+  }
+}
+.ritual-qcell {
+  animation: qcell-cycle 2.7s linear infinite;
+}
+
+/* 紫微：宫格鎏金光巡回 */
+@keyframes zcell-cycle {
+  0%,
+  100% {
+    box-shadow: none;
+    border-color: var(--line);
+  }
+  8% {
+    box-shadow: 0 0 10px -2px rgba(201, 162, 39, 0.8);
+    border-color: rgba(201, 162, 39, 0.85);
+  }
+  16% {
+    box-shadow: none;
+    border-color: var(--line);
+  }
+}
+.ritual-zcell {
+  animation: zcell-cycle 4.8s linear infinite;
+}
+
+/* 掌纹：三道纹逐笔描出后淡去重描 */
+@keyframes draw-cycle {
+  0% {
+    stroke-dashoffset: 320;
+    opacity: 1;
+  }
+  42% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  74% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  90%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+.ritual-draw {
+  stroke-dasharray: 320;
+  animation: draw-cycle 3.4s ease-in-out infinite;
+}
+
+/* 面相：扫描线在三停间往复 */
+@keyframes scan-y {
+  0%,
+  100% {
+    transform: translateY(-26px);
+  }
+  50% {
+    transform: translateY(26px);
+  }
+}
+.ritual-scanline {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: scan-y 2.7s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up,
   .animate-fade-in,
@@ -467,7 +636,17 @@ body {
   .btn-gilt::after,
   .dial-spin,
   .taiji-spin,
-  .badge-glow-sweep::after {
+  .badge-glow-sweep::after,
+  .ritual-coin,
+  .ritual-yao,
+  .ritual-reel,
+  .ritual-flicker,
+  .ritual-charflip,
+  .qimen-ring,
+  .ritual-qcell,
+  .ritual-zcell,
+  .ritual-draw,
+  .ritual-scanline {
     animation: none;
   }
   .prob-bar > div,

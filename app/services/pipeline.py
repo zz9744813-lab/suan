@@ -28,7 +28,7 @@ from datetime import date, datetime, timedelta
 from app.utils import utcnow
 from typing import Any
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.agents.base import AgentContext
 from app.agents.fusion import fuse, FusionInput
@@ -452,10 +452,40 @@ class DailyPipeline:
             f"共 {len(chosen)} 条研究样本（零 LLM，秒级；{crossed} 条达成 ≥2 法交叉印证）"
         )
 
+        # 去重：同事件 + 同尺度 + 同窗口起点且尚未定论（冻结/研究/待验证）的
+        # 样本不重复入库，防止同一天重复点「生成」刷出一模一样的行。
+        # 尺度必须进键：同一事件在日/周/月是三个不同的可证伪断言。
+        existing_rows = self.session.exec(
+            select(
+                PredictionRecord.event_type,
+                PredictionRecord.time_scale,
+                PredictionRecord.window_start,
+            ).where(
+                PredictionRecord.user_id == self.user_id,  # type: ignore[arg-type]
+                PredictionRecord.status.in_([  # type: ignore[attr-defined]
+                    PredictionStatus.FROZEN.value,
+                    PredictionStatus.RESEARCH.value,
+                    PredictionStatus.VERIFY_REQUIRED.value,
+                ])
+            )
+        ).all()
+        existing_keys = {(et, ts, ws.date()) for et, ts, ws in existing_rows}
+        dup_skipped = 0
+
         for cand, _, _ in chosen:
+            dup_key = (cand.event_type, cand.time_scale.value, cand.window_start.date())
+            if dup_key in existing_keys:
+                dup_skipped += 1
+                continue
+            existing_keys.add(dup_key)
             pred = self._freeze(cand, fusion=None, status=PredictionStatus.RESEARCH.value)
             if pred:
                 result.frozen.append(pred)
+
+        if dup_skipped:
+            result.notes.append(
+                f"去重：跳过 {dup_skipped} 条与在库样本同事件同窗口的重复选题"
+            )
 
         return result
 

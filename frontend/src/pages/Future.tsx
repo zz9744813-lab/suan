@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { api, DEFAULT_USER_ID } from '../api/client';
 import { AlmanacDial, ColorSwatches, DOMAIN_ACCENT } from '../components/almanac';
+import { DivinationStage } from '../components/rituals';
 import {
   Badge,
   Card,
@@ -566,6 +567,8 @@ export default function Future() {
         }
       >
         <PipelineSteps active={generating} done={runDone} />
+        {/* 七术式推演仪式：生成期间轮转各术式的传统仪程动效 */}
+        {(generating || runDone) && <DivinationStage active={generating} done={runDone} />}
       </Card>
 
       {notes && (
