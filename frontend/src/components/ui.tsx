@@ -129,9 +129,11 @@ export function Stat({
 export function Badge({
   children,
   tone = 'default',
+  className = '',
 }: {
   children: ReactNode;
   tone?: 'default' | 'good' | 'bad' | 'warn' | 'info' | 'gilt';
+  className?: string;
 }) {
   const cls = {
     default: 'border-bd bg-white/[0.04] text-t1',
@@ -143,7 +145,7 @@ export function Badge({
   }[tone];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 ${cls}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 ${cls} ${className}`}
     >
       {children}
     </span>

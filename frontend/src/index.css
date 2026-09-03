@@ -405,11 +405,69 @@ body {
   outline: none;
 }
 
+/* ---------- 玄学组件动效 ---------- */
+
+@keyframes spin360 {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 罗盘外环：极慢转（一圈 120s），营造「活盘」感 */
+.dial-spin {
+  animation: spin360 120s linear infinite;
+}
+
+/* 太极：反向缓转（一圈 36s），取阴阳流转之意 */
+.taiji-spin {
+  animation: spin360 36s linear infinite reverse;
+}
+
+/* 「N 法交叉印证」徽标：鎏金微光扫过，克制的注目 */
+.badge-glow-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.badge-glow-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 55%;
+  background: linear-gradient(100deg, transparent, rgba(74, 222, 128, 0.28), transparent);
+  transform: translateX(-160%) skewX(-14deg);
+  pointer-events: none;
+  animation: sweep-x 3.2s ease-in-out infinite;
+}
+
+@keyframes sweep-x {
+  0%,
+  55% {
+    transform: translateX(-160%) skewX(-14deg);
+  }
+  85%,
+  100% {
+    transform: translateX(280%) skewX(-14deg);
+  }
+}
+
+/* 锦囊卡右上氛围光：鎏金日光 + 夜间月辉二态 */
+.aura-gilt {
+  background:
+    radial-gradient(420px 200px at 88% 0%, var(--glow-gold), transparent 70%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up,
   .animate-fade-in,
   .stagger > *,
-  .btn-gilt::after {
+  .btn-gilt::after,
+  .dial-spin,
+  .taiji-spin,
+  .badge-glow-sweep::after {
     animation: none;
   }
   .prob-bar > div,

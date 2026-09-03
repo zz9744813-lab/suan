@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { api, DEFAULT_USER_ID } from '../api/client';
+import { AlmanacDial, ColorSwatches, DOMAIN_ACCENT } from '../components/almanac';
 import {
   Badge,
   Card,
@@ -333,11 +334,33 @@ export default function Future() {
     : 0;
   const engineTotal = health.data ? Object.keys(health.data.engines).length : 7;
 
-  const renderRow = (p: (typeof visible)[number], isResearch = false) => (
-    <li key={p.prediction_id} className="row-hover rounded-lg border border-line p-3">
+  const renderRow = (p: (typeof visible)[number], isResearch = false) => {
+    const accent = DOMAIN_ACCENT[p.domain];
+    return (
+    <li key={p.prediction_id} className="row-hover relative rounded-lg border border-line p-3 pl-4">
+      {/* 域色渐变边条 + 域字小印（罗盘一脉相承的章感） */}
+      <i
+        aria-hidden
+        className="pointer-events-none absolute inset-y-2 left-0 w-[3px] rounded-full"
+        style={{
+          background: accent
+            ? `linear-gradient(180deg, ${accent.from}, ${accent.to})`
+            : 'linear-gradient(180deg, #cbd5e1, #94a3b8)',
+        }}
+      />
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            {accent && (
+              <span
+                aria-hidden
+                className="flex h-5 w-5 items-center justify-center rounded-[5px] text-[10px] font-bold text-white/95 shadow-sm"
+                style={{ background: `linear-gradient(160deg, ${accent.from}, ${accent.to})` }}
+                title={DOMAIN_LABEL[p.domain] ?? p.domain}
+              >
+                {accent.seal}
+              </span>
+            )}
             <span className="text-sm text-t1">{cleanDescription(p.description, p.event_type)}</span>
             <Badge>{DOMAIN_LABEL[p.domain] ?? p.domain}</Badge>
             <Badge tone="info">{SCALE_LABEL[p.time_scale]}</Badge>
@@ -366,7 +389,9 @@ export default function Future() {
           {((p.supporting_sources?.length ?? 0) > 0 || (p.opposing_sources?.length ?? 0) > 0) && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {p.crossed && (
-                <Badge tone="good">◆ {p.supporting_sources!.length} 法交叉印证</Badge>
+                <Badge tone="good" className="badge-glow-sweep">
+                  ◆ {p.supporting_sources!.length} 法交叉印证
+                </Badge>
               )}
               {(p.supporting_sources ?? []).map((s) => (
                 <Badge key={s} tone="gilt">
@@ -410,8 +435,7 @@ export default function Future() {
           >
             {STATUS_LABEL[p.status] ?? p.status}
           </Badge>
-          <div
-            className="mt-1 font-mono text-[10px] text-t5"
+          <div className="mt-1 font-mono text-[10px] text-t5"
             title="冻结哈希前缀（防篡改）"
           >
             {p.sha256_head}
@@ -419,7 +443,8 @@ export default function Future() {
         </div>
       </div>
     </li>
-  );
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -446,6 +471,7 @@ export default function Future() {
       {/* 今日锦囊：老黄历（确定性历法派生）+ 幸运元素 + 情缘星 */}
       {daily.data && (
         <Card
+          className="aura-gilt overflow-hidden"
           title={`今日锦囊 · ${daily.data.day_ganzhi}日 · ${daily.data.lunar_date}`}
           subtitle={`值神 ${daily.data.day_god} · 冲${daily.data.chong} 煞${daily.data.sha_direction} · 传统民俗参考`}
           right={
@@ -454,58 +480,73 @@ export default function Future() {
             ) : undefined
           }
         >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <div className="mb-1 text-xs font-medium text-t3">宜</div>
-              <div className="flex flex-wrap gap-1">
-                {daily.data.yi.map((y) => (
-                  <Badge key={y} tone="good">
-                    {y}
-                  </Badge>
-                ))}
+          <div className="flex flex-col-reverse gap-4 md:flex-row md:items-start">
+            <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-medium text-t3">宜</div>
+                <div className="flex flex-wrap gap-1">
+                  {daily.data.yi.map((y) => (
+                    <Badge key={y} tone="good">
+                      {y}
+                    </Badge>
+                  ))}
+                </div>
+                <div className="mb-1 mt-3 text-xs font-medium text-t3">忌</div>
+                <div className="flex flex-wrap gap-1">
+                  {daily.data.ji.map((j) => (
+                    <Badge key={j} tone="bad">
+                      {j}
+                    </Badge>
+                  ))}
+                </div>
               </div>
-              <div className="mb-1 mt-3 text-xs font-medium text-t3">忌</div>
-              <div className="flex flex-wrap gap-1">
-                {daily.data.ji.map((j) => (
-                  <Badge key={j} tone="bad">
-                    {j}
-                  </Badge>
-                ))}
+              <div className="space-y-2 text-xs text-t2">
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  <span>
+                    喜神 <b className="text-t1">{daily.data.xi_dir}</b>
+                  </span>
+                  <span>
+                    财神 <b className="text-t1">{daily.data.cai_dir}</b>
+                  </span>
+                  <span>
+                    福神 <b className="text-t1">{daily.data.fu_dir}</b>
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span>幸运色</span>
+                  <ColorSwatches text={daily.data.lucky_color} />
+                  <span className="text-t4">（辅</span>
+                  <ColorSwatches text={daily.data.lucky_color_aux} size={10} />
+                  <span className="text-t4">）</span>
+                  <span className="ml-2">
+                    幸运数{' '}
+                    <b className="text-gt">{daily.data.lucky_numbers.join('、')}</b>
+                  </span>
+                </div>
+                {daily.data.day_master && (
+                  <div className="text-t3">
+                    日主{daily.data.day_master}（{daily.data.day_master_wuxing}）x 今日
+                    {daily.data.day_master_relation}
+                  </div>
+                )}
+                <div>
+                  吉时{' '}
+                  {daily.data.lucky_hours.map((h) => (
+                    <span key={h} className="mr-2 text-t2">
+                      {h}
+                    </span>
+                  ))}
+                </div>
+                <div className="text-t4">彭祖百忌：{daily.data.pengzu.join('；')}</div>
               </div>
             </div>
-            <div className="space-y-2 text-xs text-t2">
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <span>
-                  喜神 <b className="text-t1">{daily.data.xi_dir}</b>
-                </span>
-                <span>
-                  财神 <b className="text-t1">{daily.data.cai_dir}</b>
-                </span>
-                <span>
-                  福神 <b className="text-t1">{daily.data.fu_dir}</b>
-                </span>
-              </div>
-              <div>
-                幸运色 <b className="text-gt">{daily.data.lucky_color}</b>（辅{' '}
-                {daily.data.lucky_color_aux}） · 幸运数{' '}
-                <b className="text-gt">{daily.data.lucky_numbers.join('、')}</b>
-                {daily.data.day_master && (
-                  <span className="text-t3">
-                    {' '}
-                    · 日主{daily.data.day_master}（{daily.data.day_master_wuxing}）x 今日
-                    {daily.data.day_master_relation}
-                  </span>
-                )}
-              </div>
-              <div>
-                吉时{' '}
-                {daily.data.lucky_hours.map((h) => (
-                  <span key={h} className="mr-2 text-t2">
-                    {h}
-                  </span>
-                ))}
-              </div>
-              <div className="text-t4">彭祖百忌：{daily.data.pengzu.join('；')}</div>
+            {/* 罗盘：慢转八卦环 + 太极 + 三神方位点亮，锦囊卡的视觉锚 */}
+            <div className="mx-auto md:mx-0 md:mt-1">
+              <AlmanacDial
+                xi={daily.data.xi_dir}
+                cai={daily.data.cai_dir}
+                fu={daily.data.fu_dir}
+              />
             </div>
           </div>
         </Card>
