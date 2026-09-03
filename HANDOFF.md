@@ -34,7 +34,9 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 命理批示 | 八字 `GET /api/fortune/reading`；紫微 `GET /api/fortune/reading/{system}`（ziwei，2026-09-02 新增）。reasoning 层失败自动回退 cheap 层（见坑 15） |
 | 今日锦囊 | `GET /api/fortune/daily`（2026-09-03）：lunar-python 当日宜忌/值神/冲煞/三神方位/吉时/彭祖百忌 + 河图数幸运数字（五行取数：水1/6、火2/7、木3/8、金4/9、土5/0）+ 五行幸运色 + 个人层（日主×日支十神关系、红鸾/天喜/咸池动情、犯冲提示）。全部确定性计算，零 LLM |
 | 多法交叉选题 | 研究期/正式期都先跑 6 术式信号，按「同向术式数」排序选题（2026-09-03）。≥2 法同向 → 卡片带「◆ N 法交叉印证」徽标 + ✓/✗ 术式徽标。**交叉只决定选题与详批，概率仍归 Null/融合（C-005 不动）** |
-| 详批叙事层 | `app/services/cross_engine.py` + `app/prediction/narratives.py`（2026-09-03）：常见情景/多法印证明细（每条带真实证据串）/建议/注意/幸运参考。关键架构：**叙事是读侧确定性重建（list/detail 接口现场拼），冻结仓里只存「何时+何事」短声明**——否则长文案必被 Gate 的模糊词攻击拦截（见坑 16） |
+| 详批叙事层 | `app/services/cross_engine.py` + `app/prediction/narratives.py`（2026-09-03）：常见情景/多法印证明细（每条带真实证据串）/建议/注意/幸运参考。**概率口径行明示「信号概率 vs 日常基线」**（持平/抬高/压低三态）；**注意（示警）常显**，有示警术式必点名（「八字、奇门 示警」）。关键架构：**叙事是读侧确定性重建（list/detail 接口现场拼），冻结仓里只存「何时+何事」短声明**——否则长文案必被 Gate 的模糊词攻击拦截（见坑 16） |
+| 研究期去重 | 冻结前按 (event_type, time_scale, 窗口日) 去重，与在库样本重复的选题跳过并在 notes 注明（2026-09-03，见坑 19） |
+| 术式仪式动效 | `frontend/src/components/rituals.tsx`（2026-09-03）：生成中逐术式轮动（六爻铜钱摇卦/梅花数字卷帘/奇门九星转盘/八字四柱翻字/紫微布宫流光/掌纹描线/面相三停扫描），完成后七术式收录态；命盘页批示等待同款仪式。纯 CSS/内联 SVG，`prefers-reduced-motion` 有降级 |
 | 出生档案 | 创建 + `PUT /api/users/{id}/profile` 更新（之前只有 create，2026-08-30 补） |
 | 紫微运限 | `ziwei-0.2.0`：iztro `chart.horoscope()` 流日/流月/流年接入信号层——流年宫宿主本命宫 + 流年干四化（十干四化表）引动本命星，按权重计入方向/强度。时标映射：day→流日、week/month→流月、year→流年 |
 | 前端 | React + TS + Vite，8 个一级页面（未来页=按应验日分组、验证页=批复式、命盘页=八字+紫微十二宫盘） |
@@ -285,6 +287,7 @@ RealityState 扫描 → 候选事件(candidates)
 16. **Gate 语义 vs 详批叙事必须分层**（2026-09-03）：长文案进 `description` 会被对抗 Gate 团灭——DefinitionAttack 禁词（"运势/贵人/小人/桃花/气场/能量/福报/机缘/可能/也许/大概/相关"…）在 description+criteria 命中即 REJECT；Vagueness/Definition 的 WARN 也会被当 REWRITE 丢候选。踩过的词：`运势锦囊→幸运参考`、`可能形态→常见情景`、`贵人相助→获得实质帮助`、`桃花提示→情缘提示`、`咸池桃花→咸池引动`。架构解法：**冻结仓的描述只放「何时+何事」短声明**（如「9月4日（周五）遇到心动的缘分。」），多行详批（常见情景/多法印证/建议/注意/幸运参考）是**读侧确定性重建**（`cross_engine.narrative_for_record()`，由 event_type + SignalRecord + 当日历算现拼），不进冻结载荷、不影响哈希、天然免疫 Gate。给叙事/本体写新文案时先对着 `app/adversarial/attacks/deterministic.py` 里的禁词表自查。
 17. **`iztro` `horoscope` 的 palace_names 是 12 宫中文名列表**（按本命宫序），转宿主本命宫要 `.index(...)` 映射回索引；流年干支是 `'gengHeavenly'` 这种 camelCase 枚举字符串，需 `_HEAVENLY_ZH` 映射回天干再查四化表。
 18. **exe 数据目录在 `dist/data/`（spec datas 里 `("data", "data")`）**，所以清库/补数据要同时处理 repo 的 `data/xuanmirror.db` 和 `dist/data/xuanmirror.db` 两个副本。打包后浏览器若显示旧页面，多半是旧 exe 进程没杀或标签页缓存——换端口验证或给 URL 加 `?fresh=1` 强刷。
+19. **研究期连点两次「生成预测」会重复冻结同一批选题**（2026-09-03 修）：`pipeline._run_research()` 冻结前按 `(event_type, time_scale, window_start.date())` 对在库（FROZEN/RESEARCH/VERIFY_REQUIRED）样本去重，跳过并在 notes 注明「去重：跳过 N 条」。**time_scale 必须在键里**——同一事件在日/周/月是三条独立可证伪声明，缺了它月度样本会被周样本误杀（教训来自一次测试失败）。
 
 ---
 
