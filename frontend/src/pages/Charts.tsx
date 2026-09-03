@@ -1,6 +1,14 @@
 import { useState } from 'react';
 
 import { api, DEFAULT_USER_ID, type FortuneReading, type ZiweiReading } from '../api/client';
+import {
+  BRIGHTNESS_CLS,
+  MiniTaiji,
+  MUTAGEN_CLS,
+  WUXING_COLOR,
+  wuxingOfGan,
+  wuxingOfZhi,
+} from '../components/almanac';
 import { Badge, Card, EmptyState, ErrorBox, GhostButton, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
 import { SOURCE_LABEL, cleanDescription, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -49,12 +57,24 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
   }
 
   const bazi = chart.bazi ?? {};
-  const pillars = [
-    ['年柱', bazi.year],
-    ['月柱', bazi.month],
-    ['日柱', bazi.day],
-    ['时柱', bazi.time],
-  ];
+  const PILLAR_KEYS = ['year', 'month', 'day', 'time'] as const;
+  const pillarLabel: Record<(typeof PILLAR_KEYS)[number], string> = {
+    year: '年柱',
+    month: '月柱',
+    day: '日柱',
+    time: '时柱',
+  };
+
+  // 五行分布：四柱八个字的五行计数，画成一条彩色能量条
+  const elementCount: Record<string, number> = {};
+  for (const k of PILLAR_KEYS) {
+    const gz: string = bazi[k] ?? '';
+    const g = wuxingOfGan(gz.slice(0, 1));
+    const z = wuxingOfZhi(gz.slice(1, 2));
+    if (g) elementCount[g] = (elementCount[g] ?? 0) + 1;
+    if (z) elementCount[z] = (elementCount[z] ?? 0) + 1;
+  }
+  const elementTotal = Object.values(elementCount).reduce((a, b) => a + b, 0);
 
   const dayun = chart.dayun ?? [];
   // 当前精确周岁（后端已算好，前端直接用）；为 null 时回退到年份差近似
@@ -71,32 +91,73 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
           chart.birth_time_known ? '时辰已确认' : '时辰未知（时柱存疑）'
         }`}
       >
+        {/* 四柱卷轴：天干地支按五行着色，十神在上、纳音在下 */}
         <div className="grid grid-cols-4 gap-2 text-center">
-          {pillars.map(([k, v]) => (
-            <div key={k} className="rounded-xl border border-line bg-panel py-3">
-              <div className="text-[11px] text-t4">{k}</div>
-              <div className="mt-1 font-serif text-xl font-semibold tracking-[0.15em] text-gt">
-                {v || '—'}
+          {PILLAR_KEYS.map((k) => {
+            const gz: string = bazi[k] ?? '';
+            const gan = gz.slice(0, 1);
+            const zhi = gz.slice(1, 2);
+            const wg = wuxingOfGan(gan);
+            const wz = wuxingOfZhi(zhi);
+            const isDay = k === 'day';
+            return (
+              <div
+                key={k}
+                className={`card-hover rounded-xl border py-3 ${
+                  isDay ? 'border-gilt-500/40 bg-gilt-500/[0.06]' : 'border-line bg-panel'
+                }`}
+              >
+                <div className={`text-[11px] ${isDay ? 'font-medium text-gt' : 'text-t4'}`}>
+                  {pillarLabel[k]}
+                  {isDay && ' · 日主'}
+                </div>
+                <div className="mt-0.5 min-h-4 text-[10px] text-t3">
+                  {chart.shishen?.[k] ?? ''}
+                </div>
+                <div className="mt-1 font-serif text-2xl font-bold leading-9 tracking-wider">
+                  <div style={{ color: WUXING_COLOR[wg] }} title={`天干${gan} · 五行属${wg}`}>
+                    {gan || '—'}
+                  </div>
+                  <div style={{ color: WUXING_COLOR[wz] }} title={`地支${zhi} · 五行属${wz}`}>
+                    {zhi || '—'}
+                  </div>
+                </div>
+                <div className="mt-1 min-h-4 text-[10px] text-t5">
+                  {chart.nayin?.[k] ?? ''}
+                </div>
               </div>
-              <div className="mt-1 text-[11px] text-t3">
-                五行 {chart.wuxing?.[k === '年柱' ? 'year' : k === '月柱' ? 'month' : k === '日柱' ? 'day' : 'time'] ?? '—'}
-              </div>
+            );
+          })}
+        </div>
+
+        {/* 五行分布能量条 */}
+        {elementTotal > 0 && (
+          <div className="mt-3">
+            <div className="mb-1.5 flex items-baseline justify-between text-[11px]">
+              <span className="font-medium text-t3">五行分布</span>
+              <span className="text-t5">
+                {(['木', '火', '土', '金', '水'] as const)
+                  .map((w) => (elementCount[w] ? `${w}${elementCount[w]}` : null))
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
             </div>
-          ))}
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-          {(['year', 'month', 'day', 'time'] as const).map((k) => (
-            <div key={k} className="rounded-lg bg-panel px-3 py-2">
-              <div className="text-t4">
-                {k === 'year' ? '年' : k === 'month' ? '月' : k === 'day' ? '日' : '时'} 十神
-              </div>
-              <div className="mt-0.5 text-t1">{chart.shishen?.[k] ?? '—'}</div>
+            <div className="flex h-2 overflow-hidden rounded-full bg-panel">
+              {(['木', '火', '土', '金', '水'] as const)
+                .filter((w) => elementCount[w] > 0)
+                .map((w) => (
+                  <div
+                    key={w}
+                    style={{
+                      width: `${(elementCount[w] / elementTotal) * 100}%`,
+                      backgroundColor: WUXING_COLOR[w],
+                    }}
+                    title={`${w} ${elementCount[w]}`}
+                  />
+                ))}
             </div>
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-t4">
-          <span>纳音：{['year', 'month', 'day', 'time'].map((k) => chart.nayin?.[k]).filter(Boolean).join(' · ') || '—'}</span>
-        </div>
+          </div>
+        )}
       </Card>
 
       {/* 大运时间轴 */}
@@ -115,7 +176,7 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
                   <div
                     className={`flex w-full flex-col items-center gap-1 rounded-lg border px-1 py-2 text-center transition-colors ${
                       isCurrent
-                        ? 'border-gilt-500/60 bg-gilt-500/15'
+                        ? 'border-gilt-500/60 bg-gilt-500/15 shadow-[0_0_14px_-4px_rgba(201,162,39,0.55)]'
                         : 'border-line bg-panel'
                     }`}
                   >
@@ -144,17 +205,24 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
           <EmptyState>暂无流年数据</EmptyState>
         ) : (
           <div className="grid grid-cols-5 gap-2 text-center md:grid-cols-10">
-            {chart.liunian.map((ly) => (
-              <div key={ly.year} className="rounded-lg border border-line bg-panel py-2.5">
-                <div className="text-[11px] text-t4">{ly.year}</div>
-                <div className="mt-0.5 font-serif text-lg font-semibold tracking-wider text-gt">
-                  {ly.ganzhi}
+            {chart.liunian.map((ly) => {
+              const w = wuxingOfGan((ly.ganzhi ?? '').slice(0, 1));
+              return (
+                <div key={ly.year} className="rounded-lg border border-line bg-panel py-2.5">
+                  <div className="text-[11px] text-t4">{ly.year}</div>
+                  <div
+                    className="mt-0.5 font-serif text-lg font-semibold tracking-wider"
+                    style={{ color: WUXING_COLOR[w] }}
+                    title={`${ly.ganzhi} 年 · 天干属${w || '—'}`}
+                  >
+                    {ly.ganzhi}
+                  </div>
+                  <div className="text-[10px] text-t4">
+                    {ly.zodiac}年{ly.age != null ? ` · ${ly.age}岁` : ''}
+                  </div>
                 </div>
-                <div className="text-[10px] text-t4">
-                  {ly.zodiac}年{ly.age != null ? ` · ${ly.age}岁` : ''}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>
@@ -265,21 +333,30 @@ function ZiweiSection({
               const pos = PALACE_POS[branch];
               const isSoul = p.name === chart.soul_palace;
               const isBody = p.name === chart.body_palace;
+              const branchWu = wuxingOfZhi(branch);
               return (
                 <div
                   key={p.name}
                   style={
                     pos ? { gridRowStart: pos[0] + 1, gridColumnStart: pos[1] + 1 } : undefined
                   }
-                  className={`card-hover min-h-[92px] bg-card p-2.5 ${
-                    isSoul ? 'bg-gilt-500/[0.06]' : ''
+                  className={`card-hover min-h-[92px] bg-card p-2.5 transition-shadow ${
+                    isSoul
+                      ? 'bg-gilt-500/[0.08] shadow-[inset_0_0_0_1.5px_rgba(201,162,39,0.55),0_0_16px_-6px_rgba(201,162,39,0.5)]'
+                      : ''
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className={`text-xs font-medium ${isSoul ? 'text-gt' : 'text-t2'}`}>
                       {p.name}
                     </span>
-                    <span className="text-[10px] tabular text-t5">{p.ganzhi}</span>
+                    <span
+                      className="text-[10px] tabular"
+                      style={{ color: WUXING_COLOR[branchWu] ?? 'var(--t5)' }}
+                      title={`宫支 ${p.ganzhi} · 属${branchWu || '—'}`}
+                    >
+                      {p.ganzhi}
+                    </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-1.5 gap-y-1">
                     {p.major_stars.length === 0 && (
@@ -288,15 +365,16 @@ function ZiweiSection({
                     {p.major_stars.map((s, i) => (
                       <span
                         key={i}
-                        className="text-xs text-t1"
+                        className={`text-xs ${BRIGHTNESS_CLS[s.brightness ?? ''] ?? 'text-t2'}`}
                         title={`${s.name}${s.brightness ? ` · ${s.brightness}` : ''}${s.mutagen ? ` · 化${s.mutagen}` : ''}`}
                       >
                         {s.name}
-                        {s.brightness && (
-                          <span className="text-[9px] text-t4">{s.brightness}</span>
-                        )}
                         {s.mutagen && (
-                          <span className="ml-0.5 rounded border border-gilt-500/40 bg-gilt-500/10 px-0.5 text-[9px] text-gt">
+                          <span
+                            className={`ml-0.5 rounded border px-0.5 text-[9px] font-semibold ${
+                              MUTAGEN_CLS[s.mutagen] ?? 'border-bd bg-panel text-t3'
+                            }`}
+                          >
                             {s.mutagen}
                           </span>
                         )}
@@ -315,8 +393,9 @@ function ZiweiSection({
                 </div>
               );
             })}
-            {/* 中宫：命宫/身宫摘要 */}
-            <div className="col-span-2 row-span-2 flex flex-col items-center justify-center gap-2 bg-panel p-4 text-center">
+            {/* 中宫：命宫/身宫摘要 + 太极静饰 */}
+            <div className="col-span-2 row-span-2 flex flex-col items-center justify-center gap-2.5 bg-panel p-4 text-center">
+              <MiniTaiji size={44} />
               <div className="text-[10px] tracking-[0.3em] text-t4">紫微斗数</div>
               <div className="text-sm text-t2">
                 命宫 <span className="font-semibold text-gt">{chart.soul_palace || '—'}</span>

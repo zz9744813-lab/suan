@@ -229,3 +229,65 @@ export const DOMAIN_ACCENT: Record<string, { from: string; to: string; seal: str
   purchase: { from: '#fcd34d', to: '#f59e0b', seal: '购' },
   habit: { from: '#c4b5fd', to: '#8b5cf6', seal: '习' },
 };
+
+/* ---------------- 五行（命盘页干支着色共用） ---------------- */
+
+const GAN_WUXING: Record<string, string> = {
+  甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土',
+  己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水',
+};
+const ZHI_WUXING: Record<string, string> = {
+  子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火',
+  午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水',
+};
+
+export function wuxingOfGan(g: string): string {
+  return GAN_WUXING[g] ?? '';
+}
+export function wuxingOfZhi(z: string): string {
+  return ZHI_WUXING[z] ?? '';
+}
+
+/** 五行主题色（金取鎏金而非纯白，保证两种主题下都可读） */
+export const WUXING_COLOR: Record<string, string> = {
+  木: '#2f9e6b',
+  火: '#e04f3f',
+  土: '#b07a2a',
+  金: '#c9a227',
+  水: '#3b82f6',
+};
+
+/** 紫微星曜亮度 → 展示层级（庙=鎏金重字，陷=极弱） */
+export const BRIGHTNESS_CLS: Record<string, string> = {
+  庙: 'text-gt font-semibold',
+  旺: 'text-t1 font-semibold',
+  得: 'text-t1',
+  利: 'text-t2',
+  平: 'text-t3',
+  不: 'text-t4',
+  陷: 'text-t5',
+};
+
+/** 四化标记配色：禄鎏金 / 权绛红 / 科天青 / 忌沉红 */
+export const MUTAGEN_CLS: Record<string, string> = {
+  禄: 'border-gilt-500/50 bg-gilt-500/15 text-gt',
+  权: 'border-cinnabar-500/50 bg-cinnabar-500/15 text-cinnabar-400',
+  科: 'border-sky-500/50 bg-sky-500/15 text-sky-400',
+  忌: 'border-red-500/50 bg-red-500/10 text-red-500',
+};
+
+/** 迷你太极（命盘中宫等处的静饰） */
+export function MiniTaiji({ size = 34, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg viewBox="0 0 40 40" width={size} height={size} className={className} aria-hidden>
+      <circle cx="20" cy="20" r="19" fill="var(--card)" stroke="var(--t4)" strokeWidth="1" />
+      <path
+        d="M 20 1 A 19 19 0 0 1 20 39 A 9.5 9.5 0 0 1 20 20 A 9.5 9.5 0 0 0 20 1 Z"
+        fill="var(--t1)"
+        opacity="0.85"
+      />
+      <circle cx="20" cy="10.5" r="2.4" fill="var(--t1)" opacity="0.85" />
+      <circle cx="20" cy="29.5" r="2.4" fill="var(--card)" />
+    </svg>
+  );
+}
