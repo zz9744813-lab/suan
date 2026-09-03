@@ -53,6 +53,12 @@ DOMAIN_FAVORABLE_SHISHEN: dict[Domain, set[str]] = {
     Domain.PROJECT: {"财", "官"},
     Domain.UNEXPECTED_EVENT: {"官", "劫"},  # 官杀=突发压力
     Domain.SCHEDULE: {"官"},
+    # 男命以财为妻星、女命以官为夫星；无性别路径时两星并列取「异性缘层面有利」
+    # （弱先验，gender 细化留待规则学习层）
+    Domain.RELATIONSHIP: {"财", "官"},
+    Domain.TRAVEL: {"食伤", "财"},          # 食伤=出行/动线，财=动生财
+    Domain.PURCHASE: {"财"},
+    Domain.HABIT: {"印", "比劫"},           # 印=自律涵养，比劫=自我管理
 }
 
 

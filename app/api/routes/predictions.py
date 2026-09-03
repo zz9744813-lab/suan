@@ -72,7 +72,55 @@ def list_predictions(
         stmt = stmt.where(PredictionRecord.visibility_mode == "VISIBLE")
 
     rows = session.exec(stmt.order_by(PredictionRecord.created_at.desc()).limit(limit)).all()
-    return {"count": len(rows), "items": [_brief(r) for r in rows]}
+
+    # 一次查询取回所有展示的预测的信号来源与交叉印证数（卡片徽标用）。
+    # N+1 规避：按 prediction_id 分组到内存。
+    signal_map: dict[str, dict[str, Any]] = {}
+    if rows:
+        from collections import defaultdict
+
+        sigs = session.exec(
+            select(SignalRecord).where(
+                SignalRecord.prediction_id.in_([r.prediction_id for r in rows])  # type: ignore[union-attr]
+            )
+        ).all()
+        grouped: dict[str, list[SignalRecord]] = defaultdict(list)
+        for s in sigs:
+            grouped[s.prediction_id].append(s)
+        for pid, slist in grouped.items():
+            supporting = {
+                s.source_type
+                for s in slist
+                if not s.degraded
+                and s.direction > 0
+                and s.source_type not in ("null", "reality")
+            }
+            opposing = {
+                s.source_type
+                for s in slist
+                if not s.degraded
+                and s.direction < 0
+                and s.source_type not in ("null", "reality")
+            }
+            signal_map[pid] = {
+                "supporting_sources": sorted(supporting),
+                "opposing_sources": sorted(opposing),
+                "crossed": len(supporting) >= 2,
+            }
+
+    items = []
+    for r in rows:
+        brief = _brief(r)
+        brief.update(signal_map.get(r.prediction_id, {}))
+        # 富文本详批（展示层，deterministic 重建，不进冻结哈希）
+        try:
+            from app.services.cross_engine import narrative_for_record
+
+            brief["narrative"] = narrative_for_record(session, r, grouped.get(r.prediction_id, []))
+        except Exception:
+            brief["narrative"] = ""
+        items.append(brief)
+    return {"count": len(rows), "items": items}
 
 
 # ======================================================================
@@ -210,11 +258,21 @@ def get_prediction(
         key = s.dependency_group or f"solo:{s.source_type}"
         groups.setdefault(key, []).append(s.source_type)
 
+    # 展示层详批（deterministic 重建，不进冻结哈希）
+    narrative = ""
+    try:
+        from app.services.cross_engine import narrative_for_record
+
+        narrative = narrative_for_record(session, row, list(signals))
+    except Exception:
+        narrative = ""
+
     return {
         "prediction_id": row.prediction_id,
         "domain": row.domain,
         "event_type": row.event_type,
         "description": row.description,
+        "narrative": narrative,
         "probability": row.probability,
         "null_probability": row.null_probability,
         "window": [row.window_start.isoformat(), row.window_end.isoformat()],

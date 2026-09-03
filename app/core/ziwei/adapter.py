@@ -26,7 +26,29 @@ from app.schemas.signal import (
     SourceType,
 )
 
-ENGINE_VERSION = "ziwei-0.1.0"
+ENGINE_VERSION = "ziwei-0.2.0"
+
+# 十干四化表（通行版本）： → (禄, 权, 科, 忌)
+STEM_MUTAGENS: dict[str, tuple[str, str, str, str]] = {
+    "甲": ("廉贞", "破军", "武曲", "太阳"),
+    "乙": ("天机", "天梁", "紫微", "太阴"),
+    "丙": ("天同", "天机", "文昌", "廉贞"),
+    "丁": ("太阴", "天同", "天机", "巨门"),
+    "戊": ("贪狼", "太阴", "右弼", "天机"),
+    "己": ("武曲", "贪狼", "天梁", "文曲"),
+    "庚": ("太阳", "武曲", "太阴", "天同"),
+    "辛": ("巨门", "太阳", "文曲", "文昌"),
+    "壬": ("天梁", "紫微", "左辅", "武曲"),
+    "癸": ("破军", "巨门", "太阴", "贪狼"),
+}
+
+# 紫微宫位中文名 → iztro 内部英文 id（horoscope.palace_names 用英文 id）
+PALACE_EN = {
+    "命宫": "soulPalace", "兄弟宫": "siblingsPalace", "夫妻宫": "spousePalace",
+    "子女宫": "childrenPalace", "财帛宫": "wealthPalace", "疾厄宫": "healthPalace",
+    "迁移宫": "travelPalace", "交友宫": "friendsPalace", "官禄宫": "careerPalace",
+    "田宅宫": "propertyPalace", "福德宫": "spiritPalace", "父母宫": "parentsPalace",
+}
 
 # domain → 紫微宫位（传统对应）
 DOMAIN_PALACE: dict[Domain, str] = {
@@ -58,6 +80,18 @@ PALACE_COUNTER: dict[str, str] = {
 def _hour_to_time_index(hour: int) -> int:
     """小时 → iztro 时辰索引（0-12）。"""
     return min((hour + 1) // 2, 12)
+
+
+_HEAVENLY_ZH = {
+    "jiaHeavenly": "甲", "yiHeavenly": "乙", "bingHeavenly": "丙",
+    "dingHeavenly": "丁", "wuHeavenly": "戊", "jiHeavenly": "己",
+    "gengHeavenly": "庚", "xinHeavenly": "辛", "renHeavenly": "壬",
+    "guiHeavenly": "癸",
+}
+
+
+def _stem_zh(stem: Any) -> str:
+    return _HEAVENLY_ZH.get(str(stem), "")
 
 
 class ZiweiAdapter(MetaphysicalAdapter):
@@ -104,7 +138,35 @@ class ZiweiAdapter(MetaphysicalAdapter):
         )
 
         # 结构化输出
-        return self._to_payload(chart)
+        payload = self._to_payload(chart)
+
+        # ---------- 运限层（流日/流月/流年）：让紫微信号随时间变化 ----------
+        # 本命盘是静止的（每天算出来都一样），真正「哪一天是什么天气」靠运限。
+        # horoscope(date).daily/monthly/yearly 给出该层干支与「各本命宫当前轮值什么宫」，
+        # 例如 daily.palace_names[i] == 'spousePalace' 表示流日夫妻宫临本命第 i 宫。
+        try:
+            h = chart.horoscope(query.target_date.isoformat())
+            flow: dict[str, Any] = {}
+            for scale_key, layer_name in (
+                ("day", "daily"),
+                ("month", "monthly"),
+                ("year", "yearly"),
+            ):
+                layer = getattr(h, layer_name, None)
+                if layer is None:
+                    continue
+                flow[scale_key] = {
+                    "layer_name": layer.name,
+                    "stem": _stem_zh(getattr(layer, "heavenly_stem", "")),
+                    # 本命宫 index → 该宫当前轮值的宫位 id
+                    "palace_names": list(getattr(layer, "palace_names", []) or []),
+                }
+            payload["flow"] = flow
+        except Exception:
+            # 运限层失败不阻断本命层（降级而非报错）
+            payload["flow"] = {}
+
+        return payload
 
     # ------------------------------------------------------------------
     def _to_payload(self, chart: Any) -> dict[str, Any]:
@@ -145,7 +207,8 @@ class ZiweiAdapter(MetaphysicalAdapter):
         规则（骨架，待验证）：
             1. 目标 domain 对应宫的主星亮度：庙/旺/得 → 正向，陷/弱 → 负向；
             2. 四化星落该宫 → 增强方向（禄/权/科 正，忌 负）；
-            3. 命宫主星整体状态作为基础。
+            3. 运限层（流日/流月/流年）：该 domain 宫临本命何宫、流干四化引动
+               该宿主宫星曜 → 修正净值（让信号随时间变化，本命盘本身是静止的）。
         """
         target_palace = DOMAIN_PALACE.get(query.domain)
         palace = next(
@@ -187,6 +250,43 @@ class ZiweiAdapter(MetaphysicalAdapter):
                 mutagen_labels.append(f"{s['label']}忌")
 
         net = (0.5 if bright_any else -0.3 if weak_any else 0.0) + mutagen_val
+
+        # ---------- 运限层：流X 目标宫临本命哪一宫 + 流干四化 ----------
+        # 只用本命盘算紫微，每天信号都一样 —— 这是「静止盘当天气预报用」的伪精度。
+        # 运限层把「当天流日夫妻宫临本命何宫、流干四化引动哪些星」纳入净值得分。
+        flow_evidence: list[str] = []
+        flow_payload = chart.get("flow") or {}
+        flow_scale = query.time_scale.value
+        # 周尺度以流月层论（流日只主当天，管不住整周）
+        if flow_scale == "week":
+            flow_scale = "month"
+        layer = flow_payload.get(flow_scale) or {}
+        palace_names = layer.get("palace_names") or []
+        palace_en = PALACE_EN.get(target_palace or "")
+        if palace_en and palace_en in palace_names:
+            host_index = palace_names.index(palace_en)
+            host = next(
+                (p for p in chart.get("palaces", []) if p["index"] == host_index),
+                None,
+            )
+            if host is not None:
+                host_stars = host.get("major_stars", [])
+                host_bright = any(s["is_bright"] for s in host_stars)
+                host_weak = any(s["is_weak"] for s in host_stars)
+                net += 0.3 if host_bright else (-0.2 if host_weak else 0.0)
+                star_txt = "、".join(s["label"] for s in host_stars) or "无主星"
+                flow_evidence.append(
+                    f"{layer['layer_name']}{target_palace}临本命{host['name']}（{star_txt}）"
+                )
+                # 流干四化引动宿主宫星曜
+                mu = STEM_MUTAGENS.get(layer.get("stem") or "")
+                if mu:
+                    labels = {s["label"] for s in host_stars}
+                    for badge, star in zip(("禄", "权", "科", "忌"), mu):
+                        if star in labels:
+                            net += -0.4 if badge == "忌" else 0.3
+                            flow_evidence.append(f"{layer['layer_name']}干化{badge}引动{star}")
+
         if net == 0:
             return []
 
@@ -215,6 +315,14 @@ class ZiweiAdapter(MetaphysicalAdapter):
                     source=EvidenceSource.TRADITIONAL_RULE,
                     rule_id=rule_id,
                     description=f"四化：{'、'.join(mutagen_labels)}",
+                )
+            )
+        for fe in flow_evidence:
+            evidence.append(
+                Evidence(
+                    source=EvidenceSource.TRADITIONAL_RULE,
+                    rule_id=rule_id,
+                    description=fe,
                 )
             )
 

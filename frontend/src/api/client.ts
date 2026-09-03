@@ -2,6 +2,7 @@
 
 import type {
   Aggregate,
+  DailyAlmanac,
   EngineInfo,
   GateTestResponse,
   HistoryItem,
@@ -265,6 +266,12 @@ export const api = {
   fortuneReadingZiwei: (userId: number, refresh = false) =>
     get<ZiweiReading>(
       `/api/fortune/reading/ziwei?user_id=${userId}${refresh ? '&refresh=true' : ''}`,
+    ),
+
+  /** 今日锦囊：宜忌/吉神方位/冲煞/吉时/幸运色数/桃花引动（确定性，秒出） */
+  fortuneDaily: (userId: number, date?: string) =>
+    get<DailyAlmanac>(
+      `/api/fortune/daily?user_id=${userId}${date ? `&date=${date}` : ''}`,
     ),
 };
 

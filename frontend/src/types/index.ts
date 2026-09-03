@@ -47,6 +47,45 @@ export interface PredictionBrief {
   window: [string, string];
   verification_due_at: string | null;
   sha256_head: string;
+  /** 读取端重建的详批（情景/多法印证/建议/幸运参考），非冻结内容 */
+  narrative?: string;
+  /** 正向同向的术式来源（如 ["bazi","ziwei"]），多法交叉徽标用 */
+  supporting_sources?: string[];
+  opposing_sources?: string[];
+  /** ≥2 个术式源同向（多方法交叉印证达成） */
+  crossed?: boolean;
+}
+
+/** 今日锦囊（/api/fortune/daily）：老黄历 + 民俗元素，纯确定性派生 */
+export interface DailyAlmanac {
+  date: string;
+  day_ganzhi: string;
+  day_wuxing: string;
+  lunar_date: string;
+  yi: string[];
+  ji: string[];
+  xi_dir: string;
+  cai_dir: string;
+  fu_dir: string;
+  chong: string;
+  sha_direction: string;
+  day_god: string;
+  pengzu: string[];
+  lucky_hours: string[];
+  lucky_color: string;
+  lucky_color_aux: string;
+  lucky_numbers: number[];
+  day_zhi: string;
+  day_master?: string;
+  day_master_wuxing?: string;
+  day_master_relation?: string;
+  peach_blossom_stars?: {
+    hongluan: string;
+    tianxi: string;
+    xianchi: string[];
+  };
+  peach_activated?: string[];
+  clash_birth_day?: boolean;
 }
 
 /** 方案第 49 节：预测详情必须完全可解释 */

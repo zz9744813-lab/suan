@@ -45,6 +45,7 @@ from app.core.base import AdapterQuery
 from app.core.calendar.core import CalendarCore
 from app.models.prediction import ForecastCandidate, PredictionFreeze, PredictionRecord
 from app.models.reality import DailyState
+from app.services.cross_engine import daily_almanac, summarize_signals, when_text
 from app.prediction.budget import apply_budget, default_slots
 from app.prediction.ontology import ONTOLOGY, by_scale
 from app.reality.null_model import NullModel
@@ -157,7 +158,8 @@ class DailyPipeline:
         if phase == "cold":
             result.notes.append(
                 f"冷启动：已验证样本 {calibrated}/{self.settings.MIN_CALIBRATION_SAMPLES}，"
-                f"术式信号未经实证不参与融合，本轮仅产出研究样本（不代表预测力）"
+                f"术式信号用于选题/叙事并留痕，概率仍取 Null 基线"
+                f"（术式预测力未经实证，不宣称有效）"
             )
         elif phase == "explore":
             result.notes.append(
@@ -184,6 +186,11 @@ class DailyPipeline:
         window = FreezeAgent.default_window(
             datetime(target_date.year, target_date.month, target_date.day), time_scale
         )
+
+        try:
+            almanac = daily_almanac(self.session, self.user_id, window.start.date())
+        except Exception:  # 锦囊缺失不阻断正式期
+            almanac = None
 
         # ---------- 4. 确定性通道（无 LLM）：信号 → 融合 → 门槛 → 临时候选 → Gate ----------
         # 核心原则（C-005 + 禁止 6）：概率永远来自确定性融合/Null 基线；
@@ -248,6 +255,7 @@ class DailyPipeline:
                 time_scale=time_scale,
                 probability=p_final,
                 signals=signals,
+                almanac=almanac,
             )
             if cand is None:
                 result.notes.append(f"{event_type} 无法构造可证伪候选（C-001）")
@@ -325,20 +333,38 @@ class DailyPipeline:
         reality_state: dict[str, Any],
         phase: str,
     ) -> PipelineResult:
-        """研究期主流程：多尺度 Ontology 扫描 → 信号 → 融合 → 按尺度配额冻结。
+        """研究期主流程：多尺度多法交叉扫描 → 收敛优选 → 富文本冻结。
 
         全程零 LLM：研究样本的使命是启动验证闭环，必须秒级完成。
-        概率权威：cold 强制 Null 基线；explore 为弱先验融合结果。
+        术式信号的角色（第一性拆解）：
+          - 「选什么事」：各引擎对每个本体事件独立给信号，正向同向数多的
+            事件优先入选（多方法交叉）；纯 Null 事件兜底补齐配额；
+          - 「怎么说」：描述由确定性叙事注册表 + 真实证据句渲染；
+          - 「概率多少」：权威不变 —— cold 强制 Null 基线，explore 弱先验融合
+            （C-005/C-006；信号照常落库，为后续验证积累 per-source 实证样本）。
         """
         all_provisional: list[PredictionCandidate] = []
         chosen: list[tuple[PredictionCandidate, float, Any]] = []
         by_scale_count: dict[str, int] = {}
+
+        # 每个尺度窗口的锦囊（幸运元素/宜忌，窗口起始日确定论派生；一次一日期）
+        almanac_cache: dict[Any, dict[str, Any]] = {}
 
         for scale_name, quota in self.RESEARCH_SCALE_PLAN:
             scale = SCALE_BY_NAME.get(scale_name, TimeScale.DAY)
             window = FreezeAgent.default_window(
                 datetime(target_date.year, target_date.month, target_date.day), scale
             )
+            if window.start.date() not in almanac_cache:
+                try:
+                    almanac_cache[window.start.date()] = daily_almanac(
+                        self.session, self.user_id, window.start.date()
+                    )
+                except Exception as exc:  # 锦囊缺失不阻断生成
+                    logger.warning("今日锦囊生成失败：%s", exc)
+                    almanac_cache[window.start.date()] = {}
+            almanac = almanac_cache[window.start.date()]
+
             scanned = self._ontology_scan(
                 scale=scale_name, limit=max(quota * 4, self.settings.RESEARCH_SAMPLE_LIMIT)
             )
@@ -350,6 +376,8 @@ class DailyPipeline:
                 spec = ONTOLOGY.get(event_type)
                 domain = _domain(item.get("domain", "") or (spec.domain if spec else ""))
                 try:
+                    # 研究期同样全量收集术式信号：选事件 + 叙事 + 留痕三层用途。
+                    # （概率权威不受此影响：cold 仍取 null_p，见下。）
                     signals, null_p = self._collect_signals(
                         event_type=event_type,
                         domain=domain,
@@ -358,7 +386,7 @@ class DailyPipeline:
                         target_date=target_date,
                         reality_state=reality_state,
                         experiment_arm=self.experiment_arm,
-                        include_metaphysical=(phase != "cold"),
+                        include_metaphysical=True,
                     )
                 except Exception as exc:
                     result.notes.append(f"{event_type} 信号收集失败：{exc}")
@@ -379,15 +407,34 @@ class DailyPipeline:
                     time_scale=scale,
                     probability=null_p if phase == "cold" else fusion.probability,
                     signals=signals,
+                    almanac=almanac,
                 )
                 if cand is None:
                     continue
                 all_provisional.append(cand)
                 per_scale.append((cand, null_p, fusion))
 
-            # 按概率降序取该尺度配额
-            per_scale.sort(key=lambda e: e[0].probability, reverse=True)
-            picked = per_scale[:quota]
+            # ---------- 交叉印证优先 + 领域多样性选择 ----------
+            # 排序键：术式正向源数（降序）→ 概率（降序）；同分保证领域多样性 ——
+            # 已选的 domain 靠后，让每轮样本覆盖不同生活面。
+            def _rank(entry: tuple[PredictionCandidate, float, Any]) -> tuple[int, float]:
+                cs = summarize_signals(entry[0].signals)
+                return (cs.metaphysical_support, entry[0].probability)
+
+            per_scale.sort(key=_rank, reverse=True)
+            picked: list[tuple[PredictionCandidate, float, Any]] = []
+            seen_domains: set[str] = set()
+            deferred: list[tuple[PredictionCandidate, float, Any]] = []
+            for entry in per_scale:
+                if entry[0].domain.value in seen_domains:
+                    deferred.append(entry)
+                else:
+                    picked.append(entry)
+                    seen_domains.add(entry[0].domain.value)
+                if len(picked) >= quota:
+                    break
+            if len(picked) < quota:
+                picked.extend(deferred[: quota - len(picked)])
             chosen.extend(picked)
             by_scale_count[scale_name] = len(picked)
 
@@ -397,9 +444,12 @@ class DailyPipeline:
 
         result.candidates = all_provisional
         result.budget_usage = {"research": len(chosen), **by_scale_count}
+        crossed = sum(
+            1 for cand, _, _ in chosen if summarize_signals(cand.signals).crossed
+        )
         result.notes.append(
             f"研究期多尺度：{' / '.join(f'{k} {v}' for k, v in by_scale_count.items())}，"
-            f"共 {len(chosen)} 条研究样本（零 LLM，秒级）"
+            f"共 {len(chosen)} 条研究样本（零 LLM，秒级；{crossed} 条达成 ≥2 法交叉印证）"
         )
 
         for cand, _, _ in chosen:
@@ -522,24 +572,6 @@ class DailyPipeline:
         ]
 
     # ------------------------------------------------------------------
-    _WEEKDAY_ZH = "一二三四五六日"
-
-    def _describe_event(
-        self, label: str, window: TimeWindow, time_scale: TimeScale
-    ) -> str:
-        """把时间窗口写进描述，让每条研究样本/候选一眼可读：何时、何事。"""
-        s, e = window.start, window.end
-        wd = f"周{self._WEEKDAY_ZH[s.weekday()]}"
-        if time_scale == TimeScale.DAY:
-            when = f"{s.month}月{s.day}日（{wd}）"
-        elif time_scale == TimeScale.WEEK:
-            when = f"{s.month}月{s.day}日 ~ {e.month}月{e.day}日这一周"
-        elif time_scale == TimeScale.MONTH:
-            when = f"{s.year}年{s.month}月"
-        else:
-            when = f"{s.year}年"
-        return f"{when}{label}"
-
     def _provisional_candidate(
         self,
         *,
@@ -549,12 +581,14 @@ class DailyPipeline:
         time_scale: TimeScale,
         probability: float,
         signals: list[Signal],
+        almanac: dict[str, Any] | None = None,  # 保留形参：叙事已改在读取端重建（见 cross_engine.rich_description）
     ) -> PredictionCandidate | None:
         """由 Event Ontology 构造确定性候选（第 56 节）。
 
-        预测的「最小可证伪骨架」必须能独立于 LLM 存在（C-001）：
-        描述/成功失败标准/裁定规则全部来自 Ontology；概率永远来自融合方。
-        描述用「何时 + 何事」句式，不靠 LLM 也言之有物。
+        预测的「最小可证伪骨架」必须能独立于 LLM 存在（C-001）。
+        description 只写「何时 + 何事」的事实断言 —— 对抗 Gate 审的就是它；
+        富文本叙事（情景/印证/建议/幸运）是展示层，由读取端用同一套确定性
+        函数从「事件 + 信号 + 锦囊」重建，不进冻结哈希、不过 Gate（C-003 语义不变）。
         """
         spec = ONTOLOGY.get(event_type)
         if spec is None:
@@ -562,7 +596,7 @@ class DailyPipeline:
         return PredictionCandidate(
             domain=domain,
             event_type=event_type,
-            description=self._describe_event(spec.label, window, time_scale),
+            description=f"{when_text(time_scale, window.start, window.end)}{spec.label}。",
             probability=probability,
             time_scale=time_scale,
             window_start=window.start,

@@ -416,3 +416,27 @@ def fortune_reading_system(
     from app.services.fortune import generate_ziwei_reading
 
     return generate_ziwei_reading(session, user_id=user_id, refresh=refresh)
+
+
+@router.get("/fortune/daily")
+def fortune_daily(
+    user_id: int = Query(...),
+    date: str | None = Query(None, description="YYYY-MM-DD，缺省为今天"),
+    session: Session = Depends(get_session),
+):
+    """今日锦囊：宜忌 / 吉神方位 / 冲煞 / 吉时 / 幸运色数 / 桃花引动。
+
+    完全由确定性历法（lunar-python 老黄历）+ 民俗规则派生，秒出，
+    无 LLM 参与；属传统术数参考展示，不进入预测闭环与评分。
+    """
+    from app.services.cross_engine import daily_almanac
+
+    from datetime import date as date_cls
+
+    from app.services.cross_engine import daily_almanac
+
+    try:
+        day = date_cls.fromisoformat(date) if date else date_cls.today()
+    except ValueError:
+        raise HTTPException(400, "date 格式应为 YYYY-MM-DD") from None
+    return daily_almanac(session, user_id, day)

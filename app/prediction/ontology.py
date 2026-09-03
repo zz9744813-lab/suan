@@ -177,6 +177,55 @@ ONTOLOGY: dict[str, EventSpec] = {
         failure_criteria=("未发生",),
         preferred_scales=("day", "week"),
     ),
+    # ---------------- relationship（姻缘/感情）----------------
+    "relationship.romantic_encounter": EventSpec(
+        event_type="relationship.romantic_encounter",
+        domain="relationship",
+        label="遇到心动的缘分",
+        success_criteria=(
+            "出现一次明确的好感信号：新认识并产生好感的异性/旧识升温/被介绍对象，任一种",
+            "你能在睡前复述出这次接触的对象和经过",
+        ),
+        failure_criteria=("没有任何此类接触或迹象",),
+        preferred_scales=("day", "week"),
+    ),
+    "relationship.relationship_progress": EventSpec(
+        event_type="relationship.relationship_progress",
+        domain="relationship",
+        label="感情关系推进",
+        success_criteria=(
+            "与心上人/伴侣的关系有明确推进：单独约会、互表心意、确定关系或深度谈心，任一种",
+        ),
+        failure_criteria=("关系原地踏步", "尚无在意的对象，无推进对象"),
+        preferred_scales=("week", "month"),
+    ),
+    "relationship.rival_or_misunderstanding": EventSpec(
+        event_type="relationship.rival_or_misunderstanding",
+        domain="relationship",
+        label="感情波折（误会/争执）",
+        success_criteria=("与心仪对象或伴侣发生明显争执、误会或冷战",),
+        failure_criteria=("未发生", "无感情对象可争执"),
+        preferred_scales=("week",),
+    ),
+    # ---------------- 贵人/聚会 ----------------
+    "career.noble_help": EventSpec(
+        event_type="career.noble_help",
+        domain="career",
+        label="获得实质帮助",
+        success_criteria=(
+            "工作/学业上收到明确的具体帮助：前辈指点、资源介绍、替你说话或替你解围",
+        ),
+        failure_criteria=("未获得任何此类帮助",),
+        preferred_scales=("day", "week"),
+    ),
+    "social.gathering": EventSpec(
+        event_type="social.gathering",
+        domain="social",
+        label="聚会/饭局邀约",
+        success_criteria=("收到或参加一次非独自的聚会/饭局/集体活动",),
+        failure_criteria=("没有任何聚会或邀约",),
+        preferred_scales=("day", "week"),
+    ),
     # ---------------- communication / habit / travel ----------------
     "communication.message_volume_spike": EventSpec(
         event_type="communication.message_volume_spike",

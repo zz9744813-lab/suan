@@ -38,6 +38,19 @@ const SCALES = [
 /* ---------- 按日分组：预测的组织主线是「哪一天 → 发生什么事」 ---------- */
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'] as const;
 
+/** 术式来源中文名（交叉印证徽标用） */
+const SOURCE_ZH: Record<string, string> = {
+  ziwei: '紫微',
+  bazi: '八字',
+  qimen: '奇门',
+  liuyao: '六爻',
+  meihua: '梅花',
+  palm: '掌纹',
+  face: '面相',
+  reality: '现实',
+  null: '基线',
+};
+
 function localDayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate(),
@@ -257,6 +270,7 @@ export default function Future() {
   const [runDone, setRunDone] = useState(false);
 
   const preds = useAsync(() => api.listPredictions(DEFAULT_USER_ID), []);
+  const daily = useAsync(() => api.fortuneDaily(DEFAULT_USER_ID), []);
   const overall = useAsync(() => api.overall(DEFAULT_USER_ID), []);
   const due = useAsync(() => api.duePredictions(DEFAULT_USER_ID), []);
   const health = useAsync(() => api.health(), []);
@@ -348,13 +362,36 @@ export default function Future() {
               </>
             )}
           </div>
+          {/* 多法交叉印证：≥2 术式同向才是真正的「多方法交叉」 */}
+          {((p.supporting_sources?.length ?? 0) > 0 || (p.opposing_sources?.length ?? 0) > 0) && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {p.crossed && (
+                <Badge tone="good">◆ {p.supporting_sources!.length} 法交叉印证</Badge>
+              )}
+              {(p.supporting_sources ?? []).map((s) => (
+                <Badge key={s} tone="gilt">
+                  ✓ {SOURCE_ZH[s] ?? s}
+                </Badge>
+              ))}
+              {(p.opposing_sources ?? []).map((s) => (
+                <Badge key={s} tone="warn">
+                  ✗ {SOURCE_ZH[s] ?? s}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {p.narrative && (
+            <div className="mt-2 whitespace-pre-line rounded-lg border border-bd/60 bg-white/[0.03] px-3 py-2 text-xs leading-relaxed text-t2">
+              {p.narrative}
+            </div>
+          )}
           {isResearch && (
             <div className="mt-2 flex items-start gap-1.5 text-xs text-amber-400/90">
               <span className="mt-0.5 h-1 w-1 shrink-0 rounded-full bg-amber-400" />
               <span>
                 {phase === 'explore'
                   ? '研究样本（实证期）：术式信号以弱先验参与并完整留痕，验证后将转化为各术式的可靠度实证。尚不代表预测力。'
-                  : '研究样本（冷启动）：术式信号未参与，概率 = Null 基线。用于启动校准闭环、积累验证数据，不代表预测力。'}
+                  : '研究样本（冷启动）：多术式交叉只决定「选题与详批」，概率仍是 Null 基线 —— 术式效力未经你的现实验证前，系统不替它背书。验证样本攒够后即自动升级。'}
               </span>
             </div>
           )}
@@ -405,6 +442,74 @@ export default function Future() {
           </>
         }
       />
+
+      {/* 今日锦囊：老黄历（确定性历法派生）+ 幸运元素 + 情缘星 */}
+      {daily.data && (
+        <Card
+          title={`今日锦囊 · ${daily.data.day_ganzhi}日 · ${daily.data.lunar_date}`}
+          subtitle={`值神 ${daily.data.day_god} · 冲${daily.data.chong} 煞${daily.data.sha_direction} · 传统民俗参考`}
+          right={
+            daily.data.peach_activated && daily.data.peach_activated.length > 0 ? (
+              <Badge tone="good">❀ {daily.data.peach_activated.join('、')}</Badge>
+            ) : undefined
+          }
+        >
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-t3">宜</div>
+              <div className="flex flex-wrap gap-1">
+                {daily.data.yi.map((y) => (
+                  <Badge key={y} tone="good">
+                    {y}
+                  </Badge>
+                ))}
+              </div>
+              <div className="mb-1 mt-3 text-xs font-medium text-t3">忌</div>
+              <div className="flex flex-wrap gap-1">
+                {daily.data.ji.map((j) => (
+                  <Badge key={j} tone="bad">
+                    {j}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2 text-xs text-t2">
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                <span>
+                  喜神 <b className="text-t1">{daily.data.xi_dir}</b>
+                </span>
+                <span>
+                  财神 <b className="text-t1">{daily.data.cai_dir}</b>
+                </span>
+                <span>
+                  福神 <b className="text-t1">{daily.data.fu_dir}</b>
+                </span>
+              </div>
+              <div>
+                幸运色 <b className="text-gt">{daily.data.lucky_color}</b>（辅{' '}
+                {daily.data.lucky_color_aux}） · 幸运数{' '}
+                <b className="text-gt">{daily.data.lucky_numbers.join('、')}</b>
+                {daily.data.day_master && (
+                  <span className="text-t3">
+                    {' '}
+                    · 日主{daily.data.day_master}（{daily.data.day_master_wuxing}）x 今日
+                    {daily.data.day_master_relation}
+                  </span>
+                )}
+              </div>
+              <div>
+                吉时{' '}
+                {daily.data.lucky_hours.map((h) => (
+                  <span key={h} className="mr-2 text-t2">
+                    {h}
+                  </span>
+                ))}
+              </div>
+              <div className="text-t4">彭祖百忌：{daily.data.pengzu.join('；')}</div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* 闭环流水线：页面视觉锚点 */}
       <Card
