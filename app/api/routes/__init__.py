@@ -3,8 +3,9 @@
     /api/predictions/*   预测生成 / 详情 / 验证 / 历史
     /api/analytics/*     评分 / 校准 / 可靠度矩阵 / 消融
     /api/system/*        引擎状态 / 用户档案 / 规则 / 本体 / Gate 测试
+    /api/imaging/*       影像相学分析（面相 / 掌纹，隐私铁律见 imaging.py）
 """
 
-from . import analytics, predictions, system
+from . import analytics, imaging, predictions, system
 
-__all__ = ["predictions", "analytics", "system"]
+__all__ = ["predictions", "analytics", "system", "imaging"]

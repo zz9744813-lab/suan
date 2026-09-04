@@ -105,9 +105,13 @@ class LLMResponse:
 
 @dataclass
 class LLMRequest:
-    """统一的 LLM 请求。"""
+    """统一的 LLM 请求。
 
-    messages: list[dict[str, str]] = field(default_factory=list)
+    messages 的 content 既可是纯文本字符串，也可是 OpenAI 视觉分段
+    （[{"type": "text", ...}, {"type": "image_url", ...}]）——视觉层专用。
+    """
+
+    messages: list[dict[str, Any]] = field(default_factory=list)
     temperature: float | None = None
     max_tokens: int | None = None
     response_format_json: bool = False

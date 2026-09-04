@@ -3,14 +3,18 @@ import { useState } from 'react';
 import { api, DEFAULT_USER_ID, type FortuneReading, type ZiweiReading } from '../api/client';
 import {
   BRIGHTNESS_CLS,
+  DAYUN_NOTE,
   MiniTaiji,
   MUTAGEN_CLS,
   Sparkles,
   WUXING_COLOR,
+  tenGod,
+  tenGodOfZhi,
   wuxingOfGan,
   wuxingOfZhi,
 } from '../components/almanac';
 import { RitualLoading } from '../components/rituals';
+import { ImagingPanel } from '../components/imaging-panel';
 import { Badge, Card, EmptyState, ErrorBox, GhostButton, Loading, PageHeader, PrimaryButton, inputCls } from '../components/ui';
 import { SOURCE_LABEL, cleanDescription, pct } from '../lib/format';
 import { useAsync } from '../lib/useAsync';
@@ -37,8 +41,8 @@ const ENGINE_REF: Record<string, string> = {
   qimen: 'Maximilian-Winter/Qimen-Dunjia',
   liuyao: 'Johnson-Jia/liuyao-divination',
   meihua: 'handsomejustin/meihua-yi',
-  palm: 'yeonsumia/palmistry + MediaPipe',
-  face: 'MediaPipe Face Landmark',
+  palm: 'OpenCV 肤色分割 + 线纹测量（本地）',
+  face: 'OpenCV Haar 级联 + 三庭五眼几何（本地）',
 };
 
 /** 批示维度 → 图标 + 说明 */
@@ -83,6 +87,23 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
   const currentAgeExact = chart.current_age_exact;
   const nowYear = new Date().getFullYear();
   const fallbackAge = nowYear - (chart.liunian?.[0]?.age ?? 0);
+  const effectiveAge = currentAgeExact ?? fallbackAge;
+  const dayMaster: string = chart.day_master ?? '';
+  // 选中的大运（点击运柱联动流年高亮）
+  const [selDy, setSelDy] = useState<number | null>(null);
+  const selDayun = selDy !== null ? dayun[selDy] : null;
+  const selWindow =
+    selDayun && selDy !== null
+      ? (() => {
+          const next = dayun[selDy + 1];
+          return {
+            startYear: selDayun.start_year,
+            endYear: (next ? next.start_year : selDayun.start_year + 10) - 1,
+            startAge: selDayun.start_age,
+            endAge: (next ? next.start_age : selDayun.start_age + 10) - 1,
+          };
+        })()
+      : null;
 
   return (
     <div className="space-y-5">
@@ -163,56 +184,141 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
         )}
       </Card>
 
-      {/* 大运时间轴 */}
-      <Card title="大运" subtitle="每十年一换的大运干支，标出当前所处大运">
+      {/* 大运时间轴：可点击运柱，联动流年高亮 */}
+      <Card
+        className="frame-flow"
+        title="大运流转"
+        subtitle="十年一运；金色为当前行运，点击任一运柱查看这十年的基调"
+      >
         {dayun.length === 0 ? (
           <EmptyState>暂无大运数据</EmptyState>
         ) : (
-          <div className="flex items-stretch gap-0 overflow-x-auto pb-1">
-            {dayun.map((d, i) => {
-              // 当前大运：根据"是否本年生日已过"反推实际周岁，再对照 start_age
-              const effectiveAge = currentAgeExact != null ? currentAgeExact : fallbackAge;
-              const isCurrent =
-                effectiveAge != null && effectiveAge >= d.start_age && i < dayun.length - 1 && effectiveAge < dayun[i + 1].start_age;
-              return (
-                <div key={i} className="flex min-w-[76px] flex-1 items-center">
-                  <div
-                    className={`flex w-full flex-col items-center gap-1 rounded-lg border px-1 py-2 text-center transition-colors ${
-                      isCurrent
-                        ? 'border-gilt-500/60 bg-gilt-500/15 shadow-[0_0_14px_-4px_rgba(201,162,39,0.55)]'
-                        : 'border-line bg-panel'
-                    }`}
-                  >
-                    <span className={`font-serif text-base font-semibold tracking-wide ${isCurrent ? 'text-gt' : 'text-t1'}`}>
-                      {d.ganzhi}
-                    </span>
-                    <span className="text-[10px] text-t4">{d.start_age} 岁</span>
-                    <span className="text-[10px] text-t5">{d.start_year}</span>
-                    {isCurrent && (
-                      <Badge tone="gilt">当前</Badge>
+          <>
+            <div className="flex items-stretch gap-0 overflow-x-auto pb-2">
+              {dayun.map((d, i) => {
+                const next = dayun[i + 1];
+                const endAge = (next ? next.start_age : d.start_age + 10) - 1;
+                const endYear = (next ? next.start_year : d.start_year + 10) - 1;
+                const isCurrent =
+                  effectiveAge != null &&
+                  effectiveAge >= d.start_age &&
+                  effectiveAge <= endAge;
+                const selected = selDy === i;
+                const gan = d.ganzhi.slice(0, 1);
+                const zhi = d.ganzhi.slice(1, 2);
+                const gWuxing = wuxingOfGan(gan);
+                const zWuxing = wuxingOfZhi(zhi);
+                const ganShen = tenGod(dayMaster, gan);
+                const zhiShen = tenGodOfZhi(dayMaster, zhi);
+                return (
+                  <div key={i} className="flex min-w-[86px] flex-1 items-center">
+                    <button
+                      onClick={() => setSelDy(selected ? null : i)}
+                      className={`btn-press flex w-full flex-col items-center gap-1 rounded-xl border px-1 py-2.5 text-center transition-all duration-300 ${
+                        selected
+                          ? 'border-gilt-400 bg-gilt-500/[0.14] shadow-[0_0_20px_-4px_rgba(201,162,39,0.6)]'
+                          : isCurrent
+                            ? 'border-gilt-500/60 bg-gilt-500/10 shadow-[0_0_14px_-4px_rgba(201,162,39,0.5)]'
+                            : 'border-line bg-panel hover:border-gilt-500/40 hover:bg-gilt-500/[0.05]'
+                      }`}
+                      title={`${d.ganzhi}运 · ${d.start_year}–${endYear} · ${d.start_age}–${endAge}岁`}
+                    >
+                      <span className="text-[9px] tracking-wider text-t5">
+                        {ganShen && <span className="text-gt/80">{ganShen}</span>}
+                        {zhiShen && <span className="text-t5">·{zhiShen}</span>}
+                      </span>
+                      <span className="flex flex-col items-center leading-none">
+                        <span
+                          className="font-serif text-xl font-semibold"
+                          style={{ color: WUXING_COLOR[gWuxing] ?? 'var(--t1)' }}
+                        >
+                          {gan}
+                        </span>
+                        <span
+                          className="font-serif text-xl font-semibold"
+                          style={{ color: WUXING_COLOR[zWuxing] ?? 'var(--t2)' }}
+                        >
+                          {zhi}
+                        </span>
+                      </span>
+                      <span className="text-[10px] tabular text-t3">
+                        {d.start_age}–{endAge} 岁
+                      </span>
+                      <span className="text-[9px] tabular text-t5">
+                        {d.start_year}–{endYear}
+                      </span>
+                      {isCurrent && <Badge tone="gilt">当下行运</Badge>}
+                    </button>
+                    {i < dayun.length - 1 && (
+                      <div
+                        className={`h-px w-2 shrink-0 ${
+                          isCurrent ? 'bg-gilt-500/60' : 'bg-line'
+                        }`}
+                      />
                     )}
                   </div>
-                  {i < dayun.length - 1 && (
-                    <div className={`h-px w-2 shrink-0 ${isCurrent ? 'bg-gilt-500/50' : 'bg-panel'}`} />
-                  )}
+                );
+              })}
+            </div>
+
+            {/* 选中运柱的详情条 */}
+            {selDayun && selWindow && (
+              <div className="animate-fade-up mt-2 rounded-xl border border-gilt-500/35 bg-gilt-500/[0.07] p-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="text-gt font-serif text-lg font-semibold">
+                    {selDayun.ganzhi}运
+                  </span>
+                  <Badge tone="gilt">{tenGod(dayMaster, selDayun.ganzhi.slice(0, 1))}</Badge>
+                  <span className="text-xs tabular text-t3">
+                    {selWindow.startYear}–{selWindow.endYear} 年 · {selWindow.startAge}–
+                    {selWindow.endAge} 岁
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+                <p className="mt-2 text-xs leading-relaxed text-t2">
+                  {DAYUN_NOTE[tenGod(dayMaster, selDayun.ganzhi.slice(0, 1))] ??
+                    '此运基调以静守为宜。'}
+                  <span className="ml-1 text-t4">
+                    （干为{tenGod(dayMaster, selDayun.ganzhi.slice(0, 1))}，支为
+                    {tenGodOfZhi(dayMaster, selDayun.ganzhi.slice(1, 2))}；传统命理参考）
+                  </span>
+                </p>
+              </div>
+            )}
+          </>
         )}
       </Card>
 
-      {/* 流年运势表 */}
-      <Card title="流年运势" subtitle="未来十年的流年干支与生肖">
+      {/* 流年运势表：与选中大运联动高亮 */}
+      <Card
+        title="流年运势"
+        subtitle={
+          selWindow
+            ? `${selDayun?.ganzhi}运覆盖的流年已鎏金标出（${selWindow.startYear}–${selWindow.endYear}）`
+            : '未来十年的流年干支与生肖；点上方运柱可联动高亮'
+        }
+      >
         {!chart.liunian || chart.liunian.length === 0 ? (
           <EmptyState>暂无流年数据</EmptyState>
         ) : (
           <div className="grid grid-cols-5 gap-2 text-center md:grid-cols-10">
             {chart.liunian.map((ly) => {
               const w = wuxingOfGan((ly.ganzhi ?? '').slice(0, 1));
+              const inSel =
+                selWindow !== null && ly.year >= selWindow.startYear && ly.year <= selWindow.endYear;
+              const isNow = ly.year === nowYear;
               return (
-                <div key={ly.year} className="rounded-lg border border-line bg-panel py-2.5">
-                  <div className="text-[11px] text-t4">{ly.year}</div>
+                <div
+                  key={ly.year}
+                  className={`rounded-lg border py-2.5 transition-all duration-300 ${
+                    inSel
+                      ? 'border-gilt-500/60 bg-gilt-500/[0.10] shadow-[0_0_12px_-4px_rgba(201,162,39,0.45)]'
+                      : 'border-line bg-panel'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1 text-[11px] text-t4">
+                    {ly.year}
+                    {isNow && <Badge tone="gilt">今</Badge>}
+                  </div>
                   <div
                     className="mt-0.5 font-serif text-lg font-semibold tracking-wider"
                     style={{ color: WUXING_COLOR[w] }}
@@ -535,6 +641,15 @@ export default function Charts() {
             </div>
           ))}
         </div>
+      </Card>
+
+      {/* 影像相学：面相 / 掌纹上传分析（隐私：原图即焚，默认不上云） */}
+      <Card
+        className="frame-flow"
+        title="影像相法"
+        subtitle="本地 OpenCV 特征分析，原图分析完立即焚毁、结果不入库；云端详批为逐项勾选的可选项"
+      >
+        <ImagingPanel />
       </Card>
 
       {/* 历法快照 */}

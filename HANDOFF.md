@@ -24,7 +24,7 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `91 passed, 2 skipped`（全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 测试 | `96 passed, 2 skipped`（全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**38 张表**（+`system_fortune_readings` 紫微批示缓存） |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
@@ -36,6 +36,8 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 多法交叉选题 | 研究期/正式期都先跑 6 术式信号，按「同向术式数」排序选题（2026-09-03）。≥2 法同向 → 卡片带「◆ N 法交叉印证」徽标 + ✓/✗ 术式徽标。**交叉只决定选题与详批，概率仍归 Null/融合（C-005 不动）** |
 | 详批叙事层 | `app/services/cross_engine.py` + `app/prediction/narratives.py`（2026-09-03）：常见情景/多法印证明细（每条带真实证据串）/建议/注意/幸运参考。**概率口径行明示「信号概率 vs 日常基线」**（持平/抬高/压低三态）；**注意（示警）常显**，有示警术式必点名（「八字、奇门 示警」）。关键架构：**叙事是读侧确定性重建（list/detail 接口现场拼），冻结仓里只存「何时+何事」短声明**——否则长文案必被 Gate 的模糊词攻击拦截（见坑 16） |
 | 研究期去重 | 冻结前按 (event_type, time_scale, 窗口日) 去重，与在库样本重复的选题跳过并在 notes 注明（2026-09-03，见坑 19） |
+| 影像相法 | `POST /api/imaging/analyze`（2026-09-03）：面相/掌纹照片上传分析。隐私边界（第 64 节）：原图写临时文件→OpenCV 提取特征→`finally` 立即删除、结果**不入库**；云端详批=服务器 `ENABLE_CLOUD_VISION` + 前端逐项勾选**双闸门**，把原图（base64 data-URI）发给 agnes-2.5-flash 出「传统相学口径」短文（系统提示禁健康/寿命/人格推断，第 9 节）。未检出时诚实返回重拍建议 |
+| 大运交互 | 命盘页大运改为可点时间轴（2026-09-03）：每柱显示干/支十神标签，点击运柱展开十年基调详条（`DAYUN_NOTE` 十神映射，前端纯计算零请求），流年卡同步鎏金高亮所选运覆盖年份；顺带修了「最后一柱大运永远标不上当前」的旧 bug |
 | 术式仪式动效 | `frontend/src/components/rituals.tsx`（2026-09-03）：生成中逐术式轮动（六爻铜钱摇卦/梅花数字卷帘/奇门九星转盘/八字四柱翻字/紫微布宫流光/掌纹描线/面相三停扫描），完成后七术式收录态；命盘页批示等待同款仪式。纯 CSS/内联 SVG，`prefers-reduced-motion` 有降级 |
 | 出生档案 | 创建 + `PUT /api/users/{id}/profile` 更新（之前只有 create，2026-08-30 补） |
 | 紫微运限 | `ziwei-0.2.0`：iztro `chart.horoscope()` 流日/流月/流年接入信号层——流年宫宿主本命宫 + 流年干四化（十干四化表）引动本命星，按权重计入方向/强度。时标映射：day→流日、week/month→流月、year→流年 |
@@ -92,7 +94,7 @@ C:\Users\6\.workbuddy\binaries\python\envs\default\Scripts\pip.exe
 | 模型 | 延迟 | 类型 | 结论 |
 |---|---|---|---|
 | `glm-5.3-flash` | ~35s | 推理（reasoning+content 分离） | **reasoning 层** |
-| `agnes-2.5-flash` | ~4s | 轻推理，答得准 | **cheap 层** |
+| `agnes-2.5-flash` | ~4s | 轻推理，答得准 | **cheap 层 + vision 层**（已实测能读图） |
 | `moonshotai/kimi-k3` | ~37s | 正文好但慢 | 备用 |
 | `deepseek-v4-flash` | 60s 超时 | — | **此站不可用，别选** |
 | `glm-5.3` | 返回空（supported_endpoint_types 为空） | — | **别选** |
@@ -281,6 +283,7 @@ RealityState 扫描 → 候选事件(candidates)
 17. **`iztro` `horoscope` 的 palace_names 是 12 宫中文名列表**（按本命宫序），转宿主本命宫要 `.index(...)` 映射回索引；流年干支是 `'gengHeavenly'` 这种 camelCase 枚举字符串，需 `_HEAVENLY_ZH` 映射回天干再查四化表。
 18. **exe 数据目录在 `dist/data/`（spec datas 里 `("data", "data")`）**，所以清库/补数据要同时处理 repo 的 `data/xuanmirror.db` 和 `dist/data/xuanmirror.db` 两个副本。打包后浏览器若显示旧页面，多半是旧 exe 进程没杀或标签页缓存——换端口验证或给 URL 加 `?fresh=1` 强刷。
 19. **研究期连点两次「生成预测」会重复冻结同一批选题**（2026-09-03 修）：`pipeline._run_research()` 冻结前按 `(event_type, time_scale, window_start.date())` 对在库（FROZEN/RESEARCH/VERIFY_REQUIRED）样本去重，跳过并在 notes 注明「去重：跳过 N 条」。**time_scale 必须在键里**——同一事件在日/周/月是三条独立可证伪声明，缺了它月度样本会被周样本误杀（教训来自一次测试失败）。
+20. **pip 版 opencv 不带 haarcascade xml**（2026-09-03）：`cv2.data.haarcascades` 目录只有 `__init__.py`，`CascadeClassifier` 静默为空 → 面相检测假阴性。修复：`app/core/face/assets/` 内置一份 `haarcascade_frontalface_default.xml`（官方 master 副本，spec datas 已收），加载后查 `cascade.empty()`，空则诚实降级 detected=False。
 
 ---
 

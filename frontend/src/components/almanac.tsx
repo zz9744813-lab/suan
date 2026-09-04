@@ -343,3 +343,54 @@ export function Sparkles({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* 十神（日主 × 他干）：大运/流年卡片的命理解读标签                     */
+/* ------------------------------------------------------------------ */
+
+const GAN_YANG = new Set('甲丙戊庚壬');
+const SHENG = ['木', '火', '土', '金', '水']; // 相生序：木→火→土→金→水→木
+
+/** 十神：日主与另一天干的生克关系（同阴阳正偏有别） */
+export function tenGod(dayMaster: string, gan: string): string {
+  const a = wuxingOfGan(dayMaster);
+  const b = wuxingOfGan(gan);
+  if (!a || !b || !dayMaster || !gan) return '';
+  const d = (SHENG.indexOf(b) - SHENG.indexOf(a) + 5) % 5;
+  const same = GAN_YANG.has(dayMaster) === GAN_YANG.has(gan);
+  return (
+    [
+      ['比肩', '劫财'], // 同我
+      ['食神', '伤官'], // 我生
+      ['偏财', '正财'], // 我克
+      ['七杀', '正官'], // 克我
+      ['偏印', '正印'], // 生我
+    ] as const
+  )[d][same ? 0 : 1];
+}
+
+/** 十神大运十年基调（传统命理参考口径，克制不夸张） */
+export const DAYUN_NOTE: Record<string, string> = {
+  正官: '立规矩、见名分的十年——章程内办事最顺，资历年久自香。',
+  七杀: '压力与魄力并行的十年——顶住了是台阶，顶不住要学会借力。',
+  正印: '学习考证、贵人文书的十年——宜积累资质，宜拜师。',
+  偏印: '偏门技艺的十年——适合钻研冷门方法与独门手艺。',
+  正财: '勤恳置产的十年——正财缓缓来，忌快钱心思。',
+  偏财: '流动生财的十年——机会多门，见好先落袋。',
+  食神: '表达与享受的十年——把肚子里的东西说出来、做出来。',
+  伤官: '才华外露的十年——锋芒裹一层棉，口舌上让三分。',
+  比肩: '自立互助的十年——朋友多、主见强，合伙先明权责。',
+  劫财: '合作与竞争并行的十年——账目分明，亲兄弟明算账。',
+};
+
+/** 地支本气天干（用于取「支十神」） */
+const ZHI_MAIN_GAN: Record<string, string> = {
+  子: '癸', 丑: '己', 寅: '甲', 卯: '乙', 辰: '戊', 巳: '丙',
+  午: '丁', 未: '己', 申: '庚', 酉: '辛', 戌: '戊', 亥: '壬',
+};
+
+/** 地支对日主的十神（经本气天干换算） */
+export function tenGodOfZhi(dayMaster: string, zhi: string): string {
+  const g = ZHI_MAIN_GAN[zhi];
+  return g ? tenGod(dayMaster, g) : '';
+}

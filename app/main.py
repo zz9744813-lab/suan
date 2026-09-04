@@ -149,6 +149,7 @@ def meta_alias():
 # ----------------------------------------------------------------------
 from app.api.routes import (  # noqa: E402
     analytics,
+    imaging,
     predictions,
     system,
 )
@@ -156,6 +157,7 @@ from app.api.routes import (  # noqa: E402
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(system.router, prefix="/api", tags=["system"])
+app.include_router(imaging.router, prefix="/api", tags=["imaging"])
 
 
 # ----------------------------------------------------------------------

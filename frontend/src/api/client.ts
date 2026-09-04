@@ -273,6 +273,15 @@ export const api = {
     get<DailyAlmanac>(
       `/api/fortune/daily?user_id=${userId}${date ? `&date=${date}` : ''}`,
     ),
+
+  /** 影像相学分析（面相/掌纹）。multipart 直传，后端默认不存图不发云。 */
+  imagingAnalyze: (form: FormData) =>
+    request<ImagingAnalysis>('/api/imaging/analyze', {
+      method: 'POST',
+      body: form,
+      // FormData 必须让浏览器自己拼 multipart 边界——不能带 JSON 头
+      headers: {} as HeadersInit,
+    }),
 };
 
 /** 紫微批示：十二宫盘面 + 六维度解读 */
@@ -297,4 +306,19 @@ export interface ZiweiReading {
     prompt_text?: string;
   } | null;
   reading: Record<string, string> | null;
+}
+
+/** 影像分析结果（POST /api/imaging/analyze） */
+export interface ImagingAnalysis {
+  kind: 'palm' | 'face';
+  detected: boolean;
+  features: Record<string, unknown>;
+  reading: string[];
+  cloud: { used: boolean; text?: string; model?: string; duration_ms?: number; reason?: string };
+  privacy: {
+    original_deleted: boolean;
+    stored: boolean;
+    cloud_sent: boolean;
+    note: string;
+  };
 }

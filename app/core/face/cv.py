@@ -72,9 +72,14 @@ def extract_face_features(image_path: str) -> FaceFeatures:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.equalizeHist(gray)
 
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    )
+    # 级联文件：优先 cv2 自带；headless 构建缺 data 时用仓库内置副本。
+    # 两级都缺失 → detected=False 诚实降级（绝不抛异常、不编造）。
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    if not Path(cascade_path).exists():
+        cascade_path = str(Path(__file__).parent / "assets" / "haarcascade_frontalface_default.xml")
+    cascade = cv2.CascadeClassifier(cascade_path)
+    if cascade.empty():
+        return features
     faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
     if len(faces) == 0:
         return features

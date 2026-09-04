@@ -12,9 +12,13 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 # 前端构建产物 → 打包进 exe，运行期从 _MEIPASS/dist 读取
-datas = [("frontend/dist", "dist")]
+# Haar 人脸级联：本仓库内置副本（cv2 headless 构建不带 data 目录）
+datas = [
+    ("frontend/dist", "dist"),
+    ("app/core/face/assets", "app/core/face/assets"),
+]
 
-hiddenimports = []
+hiddenimports = ["python_multipart"]
 
 # uvicorn 动态导入 worker 协议 / 日志
 hiddenimports += collect_submodules("uvicorn")
