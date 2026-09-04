@@ -722,6 +722,47 @@ body {
   }
 }
 
+/* 维度瓦片（批示/紫微六维）：悬停抬升 + 自身色调光晕 */
+.reading-tile {
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+@media (hover: hover) {
+  .reading-tile:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--tone, #c9a227) 55%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--tone, #c9a227) 35%, transparent),
+      0 10px 24px -12px var(--tone, #c9a227);
+  }
+}
+
+/* 流年小格：悬停五行色抬升 + 光晕；按下微缩 */
+.liunian-chip {
+  cursor: pointer;
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease;
+}
+.liunian-chip:disabled {
+  cursor: default;
+}
+@media (hover: hover) {
+  .liunian-chip:not(:disabled):hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--tone, #8a8f98) 60%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--tone, #8a8f98) 40%, transparent),
+      0 8px 18px -10px var(--tone, transparent);
+  }
+}
+.liunian-chip:not(:disabled):active {
+  transform: translateY(0) scale(0.96);
+}
+
 /* 页面大标题：鎏金流光掠过 */
 @keyframes text-flow {
   0%,
@@ -778,7 +819,9 @@ body {
   .btn-press,
   .card-hover,
   .card-lift,
-  .row-hover {
+  .row-hover,
+  .reading-tile,
+  .liunian-chip {
     transition: none;
   }
 }

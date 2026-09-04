@@ -45,15 +45,35 @@ const ENGINE_REF: Record<string, string> = {
   face: 'OpenCV Haar 级联 + 三庭五眼几何（本地）',
 };
 
-/** 批示维度 → 图标 + 说明 */
-const READING_META: { key: string; label: string; icon: string }[] = [
-  { key: '命格总论', label: '命格总论', icon: '命' },
-  { key: '事业', label: '事业', icon: '业' },
-  { key: '财运', label: '财运', icon: '财' },
-  { key: '婚恋', label: '婚恋', icon: '姻' },
-  { key: '健康', label: '健康', icon: '健' },
-  { key: '未来5年', label: '未来 5 年', icon: '5' },
-  { key: '未来10年', label: '未来 10 年', icon: '10' },
+/** 小徽标色调（传统色系）：批示维度/十神按类别分色，不再清一色鎏金 */
+const TONE = {
+  gilt: '#C9A227', // 鎏金
+  azure: '#4A7EBB', // 黛蓝
+  amber: '#D98E2B', // 琥珀
+  rouge: '#D4587A', // 茜红
+  jade: '#3E9E7A', // 竹青
+  violet: '#8A63B8', // 紫檀
+  celadon: '#4FA3A5', // 青瓷
+} as const;
+
+/** 十神 → 关系类别色调：官杀朱 / 财帛琥珀 / 印绶黛蓝 / 食伤竹青 / 比劫紫檀 */
+const SHISHEN_TONE: Record<string, string> = {
+  正官: '#D45D5D', 七杀: '#D45D5D',
+  正财: TONE.amber, 偏财: TONE.amber,
+  正印: TONE.azure, 偏印: TONE.azure,
+  食神: TONE.jade, 伤官: TONE.jade,
+  比肩: TONE.violet, 劫财: TONE.violet,
+};
+
+/** 批示维度 → 图标 + 色调 */
+const READING_META: { key: string; label: string; icon: string; tone: string }[] = [
+  { key: '命格总论', label: '命格总论', icon: '命', tone: TONE.gilt },
+  { key: '事业', label: '事业', icon: '业', tone: TONE.azure },
+  { key: '财运', label: '财运', icon: '财', tone: TONE.amber },
+  { key: '婚恋', label: '婚恋', icon: '姻', tone: TONE.rouge },
+  { key: '健康', label: '健康', icon: '健', tone: TONE.jade },
+  { key: '未来5年', label: '未来 5 年', icon: '5', tone: TONE.violet },
+  { key: '未来10年', label: '未来 10 年', icon: '10', tone: TONE.celadon },
 ];
 
 /** 命理批示区块（大运时间轴 + 流年 + 批示卡片） */
@@ -224,8 +244,16 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
                       title={`${d.ganzhi}运 · ${d.start_year}–${endYear} · ${d.start_age}–${endAge}岁`}
                     >
                       <span className="text-[9px] tracking-wider text-t5">
-                        {ganShen && <span className="text-gt/80">{ganShen}</span>}
-                        {zhiShen && <span className="text-t5">·{zhiShen}</span>}
+                        {ganShen && (
+                          <span style={{ color: SHISHEN_TONE[ganShen] ?? 'var(--t5)' }}>
+                            {ganShen}
+                          </span>
+                        )}
+                        {zhiShen && (
+                          <span style={{ color: SHISHEN_TONE[zhiShen] ?? 'var(--t5)' }}>
+                            ·{zhiShen}
+                          </span>
+                        )}
                       </span>
                       <span className="flex flex-col items-center leading-none">
                         <span
@@ -268,7 +296,18 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
                   <span className="text-gt font-serif text-lg font-semibold">
                     {selDayun.ganzhi}运
                   </span>
-                  <Badge tone="gilt">{tenGod(dayMaster, selDayun.ganzhi.slice(0, 1))}</Badge>
+                  {(() => {
+                    const shen = tenGod(dayMaster, selDayun.ganzhi.slice(0, 1));
+                    const c = SHISHEN_TONE[shen] ?? '#C9A227';
+                    return (
+                      <span
+                        className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                        style={{ borderColor: `${c}55`, backgroundColor: `${c}1f`, color: c }}
+                      >
+                        {shen}
+                      </span>
+                    );
+                  })()}
                   <span className="text-xs tabular text-t3">
                     {selWindow.startYear}–{selWindow.endYear} 年 · {selWindow.startAge}–
                     {selWindow.endAge} 岁
@@ -293,8 +332,8 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
         title="流年运势"
         subtitle={
           selWindow
-            ? `${selDayun?.ganzhi}运覆盖的流年已鎏金标出（${selWindow.startYear}–${selWindow.endYear}）`
-            : '未来十年的流年干支与生肖；点上方运柱可联动高亮'
+            ? `${selDayun?.ganzhi}运覆盖的流年已鎏金标出（${selWindow.startYear}–${selWindow.endYear}）· 再点流年可取消选中`
+            : '未来十年的流年干支与生肖；点运柱联动高亮，点流年反选所属大运'
         }
       >
         {!chart.liunian || chart.liunian.length === 0 ? (
@@ -306,30 +345,37 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
               const inSel =
                 selWindow !== null && ly.year >= selWindow.startYear && ly.year <= selWindow.endYear;
               const isNow = ly.year === nowYear;
+              // 该流年所属的大运下标（用于点击反向联动选中运柱）
+              const ownerIdx = dayun.findIndex(
+                (d, i) =>
+                  ly.year >= d.start_year &&
+                  ly.year < (dayun[i + 1] ? dayun[i + 1].start_year : d.start_year + 10),
+              );
               return (
-                <div
+                <button
+                  type="button"
                   key={ly.year}
-                  className={`rounded-lg border py-2.5 transition-all duration-300 ${
+                  disabled={ownerIdx === -1}
+                  onClick={() => ownerIdx !== -1 && setSelDy(selDy === ownerIdx ? null : ownerIdx)}
+                  className={`liunian-chip rounded-lg border py-2.5 ${
                     inSel
                       ? 'border-gilt-500/60 bg-gilt-500/[0.10] shadow-[0_0_12px_-4px_rgba(201,162,39,0.45)]'
                       : 'border-line bg-panel'
                   }`}
+                  style={{ ['--tone' as string]: WUXING_COLOR[w] ?? '#8a8f98' }}
+                  title={`${ly.ganzhi} 年 · 天干属${w || '—'} · 点击查看所属大运`}
                 >
                   <div className="flex items-center justify-center gap-1 text-[11px] text-t4">
                     {ly.year}
                     {isNow && <Badge tone="gilt">今</Badge>}
                   </div>
-                  <div
-                    className="mt-0.5 font-serif text-lg font-semibold tracking-wider"
-                    style={{ color: WUXING_COLOR[w] }}
-                    title={`${ly.ganzhi} 年 · 天干属${w || '—'}`}
-                  >
+                  <div className="mt-0.5 font-serif text-lg font-semibold tracking-wider" style={{ color: WUXING_COLOR[w] }}>
                     {ly.ganzhi}
                   </div>
                   <div className="text-[10px] text-t4">
                     {ly.zodiac}年{ly.age != null ? ` · ${ly.age}岁` : ''}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -352,10 +398,18 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
               return (
                 <div
                   key={m.key}
-                  className={`rounded-xl border border-bd bg-panel p-4 ${isWide ? 'md:col-span-2' : ''}`}
+                  className={`reading-tile rounded-xl border border-bd bg-panel p-4 ${isWide ? 'md:col-span-2' : ''}`}
+                  style={{ ['--tone' as string]: m.tone }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md border border-gilt-500/30 bg-gilt-500/10 text-xs font-semibold text-gt">
+                    <span
+                      className="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-semibold"
+                      style={{
+                        borderColor: `${m.tone}55`,
+                        backgroundColor: `${m.tone}1f`,
+                        color: m.tone,
+                      }}
+                    >
                       {m.icon}
                     </span>
                     <span className="text-sm font-medium text-t1">{m.label}</span>
@@ -391,13 +445,13 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
 }
 
 /** 紫微批示的六个维度 */
-const ZIWEI_DIMS: { key: string; icon: string; wide?: boolean }[] = [
-  { key: '命身总论', icon: '命', wide: true },
-  { key: '事业官禄', icon: '禄' },
-  { key: '财帛', icon: '财' },
-  { key: '夫妻感情', icon: '姻' },
-  { key: '迁移际遇', icon: '迁' },
-  { key: '大限走势', icon: '限', wide: true },
+const ZIWEI_DIMS: { key: string; icon: string; wide?: boolean; tone: string }[] = [
+  { key: '命身总论', icon: '命', wide: true, tone: TONE.gilt },
+  { key: '事业官禄', icon: '禄', tone: TONE.azure },
+  { key: '财帛', icon: '财', tone: TONE.amber },
+  { key: '夫妻感情', icon: '姻', tone: TONE.rouge },
+  { key: '迁移际遇', icon: '迁', tone: TONE.celadon },
+  { key: '大限走势', icon: '限', wide: true, tone: TONE.violet },
 ];
 
 /** 紫微十二宫的经典盘位：按宫位地支固定在 4×4 盘面上，中宫放概要 */
@@ -528,10 +582,18 @@ function ZiweiSection({
                 return (
                   <div
                     key={d.key}
-                    className={`rounded-xl border border-bd bg-panel p-4 ${d.wide ? 'md:col-span-2' : ''}`}
+                    className={`reading-tile rounded-xl border border-bd bg-panel p-4 ${d.wide ? 'md:col-span-2' : ''}`}
+                    style={{ ['--tone' as string]: d.tone }}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-md border border-gilt-500/30 bg-gilt-500/10 text-xs font-semibold text-gt">
+                      <span
+                        className="flex h-6 w-6 items-center justify-center rounded-md border text-xs font-semibold"
+                        style={{
+                          borderColor: `${d.tone}55`,
+                          backgroundColor: `${d.tone}1f`,
+                          color: d.tone,
+                        }}
+                      >
                         {d.icon}
                       </span>
                       <span className="text-sm font-medium text-t1">{d.key}</span>
