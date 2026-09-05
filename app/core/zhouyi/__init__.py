@@ -91,3 +91,7 @@ def cite(name: str, yao_index: int | None = None) -> str | None:
     if pos is None or not (1 <= yao_index <= 6):
         return None
     return f"《周易·{short}》{pos[yao_index - 1]}：{e['yao'][yao_index - 1]}"
+
+from .adapter import ZhouyiAdapter, ENGINE_VERSION  # noqa: E402,F401
+
+__all__ = ["ZhouyiAdapter", "ENGINE_VERSION"]

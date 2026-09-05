@@ -32,9 +32,9 @@ def test_health_lists_engines(client):
     r = client.get("/health")
     assert r.status_code == 200
     engines = r.json()["engines"]
-    # 七个术式 Adapter 全部注册
+    # 八个术式 Adapter 全部注册（round 12 新增 zhouyi 义理引擎）
     assert set(engines) == {
-        "ziwei", "bazi", "qimen", "liuyao", "meihua", "palm", "face"
+        "ziwei", "bazi", "qimen", "liuyao", "meihua", "palm", "face", "zhouyi"
     }
 
 

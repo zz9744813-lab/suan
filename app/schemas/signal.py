@@ -35,6 +35,7 @@ class SourceType(str, Enum):
     QIMEN = "qimen"
     LIUYAO = "liuyao"
     MEIHUA = "meihua"
+    ZHOUYI = "zhouyi"  # 周易经文义理（卦辞/爻辞吉凶辞断向，与纳甲/体用并列的第三条易学路径）
     PALM = "palm"
     FACE = "face"
     REALITY = "reality"
@@ -95,6 +96,8 @@ DEFAULT_SCALE_SUPPORT: dict[SourceType, dict[TimeScale, float]] = {
     SourceType.QIMEN: {TimeScale.DAY: 0.9, TimeScale.WEEK: 0.9, TimeScale.MONTH: 0.0, TimeScale.YEAR: 0.0},
     SourceType.LIUYAO: {TimeScale.DAY: 0.9, TimeScale.WEEK: 0.9, TimeScale.MONTH: 0.5, TimeScale.YEAR: 0.0},
     SourceType.MEIHUA: {TimeScale.DAY: 0.9, TimeScale.WEEK: 0.5, TimeScale.MONTH: 0.0, TimeScale.YEAR: 0.0},
+    # 周易义理与易卦时间起卦同源：支持短尺度（与六爻同级）
+    SourceType.ZHOUYI: {TimeScale.DAY: 0.9, TimeScale.WEEK: 0.9, TimeScale.MONTH: 0.5, TimeScale.YEAR: 0.0},
     SourceType.PALM: {TimeScale.DAY: 0.0, TimeScale.WEEK: 0.0, TimeScale.MONTH: 0.2, TimeScale.YEAR: 0.2},
     SourceType.FACE: {TimeScale.DAY: 0.0, TimeScale.WEEK: 0.0, TimeScale.MONTH: 0.2, TimeScale.YEAR: 0.2},
     SourceType.REALITY: {TimeScale.DAY: 0.9, TimeScale.WEEK: 0.9, TimeScale.MONTH: 0.9, TimeScale.YEAR: 0.5},

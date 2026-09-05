@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sqlmodel import Session, select
@@ -139,6 +139,7 @@ def daily_almanac(
     try:
         from datetime import datetime as _dt, time as _time
 
+        from app.core.meihua.engine import GUA_WUXING as _GUA_WX
         from app.core.meihua.engine import cast_hexagram as _cast_hexagram
         from app.core.zhouyi import by_name as _gua_by_name, cite as _gua_cite
 
@@ -147,21 +148,65 @@ def daily_almanac(
             year_branch=lunar.getYearInGanZhi()[1],
             hour_branch=day_zhi,
         )
-        ben_name = gua["ben_gua"]["name"]
+        ben = gua["ben_gua"]
+        ben_name = ben["name"]
         canon = _gua_by_name(ben_name) or {}
         out["daily_gua"] = {
             "name": ben_name,
             "short": canon.get("short", ""),
-            "lines": list(gua["ben_gua"]["lines"]),  # 初→上，1 阳 0 阴（供前端画卦象）
+            "lines": list(ben["lines"]),  # 初→上，1 阳 0 阴（供前端画卦象）
             "moving_yao": gua["moving_yao"],
             "gua_ci": _gua_cite(ben_name),
             "yao_ci": _gua_cite(ben_name, gua["moving_yao"]),
             "xiang": canon.get("xiang", ""),
+            "upper_gua": ben.get("upper", ""),
+            "lower_gua": ben.get("lower", ""),
+            "upper_wuxing": _GUA_WX.get(ben.get("upper", ""), ""),
+            "lower_wuxing": _GUA_WX.get(ben.get("lower", ""), ""),
         }
     except Exception as exc:  # 经文缺失不阻断锦囊
         import logging
 
         logging.getLogger(__name__).warning("日卦生成失败：%s", exc)
+
+    # ---------- 本日参读：窗口覆盖当日的在库预测（与卦并列展示，不主张因果） ----------
+    try:
+        from datetime import datetime as _day_dt
+
+        from app.models.prediction import PredictionRecord
+        from app.schemas.prediction import PredictionStatus
+
+        day_start = _day_dt.combine(target_date, _day_dt.min.time())
+        day_end = day_start + timedelta(days=1)
+        event_rows = session.exec(
+            select(PredictionRecord).where(
+                PredictionRecord.user_id == user_id,
+                PredictionRecord.window_start < day_end,
+                PredictionRecord.window_end >= day_start,
+                PredictionRecord.status.in_([  # type: ignore[attr-defined]
+                    PredictionStatus.FROZEN.value,
+                    PredictionStatus.RESEARCH.value,
+                    PredictionStatus.VERIFY_REQUIRED.value,
+                    PredictionStatus.WAITING_USER.value,
+                ]),
+            )
+        ).all()
+        out["related_predictions"] = [
+            {
+                "prediction_id": r.prediction_id,
+                "description": r.description,
+                "probability": r.probability,
+                "null_probability": r.null_probability,
+                "time_scale": r.time_scale,
+                "status": r.status,
+                "window": [r.window_start.isoformat(), r.window_end.isoformat()],
+            }
+            for r in event_rows[:4]
+        ]
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning("本日参读事件查询失败：%s", exc)
 
     # ---------- 个人化层（需出生档案）----------
     profile = session.exec(
@@ -216,6 +261,75 @@ def daily_almanac(
             "clash_birth_day": clash_day,
         }
     )
+
+    # ---------- 日卦 × 命数：上下卦五行与日主的扶抑喜忌（确定性参读） ----------
+    # 卦不改变概率，只陈述「今日卦气相对你的日主是生扶还是克泄耗」（C-006）。
+    gua = out.get("daily_gua")
+    if gua and day_master_wx:
+        try:
+            from app.core.bazi.adapter import (
+                WUXING_KE as _BZ_KE,
+                WUXING_SHENG as _BZ_SHENG,
+                day_master_strength as _dm_strength,
+            )
+
+            # 本命四柱（供强弱判定）；出生时辰未知时以四柱缺时照样简评，弱化结论口径
+            ec = birth_lunar.getEightChar()
+            bazi4 = {
+                "year": ec.getYear(),
+                "month": ec.getMonth(),
+                "day": ec.getDay(),
+                "time": ec.getTime(),
+                "day_master": day_master,
+            }
+            _, verdict, _ = _dm_strength(bazi4)
+
+            def _rel_cat(wx: str) -> str:
+                """卦五行 → 相对日主的十神类（同我/生我/我生/我克/克我）。"""
+                if wx == day_master_wx:
+                    return "比劫"
+                if _BZ_SHENG.get(wx) == day_master_wx:
+                    return "印"
+                if _BZ_SHENG.get(day_master_wx) == wx:
+                    return "食伤"
+                if _BZ_KE.get(day_master_wx) == wx:
+                    return "财"
+                if _BZ_KE.get(wx) == day_master_wx:
+                    return "官"
+                return ""
+
+            if verdict == "身强":
+                fav = {"官", "财", "食伤"}
+            elif verdict == "身弱":
+                fav = {"印", "比劫"}
+            else:
+                fav = set()
+
+            verb = {"比劫": "比扶", "印": "生扶", "食伤": "泄", "财": "耗", "官": "克"}
+            notes: list[str] = []
+            for pos, tg, twx in (
+                ("上卦", gua.get("upper_gua", ""), gua.get("upper_wuxing", "")),
+                ("下卦", gua.get("lower_gua", ""), gua.get("lower_wuxing", "")),
+            ):
+                if not tg or not twx:
+                    continue
+                cat = _rel_cat(twx)
+                if not cat:
+                    continue
+                tail = f"{verdict}之{'喜（生扶得力）' if cat in fav else '忌（加重耗泄）'}"
+                if verdict == "中和":
+                    tail = "你的日主中和，卦气不判喜忌"
+                notes.append(
+                    f"{pos}{tg}（{twx}）{verb.get(cat, cat)}日主{day_master}"
+                    f"（{day_master_wx}，{cat}）—— {tail}"
+                )
+            if notes:
+                gua["natal_verdict"] = verdict
+                gua["natal_notes"] = notes
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("日卦命数结合失败：%s", exc)
     return out
 
 
@@ -243,6 +357,7 @@ SOURCE_LABEL = {
     SourceType.QIMEN: "奇门",
     SourceType.LIUYAO: "六爻",
     SourceType.MEIHUA: "梅花",
+    SourceType.ZHOUYI: "周易",
     SourceType.PALM: "掌纹",
     SourceType.FACE: "面相",
     SourceType.REALITY: "现实",
@@ -316,7 +431,7 @@ def rich_description(
     # 交叉印证不只看「支持了什么」，也要看「谁没说话/谁反对」（对抗性要求）。
     # 掌纹/面相属影像术式（需拍照），有信号时一并入盘点，无则注明未参校。
     label_of = SOURCE_LABEL
-    _engine_labels = ["八字", "紫微", "六爻", "梅花", "奇门"]
+    _engine_labels = ["八字", "紫微", "六爻", "梅花", "周易", "奇门"]
     _image_labels = ["掌纹", "面相"]
 
     def _mark(sigs: list[Signal]) -> str:
@@ -341,7 +456,7 @@ def rich_description(
             has_image_signal = True
             tally.append(f"{lbl}{_mark(img_sigs)}")
     lines.append(
-        "全法盘点（同一时间点·五术同参）："
+        "全法盘点（同一时间点·六术同参）："
         + " ".join(tally)
         + ("" if has_image_signal else "（掌纹/面相需拍照参校，未计入）")
         + "。"

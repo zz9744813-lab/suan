@@ -1,4 +1,4 @@
-"""核心计算层：Calendar Core + 七个术式 Adapter。
+"""核心计算层：Calendar Core + 八个术式 Adapter。
 
 第 53 节：每个术式通过 Adapter 接入，输出统一 Schema，
         未来替换算法不会影响 Prediction Engine。
@@ -23,6 +23,7 @@ from . import (  # noqa: E402,F401
     palm,
     qimen,
     ziwei,
+    zhouyi,
 )
 from .calendar import CalendarCore  # noqa: E402,F401
 

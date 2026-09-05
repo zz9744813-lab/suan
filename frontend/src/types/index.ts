@@ -96,7 +96,25 @@ export interface DailyAlmanac {
     gua_ci: string | null;
     yao_ci: string | null;
     xiang: string;
+    upper_gua?: string;
+    lower_gua?: string;
+    upper_wuxing?: string;
+    lower_wuxing?: string;
+    /** 日主强弱判定（身强/身弱/中和；有出生档案时才有） */
+    natal_verdict?: string;
+    /** 卦之上下卦五行相对日主的喜忌句（命数结合） */
+    natal_notes?: string[];
   };
+  /** 本日参读：窗口覆盖当日的在库预测（与卦并列展示，非因果） */
+  related_predictions?: {
+    prediction_id: string;
+    description: string;
+    probability: number;
+    null_probability?: number | null;
+    time_scale: string;
+    status: string;
+    window: [string, string];
+  }[];
 }
 
 /** 方案第 49 节：预测详情必须完全可解释 */

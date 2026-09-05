@@ -47,6 +47,7 @@ const SOURCE_ZH: Record<string, string> = {
   qimen: '奇门',
   liuyao: '六爻',
   meihua: '梅花',
+  zhouyi: '周易',
   palm: '掌纹',
   face: '面相',
   reality: '现实',
@@ -594,12 +595,12 @@ export default function Future() {
         </Card>
       )}
 
-      {/* 日卦 · 周易经文参读：与今日锦囊同源确定性派生，秒出 */}
+      {/* 日卦 · 命数 · 未来事件三合一参读：与今日锦囊同源确定性派生，秒出 */}
       {daily.data?.daily_gua && (
         <Card
           className="frame-flow canon-tile"
           title={`日卦 · ${daily.data.daily_gua.name}`}
-          subtitle="周易经文参读 · 日粒度确定性起卦 · 文献参考，非效力宣称"
+          subtitle="周易经文参读 · 日粒度确定性起卦 · 同日并列参读，非因果，非效力宣称"
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <div className="flex items-center gap-3 sm:flex-col sm:gap-2">
@@ -633,6 +634,45 @@ export default function Future() {
               )}
             </div>
           </div>
+          {/* 命数结合：卦之上下卦五行 × 日主强弱喜忌（有出生档案时） */}
+          {daily.data.daily_gua.natal_notes &&
+            daily.data.daily_gua.natal_notes.length > 0 && (
+              <div className="mt-3 rounded-xl border border-line bg-panel p-3">
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-gt">
+                  <CanonTag label="命数" />
+                  日主{daily.data.day_master}（{daily.data.day_master_wuxing}）
+                  {daily.data.daily_gua.natal_verdict &&
+                    ` · 日主${daily.data.daily_gua.natal_verdict}`}
+                </div>
+                <ul className="space-y-1 text-xs leading-relaxed text-t2">
+                  {daily.data.daily_gua.natal_notes.map((n, i) => (
+                    <li key={i}>· {n}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          {/* 未来事件结合：窗口覆盖本日的在库预测，与卦并列参读 */}
+          {daily.data.related_predictions &&
+            daily.data.related_predictions.length > 0 && (
+              <div className="mt-3 rounded-xl border border-line bg-panel p-3">
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-t3">
+                  <CanonTag label="本日参读" />
+                  窗口覆盖今天的在库预测（{daily.data.related_predictions.length} 条 · 与卦同日并列，非因果）
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {daily.data.related_predictions.map((p) => (
+                    <span
+                      key={p.prediction_id}
+                      className="rounded-lg border border-bd bg-card px-2.5 py-1.5 text-xs text-t2"
+                      title={`窗口 ${p.window[0]} ~ ${p.window[1]} · 状态 ${p.status}`}
+                    >
+                      {p.description}
+                      <b className="ml-2 text-gt">{pct(p.probability)}</b>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
         </Card>
       )}
 
