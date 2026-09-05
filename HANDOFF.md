@@ -24,9 +24,9 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `123 passed, 2 skipped`（全绿；round 10 经文对抗 14 项 + round 11 审查回归 13 项；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 测试 | `132 passed, 2 skipped`（全绿；round 10 经文对抗 14 + round 11 审查回归 13 + round 12 义理引擎 9；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**38 张表**（+`system_fortune_readings` 紫微批示缓存） |
-| 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
+| 术式引擎 | 8 个全部真实可跑（八字/紫微/六爻/梅花/周易义理/奇门/掌纹/面相；round 12 新增 zhouyi 义理派：卦辞+爻辞吉凶断辞定向，易卦三法同组去相关） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
 | 对抗审查 | 14 种攻击 + 串联 Gate |
 | 校准架构 | **三阶段**（2026-08-31 第二轮治本）：cold(<5) 基线校准 → explore(5~19) 信号弱先验实证 → formal(≥20) 正式预测 |
