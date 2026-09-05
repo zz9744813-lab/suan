@@ -40,8 +40,8 @@ function MatrixTable({
           <tr className="border-b border-line">
             <th className="py-1 text-left">维度</th>
             <th className="py-1 text-right">样本</th>
-            <th className="py-1 text-right">Skill</th>
-            <th className="py-1 text-right">Brier</th>
+            <th className="py-1 text-right">增益</th>
+            <th className="py-1 text-right">误差</th>
             <th className="py-1 text-right">可靠度</th>
           </tr>
         </thead>
@@ -73,6 +73,7 @@ const SYSTEM_LABEL: Record<string, string> = {
   qimen: '奇门',
   liuyao: '六爻',
   meihua: '梅花',
+  zhouyi: '周易',
   palm: '掌纹',
   face: '面相',
   reality: '现实',
@@ -102,24 +103,28 @@ export default function Models() {
       />
 
       <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="样本量" value={overall.data?.sample_size ?? '—'} />
-        <Stat label="Brier" value={overall.data ? num(overall.data.brier) : '—'} />
         <Stat
-          label="Skill vs Null"
+          label="预测误差"
+          value={overall.data ? num(overall.data.brier) : '—'}
+          hint="Brier 评分 · 越低越好"
+        />
+        <Stat
+          label="相对基线增益"
           value={
             overall.data?.skill_score != null ? pct(overall.data.skill_score, 1) : '—'
           }
           tone={(overall.data?.skill_score ?? 0) > 0 ? 'good' : 'bad'}
-          hint="第 84 节 North Star"
+          hint="Skill vs Null · 第 84 节北极星指标"
         />
         <Stat
-          label="Sharpness"
+          label="判断锐度"
           value={overall.data ? num(overall.data.sharpness, 4) : '—'}
+          hint="Sharpness · 离 0.5 越远越果断"
         />
       </div>
 
       <Card
-        title="Personal Reliability Matrix"
+        title="个人可靠度矩阵"
         subtitle="第 26 节：系统应允许得到「不好听」的结果 —— 若某术式无贡献，就显示无贡献"
       >
         {rel.loading && <Loading />}
@@ -144,7 +149,7 @@ export default function Models() {
 
             <div>
               <div className="mb-1.5 text-xs font-medium text-t2">
-                Fusion 权重（由实证 skill 学习得到）
+                融合权重（由实证增益学习得到）
               </div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(rel.data.fusion_weights).map(([k, v]) => (

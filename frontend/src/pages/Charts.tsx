@@ -31,6 +31,7 @@ const ENGINE_LABEL: Record<string, string> = {
   qimen: '奇门遁甲',
   liuyao: '六爻',
   meihua: '梅花易数',
+  zhouyi: '周易（义理）',
   palm: '掌纹',
   face: '面相',
 };
@@ -41,6 +42,7 @@ const ENGINE_REF: Record<string, string> = {
   qimen: 'Maximilian-Winter/Qimen-Dunjia',
   liuyao: 'Johnson-Jia/liuyao-divination',
   meihua: 'handsomejustin/meihua-yi',
+  zhouyi: '通行本《周易》内置抄本 · 卦辞爻辞断辞（本地）',
   palm: 'OpenCV 肤色分割 + 线纹测量（本地）',
   face: 'OpenCV Haar 级联 + 三庭五眼几何（本地）',
 };
