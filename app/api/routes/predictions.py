@@ -334,6 +334,11 @@ def verify_prediction(
     """用户自然语言回复 → OutcomeCollector → 三方 Judge → 结构化结果。
 
     第 60 节：若可能对应多个预测，必须要求明确对应关系，不能强行命中。
+
+    判定权威分层（C-003 + 批复式 UI 语义）：
+        - 快捷裁决 A/B/C：用户是判定权威，直接落 outcome（不经 LLM）；
+        - 快捷裁决 D：无法判定 → WAITING_USER，不落 outcome、不评分；
+        - 自然语言：三方 Judge 审读用户描述（分歧 / Judge 失败 → 转人工）。
     """
     row = session.exec(
         select(PredictionRecord).where(PredictionRecord.prediction_id == prediction_id)
@@ -341,7 +346,15 @@ def verify_prediction(
     if row is None:
         raise HTTPException(404, f"未找到预测：{prediction_id}")
 
+    # ---------- 0. C-003：已批复的预测不可事后改口 ----------
+    existing_outcome = session.exec(
+        select(OutcomeRecord).where(OutcomeRecord.prediction_id == prediction_id)
+    ).first()
+    if existing_outcome is not None:
+        raise HTTPException(409, "该预测已批复归档，不可改口（C-003）。")
+
     from app.agents.base import AgentContext
+    from app.schemas.outcome import Outcome
 
     # ---------- 1. Collector：解析用户回复 ----------
     collector_ctx = AgentContext(
@@ -368,25 +381,61 @@ def verify_prediction(
             "message": collected.output.get("ambiguity_note"),
         }
 
-    # ---------- 2. 三方 Judge（第 20.13 节）----------
-    judge_ctx = AgentContext(
-        user_id=row.user_id,
-        session=session,
-        target_event=row.event_type,
-        domain=row.domain,
-        payload={
-            "prediction": {
-                "description": row.description,
-                "success_criteria": row.success_criteria,
-                "failure_criteria": row.failure_criteria,
-                "grading_rule": row.grading_rule,
-                "probability": row.probability,
+    quick = (quick_answer or "").strip().upper()
+
+    # ---------- 2a. 快捷裁决 D：无法判定 → 转人工补充描述 ----------
+    if quick == "D":
+        row.status = PredictionStatus.WAITING_USER.value
+        session.add(row)
+        session.commit()
+        return {
+            "prediction_id": prediction_id,
+            "outcome": None,
+            "confidence": 0.0,
+            "needs_confirmation": True,
+            "disagreement": 0.0,
+            "judges": [],
+            "status": PredictionStatus.WAITING_USER.value,
+            "message": "已标记无法判定：补充一句实际情况后再批复即可（不落结果、不计分）。",
+        }
+
+    # ---------- 2b. 快捷裁决 A/B/C：用户直判（权威，不经 LLM）----------
+    if quick in ("A", "B", "C"):
+        quick_value = {"A": 1.0, "B": 0.0, "C": 0.5}[quick]
+        quick_label = {"A": "命中", "B": "未中", "C": "部分命中"}[quick]
+        outcome = Outcome(
+            prediction_id=prediction_id,
+            outcome=quick_value,
+            confidence=1.0,
+            evidence=(
+                f"用户快捷裁决：{quick_label}"
+                + (f"（附言：{user_reply}）" if user_reply else "")
+            ),
+            needs_confirmation=False,
+            disagreement=0.0,
+            verdicts=[],
+            judged_at=utcnow(),
+        )
+    else:
+        # ---------- 2c. 自然语言：三方 Judge（第 20.13 节）----------
+        judge_ctx = AgentContext(
+            user_id=row.user_id,
+            session=session,
+            target_event=row.event_type,
+            domain=row.domain,
+            payload={
+                "prediction": {
+                    "description": row.description,
+                    "success_criteria": row.success_criteria,
+                    "failure_criteria": row.failure_criteria,
+                    "grading_rule": row.grading_rule,
+                    "probability": row.probability,
+                },
+                "user_reply": user_reply or "",
             },
-            "user_reply": user_reply or "",
-        },
-        prediction_id=prediction_id,
-    )
-    outcome = OutcomeJudgeAgent().judge(judge_ctx, prediction_id)
+            prediction_id=prediction_id,
+        )
+        outcome = OutcomeJudgeAgent().judge(judge_ctx, prediction_id)
 
     # ---------- 3. 落库 ----------
     req = OutcomeRequestRecord(

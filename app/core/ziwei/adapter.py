@@ -59,7 +59,7 @@ DOMAIN_PALACE: dict[Domain, str] = {
     Domain.RELATIONSHIP: "夫妻宫",
     Domain.TRAVEL: "迁移宫",
     Domain.PROJECT: "官禄宫",
-    Domain.HABIT: "命宫",
+    Domain.HABIT: "福德宫",  # 福德主精神享受与癖好（习惯域更合传统口径）
     Domain.PURCHASE: "财帛宫",
     Domain.COMMUNICATION: "交友宫",
     Domain.SCHEDULE: "命宫",

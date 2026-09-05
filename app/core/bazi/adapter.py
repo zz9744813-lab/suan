@@ -31,39 +31,115 @@ from app.schemas.signal import (
     SourceType,
 )
 
-ENGINE_VERSION = "bazi-0.1.0"
+ENGINE_VERSION = "bazi-0.2.0"
 
 TIANGAN = "甲乙丙丁戊己庚辛壬癸"
 # 五行：木木火火土土金金水水
 TG_WUXING = ["木", "木", "火", "火", "土", "土", "金", "金", "水", "水"]
 
+# 地支五行（四柱根气/月令用）
+DIZHI = "子丑寅卯辰巳午未申酉戌亥"
+DZ_WUXING = ["水", "土", "木", "木", "土", "火", "火", "土", "金", "金", "土", "水"]
+
 # 五行生克：key 生 value / key 克 value
 WUXING_SHENG = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}
 WUXING_KE = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}
 
-# 十神定义：以日主为基准，同五行=比劫，生日主=印，日主生=食伤，
-# 克日主=官杀，日主克=财
-#  domain → 传统上认为「有利」的十神类别
-DOMAIN_FAVORABLE_SHISHEN: dict[Domain, set[str]] = {
-    Domain.CAREER: {"官", "印"},          # 官=职位压力/晋升，印=贵人/资质
-    Domain.MONEY: {"财"},                  # 财星
-    Domain.STUDY: {"印"},                  # 印=学习
-    Domain.SOCIAL: {"比劫", "食伤"},        # 同辈、表达
-    Domain.COMMUNICATION: {"食伤"},        # 食伤=表达输出
-    Domain.PROJECT: {"财", "官"},
-    Domain.UNEXPECTED_EVENT: {"官", "劫"},  # 官杀=突发压力
-    Domain.SCHEDULE: {"官"},
-    # 男命以财为妻星、女命以官为夫星；无性别路径时两星并列取「异性缘层面有利」
-    # （弱先验，gender 细化留待规则学习层）
-    Domain.RELATIONSHIP: {"财", "官"},
-    Domain.TRAVEL: {"食伤", "财"},          # 食伤=出行/动线，财=动生财
-    Domain.PURCHASE: {"财"},
-    Domain.HABIT: {"印", "比劫"},           # 印=自律涵养，比劫=自我管理
-}
+# 扶抑法喜忌：身强喜克泄耗（官/财/食伤），身弱喜生扶（印/比劫）。
+# 中和 → 不判断方向（诚实：不是每张盘都能读出倾向）。
+STRONG_FAVORABLE = {"官", "财", "食伤"}
+STRONG_UNFAVORABLE = {"印", "比劫"}
+WEAK_FAVORABLE = {"印", "比劫"}
+WEAK_UNFAVORABLE = {"官", "财", "食伤"}
 
 
 def wuxing_of(tiangan: str) -> str:
     return TG_WUXING[TIANGAN.index(tiangan)] if tiangan in TIANGAN else ""
+
+
+def wuxing_of_zhi(dizhi: str) -> str:
+    return DZ_WUXING[DIZHI.index(dizhi)] if dizhi in DIZHI else ""
+
+
+def day_master_strength(bazi: dict[str, str]) -> tuple[float, str, str]:
+    """日主强弱简评（扶抑法，确定性）：得令/得地/得势加权求和。
+
+    权重：月令最大（同 +3 / 印 +2 / 泄 -0.5 / 耗 -0.75 / 克 -1.0）；
+    其余三支根气（同 +1.2 / 印 +0.8 / 泄 -0.4 / 耗 -0.5 / 克 -0.6）；
+    年月时三干（比劫 +1.0 / 印 +0.6 / 食伤 -0.4 / 财 -0.5 / 官 -0.6）。
+
+    返回 (得分, 身强/身弱/中和, 月令判定短句)。|score| ≥ 2 才下强弱结论，
+    其余为中和 —— 不强断（对抗性要求：读不出倾向就承认读不出）。
+    """
+    day_master = bazi.get("day_master", "")
+    dm_wx = wuxing_of(day_master)
+    if not dm_wx:
+        return 0.0, "中和", ""
+
+    month_gz = bazi.get("month", "")
+    m_wx = wuxing_of_zhi(month_gz[1:]) if len(month_gz) > 1 else ""
+    score = 0.0
+    ling = ""
+    if m_wx:
+        if m_wx == dm_wx:
+            score += 3.0
+            ling = "得令"
+        elif WUXING_SHENG.get(m_wx) == dm_wx:
+            score += 2.0
+            ling = "得令（月令生身）"
+        elif WUXING_SHENG.get(dm_wx) == m_wx:
+            score -= 0.5
+            ling = "失令（月令泄身）"
+        elif WUXING_KE.get(dm_wx) == m_wx:
+            score -= 0.75
+            ling = "失令（月令耗身）"
+        elif WUXING_KE.get(m_wx) == dm_wx:
+            score -= 1.0
+            ling = "失令（月令克身）"
+
+    # 根气：年/日/时三支（月支已在月令计过，不重复计）
+    roots = 0
+    for pillar in ("year", "day", "time"):
+        gz = bazi.get(pillar, "")
+        if len(gz) < 2:
+            continue
+        z_wx = wuxing_of_zhi(gz[1])
+        if not z_wx:
+            continue
+        if z_wx == dm_wx:
+            score += 1.2
+            roots += 1
+        elif WUXING_SHENG.get(z_wx) == dm_wx:
+            score += 0.8
+        elif WUXING_SHENG.get(dm_wx) == z_wx:
+            score -= 0.4
+        elif WUXING_KE.get(dm_wx) == z_wx:
+            score -= 0.5
+        elif WUXING_KE.get(z_wx) == dm_wx:
+            score -= 0.6
+
+    # 得势：年/月/时干（不含日主自身）
+    for pillar in ("year", "month", "time"):
+        gz = bazi.get(pillar, "")
+        if not gz:
+            continue
+        cat = shishen_category(day_master, gz[0])
+        if cat == "比劫":
+            score += 1.0
+        elif cat == "印":
+            score += 0.6
+        elif cat == "食伤":
+            score -= 0.4
+        elif cat == "财":
+            score -= 0.5
+        elif cat == "官":
+            score -= 0.6
+
+    if score >= 2:
+        return score, "身强", ling
+    if score <= -2:
+        return score, "身弱", ling
+    return score, "中和", ling
 
 
 def shishen_category(day_master: str, other: str) -> str:
@@ -155,9 +231,12 @@ class BaziAdapter(MetaphysicalAdapter):
     def to_signals(self, query: AdapterQuery, chart: dict[str, Any]) -> list[Signal]:
         """排盘 → Signal。
 
-        骨架规则（待验证）：
-            流日/流月天干相对日主的十神类别，与目标 domain 的有利十神做匹配，
-            匹配则给出正向信号，相克则给出负向信号。
+        规则（V0.2，扶抑法）：
+            1. 先评日主强弱（得令/得地/得势，day_master_strength）；
+            2. 身强 → 喜官/财/食伤（克泄耗），忌印/比劫；
+               身弱 → 喜印/比劫（生扶），忌官/财/食伤；
+               中和 → 不判断方向（direction=0，诚实声明读不出倾向）；
+            3. 对照干支按尺度取：日/周=流日，月=流月，年=流年。
 
         C-006：这只是待验证信号，不代表已证实有效。
         """
@@ -166,13 +245,14 @@ class BaziAdapter(MetaphysicalAdapter):
         if not day_master:
             return []
 
-        # 按时间尺度选取对照干支
+        # 按时间尺度选取对照干支（周尺度用流日——一周的吉凶不该用整月干支概括）
         scale_to_ganzhi = {
             "day": chart.get("liuri", ""),
-            "week": chart.get("liuyue", ""),
+            "week": chart.get("liuri", ""),
             "month": chart.get("liuyue", ""),
             "year": chart.get("liunian", ""),
         }
+        pillar_label = {"day": "流日", "week": "流日", "month": "流月", "year": "流年"}
         ganzhi = scale_to_ganzhi.get(query.time_scale.value, chart.get("liuri", ""))
         if not ganzhi:
             return []
@@ -182,18 +262,52 @@ class BaziAdapter(MetaphysicalAdapter):
         if not category:
             return []
 
-        favorable = DOMAIN_FAVORABLE_SHISHEN.get(query.domain, set())
-        is_favorable = category in favorable
+        score, verdict, ling = day_master_strength(bazi)
+        dm_wx = wuxing_of(day_master)
 
-        # direction：有利为 +1，不利为 -1
-        direction = 1.0 if is_favorable else -1.0
+        if verdict == "身强":
+            favorable, unfavorable = STRONG_FAVORABLE, STRONG_UNFAVORABLE
+        elif verdict == "身弱":
+            favorable, unfavorable = WEAK_FAVORABLE, WEAK_UNFAVORABLE
+        else:  # 中和：无喜忌主张，方向一律 0
+            favorable, unfavorable = set(), set()
 
-        # strength：十神类别与 domain 的相关度（骨架用固定档位）
-        # 第 43 节：信息不足时必须降低信心 —— 出生时辰不确定会拉低 confidence
-        strength = 0.6 if is_favorable else 0.4
-        confidence = 0.35  # 单一十神规则，弱先验（禁止 6：初始只允许弱先验）
+        if category in favorable:
+            direction = 1.0
+        elif category in unfavorable:
+            direction = -1.0
+        else:
+            direction = 0.0  # 中和盘：不判断方向（fusion 中仅拉保守，不虚报支持/反对）
 
-        rule_id = f"BAZI-R-{category}-{query.domain.value}"
+        # strength：方向明确时的固定档位；中和给低强度（有观察、无主张）
+        strength = {1.0: 0.6, -1.0: 0.4, 0.0: 0.3}[direction]
+        confidence = 0.35  # 弱先验（禁止 6：初始只允许弱先验）
+
+        rule_id = f"BAZI-R-{category}-{verdict}-{query.domain.value}"
+        dir_text = {1.0: "喜", -1.0: "忌", 0.0: "中和不判断"}[direction]
+
+        evidence = [
+            Evidence(
+                source=EvidenceSource.CALENDAR,
+                rule_id=rule_id,
+                description=(
+                    f"日主{day_master}（{dm_wx}）{ling or '月令未知'}，"
+                    f"扶抑综合 {score:+.1f} → {verdict}；"
+                    f"{pillar_label.get(query.time_scale.value, '流日')}{ganzhi}（{category}）：{dir_text}"
+                ),
+            )
+        ]
+        counter = (
+            []
+            if direction >= 0
+            else [
+                Evidence(
+                    source=EvidenceSource.TRADITIONAL_RULE,
+                    rule_id=rule_id,
+                    description=f"{category}为{verdict}所忌（扶抑法：{'克泄耗' if verdict == '身强' else '生扶'}为喜）",
+                )
+            ]
+        )
 
         return [
             Signal(
@@ -201,24 +315,8 @@ class BaziAdapter(MetaphysicalAdapter):
                 direction=direction,
                 strength=strength,
                 confidence=confidence,
-                evidence=[
-                    Evidence(
-                        source=EvidenceSource.CALENDAR,
-                        rule_id=rule_id,
-                        description=f"日主{day_master} 对 {ganzhi}（{query.time_scale.value}）→ {category}",
-                    )
-                ],
-                counter_evidence=(
-                    []
-                    if is_favorable
-                    else [
-                        Evidence(
-                            source=EvidenceSource.TRADITIONAL_RULE,
-                            rule_id=rule_id,
-                            description=f"{category} 对 {query.domain.value} 传统上非有利",
-                        )
-                    ]
-                ),
+                evidence=evidence,
+                counter_evidence=counter,
                 rule_ids=[rule_id],
                 # 第 20.12 节：八字与紫微、黄历共享历法信号，不能当作独立证据
                 dependency_group="lunar_calendar",

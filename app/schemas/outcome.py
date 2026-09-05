@@ -96,7 +96,7 @@ class Outcome(BaseModel):
     def from_verdicts(
         cls, prediction_id: str, verdicts: list[JudgeVerdict], **kwargs: Any
     ) -> "Outcome":
-        """聚合三方 Judge。分歧超过阈值则请求用户确认（不强行命中）。"""
+        """聚合三方 Judge。分歧超过阈值则请求用户确认（不强行判定）。"""
         if not verdicts:
             raise ValueError("至少需要一方 Judge 判定（禁止 3：不能让LLM自判）")
 
@@ -107,6 +107,11 @@ class Outcome(BaseModel):
 
         # 分歧大 → 不强行判定，转人工确认
         needs_confirmation = disagreement > 0.5
+        # Judge 不可用（失败 verdict 以 confidence=0.0 记录）≥2 方 → 同样转人工。
+        # 否则三个失败 verdict 恰好「零分歧」，会以 0 置信度静默记成「未中」。
+        failed = sum(1 for v in verdicts if v.confidence <= 0.0)
+        if failed >= max(1, len(verdicts) - 1):
+            needs_confirmation = True
 
         reasoning = " | ".join(f"{v.role.value}: {v.reasoning}" for v in verdicts)
 

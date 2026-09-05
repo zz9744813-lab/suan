@@ -127,7 +127,13 @@ class DefinitionAttack(Attack):
                 "缺少失败标准 —— 无法判定「没有遇到」，预测不可证伪（第 20.3 节）"
             )
 
-        all_text = ctx.description + " " + " ".join(ctx.success_criteria + ctx.failure_criteria)
+        all_text = (
+            ctx.description
+            + " "
+            + " ".join(ctx.success_criteria + ctx.failure_criteria)
+            + " "
+            + (ctx.grading_rule or "")
+        )
 
         undef = [t for t in self.UNDEFINABLE_TERMS if t in all_text]
         if undef:

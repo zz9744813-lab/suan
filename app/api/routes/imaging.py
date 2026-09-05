@@ -31,6 +31,12 @@ async def analyze_image(
             {"detail": "仅支持 JPEG / PNG / WebP 图片"}, status_code=415
         )
 
+    # 大小预检：Starlette 会把超大 body 落盘缓冲，先按声明体积拒绝，
+    # 避免把整个文件读进内存后才发现超限（声明缺失时仍以读后实际大小为准）。
+    declared = getattr(file, "size", None)
+    if declared is not None and declared > imaging.MAX_BYTES:
+        return JSONResponse({"detail": "图片不能超过 8MB"}, status_code=413)
+
     data = await file.read()
     if not data:
         return JSONResponse({"detail": "文件为空"}, status_code=400)

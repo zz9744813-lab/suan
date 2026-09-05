@@ -307,10 +307,23 @@ class DailyPipeline:
             )
 
         # ---------- 7. Freeze（第 16 节）----------
+        # 正式期同样按 (event_type, time_scale, 窗口日) 去重（坑 19 的同类防护：
+        # 研究期有、正式期此前没有，重复点「生成」会冻结重复候选）。
+        existing_keys = self._existing_sample_keys()
+        formal_dupe_skipped = 0
         for cand, _, _ in final_entries:
+            dup_key = (cand.event_type, cand.time_scale.value, cand.window_start.date())
+            if dup_key in existing_keys:
+                formal_dupe_skipped += 1
+                continue
+            existing_keys.add(dup_key)
             pred = self._freeze(cand, fusion=None)
             if pred:
                 result.frozen.append(pred)
+        if formal_dupe_skipped:
+            result.notes.append(
+                f"去重：跳过 {formal_dupe_skipped} 条与在库样本重复的正式候选"
+            )
 
         return result
 
@@ -455,21 +468,7 @@ class DailyPipeline:
         # 去重：同事件 + 同尺度 + 同窗口起点且尚未定论（冻结/研究/待验证）的
         # 样本不重复入库，防止同一天重复点「生成」刷出一模一样的行。
         # 尺度必须进键：同一事件在日/周/月是三个不同的可证伪断言。
-        existing_rows = self.session.exec(
-            select(
-                PredictionRecord.event_type,
-                PredictionRecord.time_scale,
-                PredictionRecord.window_start,
-            ).where(
-                PredictionRecord.user_id == self.user_id,  # type: ignore[arg-type]
-                PredictionRecord.status.in_([  # type: ignore[attr-defined]
-                    PredictionStatus.FROZEN.value,
-                    PredictionStatus.RESEARCH.value,
-                    PredictionStatus.VERIFY_REQUIRED.value,
-                ])
-            )
-        ).all()
-        existing_keys = {(et, ts, ws.date()) for et, ts, ws in existing_rows}
+        existing_keys = self._existing_sample_keys()
         dup_skipped = 0
 
         for cand, _, _ in chosen:
@@ -488,6 +487,30 @@ class DailyPipeline:
             )
 
         return result
+
+    # ------------------------------------------------------------------
+    def _existing_sample_keys(self) -> set[tuple[str, str, Any]]:
+        """在库未定论样本的去重键集合：(event_type, time_scale, 窗口起点日)。
+
+        研究期与正式期共用（坑 19 / 审查 P2-④）。
+        """
+        rows = self.session.exec(
+            select(
+                PredictionRecord.event_type,
+                PredictionRecord.time_scale,
+                PredictionRecord.window_start,
+            ).where(
+                PredictionRecord.user_id == self.user_id,  # type: ignore[arg-type]
+                PredictionRecord.status.in_(  # type: ignore[attr-defined]
+                    [
+                        PredictionStatus.FROZEN.value,
+                        PredictionStatus.RESEARCH.value,
+                        PredictionStatus.VERIFY_REQUIRED.value,
+                    ]
+                )
+            )
+        ).all()
+        return {(et, ts, ws.date()) for et, ts, ws in rows}
 
     # ==================================================================
     def _collect_signals(
@@ -547,9 +570,10 @@ class DailyPipeline:
                             "engine_version": "reality-0.1.0",
                         },
                     )
-                    r = RealityAgent().run(reality_ctx)
+                    reality_agent = RealityAgent()
+                    r = reality_agent.run(reality_ctx)
                     if r.ok:
-                        sig = RealityAgent().to_signal(reality_ctx, r)
+                        sig = reality_agent.to_signal(reality_ctx, r)
                         if not sig.degraded:
                             signals.append(sig)
             except Exception as exc:

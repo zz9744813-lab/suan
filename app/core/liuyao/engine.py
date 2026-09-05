@@ -380,6 +380,7 @@ def cast_chart(dt: datetime, *, birth_date: Any = None) -> dict[str, Any]:
         month_branch = _month_branch_simple(dt.month, dt.day)
         day_branch = ZHI_ORDER[((dt.date() - datetime(1900, 1, 1).date()).days) % 12]
         day_stem = GAN_ORDER[(6 + (dt.date() - datetime(1900, 1, 1).date()).days) % 10]
+        hour_branch = ZHI_ORDER[((dt.hour + 1) // 2) % 12]
     else:
         month_gz = str(cal.payload.get("month_ganzhi", ""))
         day_gz = str(cal.payload.get("day_ganzhi", ""))

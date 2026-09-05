@@ -433,8 +433,6 @@ def fortune_daily(
 
     from datetime import date as date_cls
 
-    from app.services.cross_engine import daily_almanac
-
     try:
         day = date_cls.fromisoformat(date) if date else date_cls.today()
     except ValueError:

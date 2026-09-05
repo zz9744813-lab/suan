@@ -82,6 +82,8 @@ class LiuyaoAdapter(MetaphysicalAdapter):
             pass
 
         chart = cast_chart(dt, birth_date=(profile.solar_birth_date if profile else None))
+        # 婚恋用神依求测人性别：男用妻财、女用官鬼（compute_chart 传入 to_signals）
+        chart["_querent_gender"] = profile.gender if profile else "unknown"
 
         if "error" in chart:
             return {}
@@ -97,7 +99,13 @@ class LiuyaoAdapter(MetaphysicalAdapter):
                 衰（score < 0）→ 负向
             strength 由 |score| 归一化，confidence 固定弱先验（禁止 6）。
         """
-        yong_shen = DOMAIN_YONGSHEN.get(query.domain, "官鬼")
+        # 婚恋用神依求测人性别：男测婚用财（妻星）、女测婚用官（夫星）；
+        # 无档案/未知 → 妻财（历史默认）。其余域仍按 DOMAIN_YONGSHEN。
+        if query.domain == Domain.RELATIONSHIP:
+            querent = chart.get("_querent_gender", "unknown")
+            yong_shen = "官鬼" if querent == "female" else "妻财"
+        else:
+            yong_shen = DOMAIN_YONGSHEN.get(query.domain, "官鬼")
         yao = next((y for y in chart.get("yao_details", []) if y["liuqin"] == yong_shen), None)
         if yao is None:
             # 用神伏藏/缺失：返回降级信号（不可用 ≠ 反对）
@@ -166,7 +174,7 @@ class LiuyaoAdapter(MetaphysicalAdapter):
                         Evidence(
                             source=EvidenceSource.TRADITIONAL_RULE,
                             rule_id=rule_id,
-                            description=f"用神{ yong_shen}处{ '、'.join(yao['status']) or '平' }，力量不足",
+                            description=f"用神{yong_shen}处{'、'.join(yao['status']) or '平'}，力量不足",
                         )
                     ]
                     if score < 0

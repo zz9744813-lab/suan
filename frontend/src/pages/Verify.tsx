@@ -44,7 +44,8 @@ type DueItem = {
 type Verdict = {
   quick: string;
   label: string;
-  outcome: number;
+  /** D=无法判定时不落结果，为 null */
+  outcome: number | null;
   confidence: number;
   needsConfirmation: boolean;
   at: number;
@@ -266,9 +267,12 @@ export default function Verify() {
                       {orig ? cleanDescription(orig.description, orig.event_type) : ''}
                     </div>
                     <div className="mt-0.5 text-[11px] text-t4">
-                      {d.label} · 判定值 {(d.outcome * 100).toFixed(0)}% · 置信{' '}
-                      {(d.confidence * 100).toFixed(0)}%
-                      {d.needsConfirmation && ' · 三方有分歧，已转待人工确认'}
+                      {d.label} ·{' '}
+                      {d.outcome == null
+                        ? '未计结果'
+                        : `判定值 ${(d.outcome * 100).toFixed(0)}%`}{' '}
+                      · 置信 {((d.confidence ?? 0) * 100).toFixed(0)}%
+                      {d.needsConfirmation && ' · 转待人工确认'}
                       {d.reply && ` · 附言：${d.reply}`}
                     </div>
                   </div>
