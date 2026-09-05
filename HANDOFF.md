@@ -24,7 +24,7 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `110 passed, 2 skipped`（全绿；含 round 10 新增 14 项经文对抗测试；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 测试 | `123 passed, 2 skipped`（全绿；round 10 经文对抗 14 项 + round 11 审查回归 13 项；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**38 张表**（+`system_fortune_readings` 紫微批示缓存） |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
@@ -287,6 +287,8 @@ RealityState 扫描 → 候选事件(candidates)
 20. **pip 版 opencv 不带 haarcascade xml**（2026-09-03）：`cv2.data.haarcascades` 目录只有 `__init__.py`，`CascadeClassifier` 静默为空 → 面相检测假阴性。修复：`app/core/face/assets/` 内置一份 `haarcascade_frontalface_default.xml`（官方 master 副本，spec datas 已收），加载后查 `cascade.empty()`，空则诚实降级 detected=False。
 21. **手写 64 卦名表必有键序错位**（2026-09-05，round 10 对抗性审计战果）：梅花引擎 `GUA_NAMES` 手写表有 **9 条上下卦颠倒**（如 `(离,乾)` 误作「火天大有」，实为「天火同人」；`(坎,乾)` 误作「水天需」，实为「天水讼」）且仅覆盖 60 卦——等于梅花信号里 9/64 的卦名是错的，叙述层却无从察觉。治本：`GUA_NAMES` 改由六爻 `HEXAGRAMS`（pattern→name 权威表）程序化生成，单一事实源。**教训：凡是「手抄 N 项全量表」都要配一张程序化对照测试，或直接程序化生成**；`bian_gua.upper/lower` 误用本卦字段的同源 bug 一并修复，engine 版本升至 `meihua-0.2.0`。回归固化在 `tests/test_zhouyi_canon.py::test_meihua_gua_names_match_canonical_table`。
 22. **爻题推导规则**（2026-09-05）：初爻/上爻用「初九/上九」式，**二至五位用「九二/九三」式**（九/六在前）——第一版写成「二九」被测试当场拦下。固化在 `test_yao_positions_rules`。
+23. **历法常量表漏字**（2026-09-05，round 11 审查战果，★★★ 影响每天）：`calendar/core.py` 的 `DIZHI_WUXING` 只有 11 字（漏戌的「土」）——戌时（19-21 点）五行**静默算错**，亥时（21-23 点）`DIZHI_WUXING[11]` IndexError → CalendarCore 降级 → 六爻降级分支又缺 `hour_branch` 直接 UnboundLocalError。**每天 21:00-22:59 所有排盘全废**，且无任何告警。修复 + 常量长度回归测试（`test_calendar_dizhi_wuxing_complete`）。教训：**所有「干支序 → 属性」的紧凑常量串都要配长度断言**。
+24. **验证闭环判定语义**（2026-09-05，round 11）：修复前快捷裁决 A/B/C 只给 Collector 做歧义检测，最终 outcome 由三方 LLM Judge 对**可能为空的** user_reply 瞎猜的均值顶替；三方 Judge 全挂（confidence=0）恰好零分歧 → 以 0 置信度静默记「未中」并进评分。修复：快捷 A/B/C 直通落 outcome（用户是判定权威，不经 LLM）、D → WAITING_USER 不落结果、`from_verdicts` 失败感知转人工、已批复再 verify → 409（C-003 后端强保）。固化在 `tests/test_review_fixes.py`（13 项）。
 
 ---
 
