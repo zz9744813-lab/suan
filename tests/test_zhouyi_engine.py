@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel.pool import StaticPool
 
 import app.models.core  # noqa: F401
 from app.models.core import BirthProfile
@@ -40,9 +41,9 @@ def test_zhouyi_in_scale_support_and_reliability_floor(sesh):
 def test_gloss_score_overlap_masking():
     from app.core.zhouyi.adapter import gloss_score
 
-    # 「无咎」命中后内层「咎」不得再计
+    # 「无咎」命中后内层「咎」不得再计（降权后 0.2）
     score, hits = gloss_score("无咎。")
-    assert score == 0.25
+    assert score == 0.2
     assert hits == ["无咎"]
     # 「大吉」优先于「吉」
     score2, hits2 = gloss_score("元吉，大吉。")
@@ -240,3 +241,35 @@ def test_natal_reading_differs_by_verdict(sesh):
     n2 = daily_almanac(sesh, 102, date(2026, 9, 5))["daily_gua"].get("natal_notes") or []
     assert n1 and n2
     assert n1 != n2, "不同命盘的日卦批示不得是同一句模板"
+
+
+def test_qimen_renshi_main_signal():
+    """回测战果回归：奇门主断必须来自日干(人)×时干(事)宫生克，非恒负的门/格局。"""
+    from app.core.base import AdapterQuery, registry
+    from app.schemas.signal import Domain, TimeScale, TimeWindow
+
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                        poolclass=StaticPool)
+    SQLModel.metadata.create_all(eng)
+    with Session(eng) as s:
+        s.add(BirthProfile(user_id=1, solar_birth_date=date(1961, 8, 4),
+                           solar_birth_time="19:24", birth_time_known=True, gender="male"))
+        s.commit()
+        q = AdapterQuery(user_id=1, domain=Domain.CAREER, target_event="b.c",
+                         time_scale=TimeScale.DAY,
+                         window=TimeWindow(start=datetime(2008, 11, 4),
+                                           end=datetime(2008, 11, 4, 23, 59)),
+                         target_date=date(2008, 11, 4), target_time="12:00", session=s)
+        qm = registry.get("qimen")
+        sigs = qm.signals(q)
+        assert sigs and not sigs[0].degraded
+        descs = [e.description for e in sigs[0].evidence]
+        assert any("人）" in d and "事）" in d for d in descs), "应有人事宫关系主断"
+
+
+def test_zhouyi_boilerplate_gloss_neutral():
+    """回测战果回归：「元亨利贞」这类高频套话不得再产生正向方向。"""
+    from app.core.zhouyi.adapter import gloss_score
+
+    score, hits = gloss_score("元亨利贞。")
+    assert abs(score) < 0.5, f"套话应落在阈下，实际 {score}（{hits}）"

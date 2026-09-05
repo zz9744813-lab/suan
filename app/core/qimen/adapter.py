@@ -26,13 +26,13 @@ from app.schemas.signal import (
     SourceType,
 )
 
-from .engine import cast_chart
+from .engine import WUXING_KE, WUXING_SHENG, cast_chart
 
 ENGINE_VERSION = "qimen-0.1.0"
 
-# 吉门 / 凶门（第 6.1 节传统用法）
+# 八门吉凶（传统口径：三吉门 开休生；三凶门 死惊伤；杜景为中平，不判方向）
 JI_MEN = {"开", "休", "生"}
-XIONG_MEN = {"死", "惊", "伤", "杜", "景"}
+XIONG_MEN = {"死", "惊", "伤"}
 
 # 吉凶格局 → 方向
 PATTERN_DIRECTION = {
@@ -41,6 +41,7 @@ PATTERN_DIRECTION = {
     "伏吟": -1.0,
     "反吟": -1.0,
     "门迫": -0.6,
+    "门制": -0.3,
 }
 
 
@@ -123,10 +124,15 @@ class QimenAdapter(MetaphysicalAdapter):
                 )
 
         # 2. 格局（第 6.1 节：三奇/伏吟/反吟/门迫）
+        # 格局只计「全盘级（palace=0）」与「值符宫」的——传统以值符为用，
+        # 旧实现把任意宫位的格局都计分，多为噪声（回测教训，勿回退）。
         pattern_signals: list[float] = []
         for pat in chart.get("detected_patterns") or []:
             name = pat.get("name", "")
-            if name in PATTERN_DIRECTION:
+            if name in PATTERN_DIRECTION and pat.get("palace") in (
+                0,
+                zhifu_palace_no,
+            ):
                 pattern_signals.append(PATTERN_DIRECTION[name])
                 rule_ids.append(f"QIMEN-R-pattern-{name}")
                 evidence.append(
@@ -137,11 +143,47 @@ class QimenAdapter(MetaphysicalAdapter):
                     )
                 )
 
-        # 3. 融合：门 + 格局
+        # 3. 主断：日干落宫（求测人）× 时干落宫（事体）的五行生克 ——
+        #    奇门断事核心口径。值符门与格局只作修正（回测教训：只有门/格局时
+        #    凶格局种数天然多于吉格局，方向恒负，等于永远示警的摆设，勿回退）。
+        day_stem_info = chart.get("day_stem") or {}
+        ren_palace = day_stem_info.get("palace")
+        shi_palace = (chart.get("zhishi") or {}).get("palace")
+        pal_map = {p.get("palace"): p for p in (chart.get("palaces") or [])}
+        ren_elem = (pal_map.get(ren_palace) or {}).get("element")
+        shi_elem = (pal_map.get(shi_palace) or {}).get("element")
+
+        renshi_direction = 0.0
+        if ren_elem and shi_elem:
+            if shi_elem == ren_elem:
+                renshi_direction, renshi_label = 0.25, "人事情同气（比和）"
+            elif WUXING_SHENG.get(shi_elem) == ren_elem:
+                renshi_direction, renshi_label = 1.0, "事生人（事情来就我）"
+            elif WUXING_KE.get(ren_elem) == shi_elem:
+                renshi_direction, renshi_label = 0.5, "人克事（我可驾驭此事）"
+            elif WUXING_SHENG.get(ren_elem) == shi_elem:
+                renshi_direction, renshi_label = -0.25, "人生事（我生事体，泄而费力）"
+            elif WUXING_KE.get(shi_elem) == ren_elem:
+                renshi_direction, renshi_label = -1.0, "事克人（事来压人，难为）"
+            else:
+                renshi_direction, renshi_label = 0.0, ""
+            if renshi_label:
+                evidence.append(
+                    Evidence(
+                        source=EvidenceSource.TRADITIONAL_RULE,
+                        rule_id="QIMEN-R-renshi",
+                        description=(
+                            f"日干{day_stem_info.get('stem')}落{ren_palace}宫（{ren_elem}，人），"
+                            f"时干落{shi_palace}宫（{shi_elem}，事）：{renshi_label}"
+                        ),
+                    )
+                )
+
         door_direction = 1.0 if zhifu_door in JI_MEN else (-1.0 if zhifu_door in XIONG_MEN else 0.0)
-        net = door_direction * 0.5 + sum(pattern_signals) * 0.3
+        pattern_sum = sum(pattern_signals)
+        net = renshi_direction * 0.6 + door_direction * 0.25 + pattern_sum * 0.15
         if net == 0:
-            return []  # 无明确信号，不强行输出
+            return []  # 全盘无明确指向，不强行输出
 
         direction = 1.0 if net > 0 else -1.0
         strength = min(0.8, 0.3 + abs(net))

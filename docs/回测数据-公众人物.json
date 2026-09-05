@@ -1,0 +1,654 @@
+{
+ "per_source": {
+  "bazi": {
+   "hit": 8,
+   "miss": 5,
+   "abstain": 19,
+   "error": 0
+  },
+  "zhouyi": {
+   "hit": 24,
+   "miss": 2,
+   "abstain": 6,
+   "error": 0
+  },
+  "liuyao": {
+   "hit": 15,
+   "miss": 17,
+   "abstain": 0,
+   "error": 0
+  },
+  "meihua": {
+   "hit": 7,
+   "miss": 10,
+   "abstain": 15,
+   "error": 0
+  },
+  "qimen": {
+   "hit": 19,
+   "miss": 13,
+   "abstain": 0,
+   "error": 0
+  },
+  "ziwei": {
+   "hit": 22,
+   "miss": 4,
+   "abstain": 6,
+   "error": 0
+  }
+ },
+ "crossed": {
+  "hit": 28,
+  "miss": 4,
+  "abstain": 0
+ },
+ "pillars": [
+  {
+   "name": "奥巴马",
+   "year": "辛丑",
+   "expect": "辛丑",
+   "ok": true,
+   "pillars": {
+    "year": "辛丑",
+    "month": "乙未",
+    "day": "己巳",
+    "time": "甲戌",
+    "day_master": "己"
+   }
+  },
+  {
+   "name": "特朗普",
+   "year": "丙戌",
+   "expect": "丙戌",
+   "ok": true,
+   "pillars": {
+    "year": "丙戌",
+    "month": "甲午",
+    "day": "己未",
+    "time": "己巳",
+    "day_master": "己"
+   }
+  },
+  {
+   "name": "马斯克",
+   "year": "辛亥",
+   "expect": "辛亥",
+   "ok": true,
+   "pillars": {
+    "year": "辛亥",
+    "month": "甲午",
+    "day": "甲申",
+    "time": "戊辰",
+    "day_master": "甲"
+   }
+  },
+  {
+   "name": "泰勒·斯威夫特",
+   "year": "己巳",
+   "expect": "己巳",
+   "ok": true,
+   "pillars": {
+    "year": "己巳",
+    "month": "丙子",
+    "day": "丁未",
+    "time": "甲辰",
+    "day_master": "丁"
+   }
+  },
+  {
+   "name": "乔布斯",
+   "year": "乙未",
+   "expect": "乙未",
+   "ok": true,
+   "pillars": {
+    "year": "乙未",
+    "month": "戊寅",
+    "day": "丙辰",
+    "time": "戊戌",
+    "day_master": "丙"
+   }
+  },
+  {
+   "name": "比尔·盖茨",
+   "year": "乙未",
+   "expect": "乙未",
+   "ok": true,
+   "pillars": {
+    "year": "乙未",
+    "month": "丙戌",
+    "day": "壬戌",
+    "time": "庚子",
+    "day_master": "壬"
+   }
+  },
+  {
+   "name": "奥普拉",
+   "year": "癸巳",
+   "expect": "癸巳",
+   "ok": true,
+   "pillars": {
+    "year": "癸巳",
+    "month": "乙丑",
+    "day": "乙酉",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "勒布朗·詹姆斯",
+   "year": "甲子",
+   "expect": "甲子",
+   "ok": true,
+   "pillars": {
+    "year": "甲子",
+    "month": "丙子",
+    "day": "戊戌",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  },
+  {
+   "name": "塞雷娜·威廉姆斯",
+   "year": "辛酉",
+   "expect": "辛酉",
+   "ok": true,
+   "pillars": {
+    "year": "辛酉",
+    "month": "丁酉",
+    "day": "丁未",
+    "time": "庚子",
+    "day_master": "丁"
+   }
+  },
+  {
+   "name": "刘德华",
+   "year": "辛丑",
+   "expect": "辛丑",
+   "ok": true,
+   "pillars": {
+    "year": "辛丑",
+    "month": "丁酉",
+    "day": "癸亥",
+    "time": "壬子",
+    "day_master": "癸"
+   }
+  },
+  {
+   "name": "周杰伦",
+   "year": "戊午",
+   "expect": "戊午",
+   "ok": true,
+   "pillars": {
+    "year": "戊午",
+    "month": "乙丑",
+    "day": "乙酉",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "郎朗",
+   "year": "壬戌",
+   "expect": "壬戌",
+   "ok": true,
+   "pillars": {
+    "year": "壬戌",
+    "month": "丙午",
+    "day": "戊辰",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  }
+ ],
+ "events": [
+  {
+   "figure": "奥巴马",
+   "event": "结婚",
+   "date": "1992-10-03",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "奥巴马",
+   "event": "当选总统",
+   "date": "2008-11-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "奥巴马",
+   "event": "获诺贝尔和平奖",
+   "date": "2009-10-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "特朗普",
+   "event": "结婚",
+   "date": "2005-01-22",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "特朗普",
+   "event": "当选总统",
+   "date": "2016-11-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "特朗普",
+   "event": "再次当选",
+   "date": "2024-11-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "特朗普",
+   "event": "赌场集团破产保护",
+   "date": "2009-02-17",
+   "expected": -1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "马斯克",
+   "event": "PayPal 被收购套现",
+   "date": "2002-10-01",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马斯克",
+   "event": "执掌特斯拉",
+   "date": "2008-10-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马斯克",
+   "event": "成为世界首富",
+   "date": "2021-01-07",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "泰勒·斯威夫特",
+   "event": "格莱美年度专辑",
+   "date": "2010-01-31",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "泰勒·斯威夫特",
+   "event": "再获年度专辑",
+   "date": "2016-02-15",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "泰勒·斯威夫特",
+   "event": "福布斯认证亿万身家",
+   "date": "2023-10-26",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "乔布斯",
+   "event": "创立苹果",
+   "date": "1976-04-01",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "乔布斯",
+   "event": "被逐出苹果",
+   "date": "1985-09-17",
+   "expected": -1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "乔布斯",
+   "event": "发布 iPhone",
+   "date": "2007-01-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "乔布斯",
+   "event": "结婚",
+   "date": "1991-03-18",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "比尔·盖茨",
+   "event": "创立微软",
+   "date": "1975-04-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "比尔·盖茨",
+   "event": "发布 Windows 95",
+   "date": "1995-08-24",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "比尔·盖茨",
+   "event": "结婚",
+   "date": "1994-01-01",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "奥普拉",
+   "event": "节目全国联播",
+   "date": "1986-09-08",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "奥普拉",
+   "event": "福布斯亿万身家",
+   "date": "2003-03-01",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "勒布朗·詹姆斯",
+   "event": "状元入选",
+   "date": "2003-06-26",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "勒布朗·詹姆斯",
+   "event": "夺得总冠军",
+   "date": "2016-06-19",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "塞雷娜·威廉姆斯",
+   "event": "首夺温网",
+   "date": "2002-07-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "塞雷娜·威廉姆斯",
+   "event": "带孕夺澳网",
+   "date": "2017-01-28",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "刘德华",
+   "event": "首夺金像奖影帝",
+   "date": "2000-04-16",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "刘德华",
+   "event": "注册结婚",
+   "date": "2008-06-23",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "周杰伦",
+   "event": "首张专辑出道",
+   "date": "2000-11-07",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "周杰伦",
+   "event": "结婚",
+   "date": "2015-01-17",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "郎朗",
+   "event": "拉维尼亚替补成名",
+   "date": "1999-08-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "郎朗",
+   "event": "结婚",
+   "date": "2019-06-02",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  }
+ ],
+ "n_events": 32
+}

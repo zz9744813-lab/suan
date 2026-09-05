@@ -24,7 +24,7 @@ from app.schemas.signal import (
     SourceType,
 )
 
-ENGINE_VERSION = "zhouyi-yili-0.1.0"
+ENGINE_VERSION = "zhouyi-yili-0.2.0"
 
 # 通行本吉凶断辞 → 权重（正=同向，负=反向）。扫描按词长降序、命中区间互斥。
 GLOSS_TERMS: list[tuple[str, float]] = sorted(
@@ -36,10 +36,12 @@ GLOSS_TERMS: list[tuple[str, float]] = sorted(
         ("无不利", 0.55),
         ("利涉大川", 0.5),
         ("利有攸往", 0.45),
-        ("亨", 0.4),
-        ("无咎", 0.25),
-        ("无悔", 0.25),
-        ("利", 0.3),
+        # 亨/利/无咎/无悔 是高频套话（多数卦辞都有），降权到阈下作中性，
+        # 否则 direction 恒为正向、零信息量（回测教训：94% 命中全是灌水）
+        ("亨", 0.3),
+        ("无咎", 0.2),
+        ("无悔", 0.2),
+        ("利", 0.15),
         # 凶类
         ("凶", -1.0),
         ("无攸利", -0.6),
@@ -130,10 +132,12 @@ class ZhouyiAdapter(MetaphysicalAdapter):
         text = canon + (canon_yao or "")
 
         score, hits = gloss_score(text)
+        # 对称阈值 ±0.5：弱吉套话（亨/利/无咎）落在阈下为中性，
+        # 只有真断辞（元吉/大吉/吉 ↔ 凶/厉+吝）才定方向——宁弃权不灌水
         direction = 0.0
-        if score >= 0.25:
+        if score >= 0.5:
             direction = 1.0
-        elif score <= -0.25:
+        elif score <= -0.5:
             direction = -1.0
         strength = min(0.7, 0.3 + abs(score) * 0.12)
         confidence = 0.30  # 义理断辞，弱先验（禁止 6）

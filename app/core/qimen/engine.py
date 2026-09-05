@@ -343,8 +343,14 @@ def build_solar_and_lunar(normalized: NormalizedInput) -> tuple[Solar, Any]:
 
 
 def active_jie(lunar: Any) -> tuple[str, Any, Any]:
-    prev_jie = lunar.getPrevJie(False)
-    next_jie = lunar.getNextJie(False)
+    """当前节气（含十二中气）。
+
+    ⚠️ 必须用 getPrevJieQi（二十四节气全表）而不是 getPrevJie（只有十二「节」）：
+    JU_TABLE 以全部 24 节气为键，若跳过中气，则每逢春分/秋分/夏至/冬至等
+    中气统领的时段（全年约一半日子）局数错一档，整盘作废（回测战果，勿回退）。
+    """
+    prev_jie = lunar.getPrevJieQi(False)
+    next_jie = lunar.getNextJieQi(False)
     if prev_jie is None:
         raise ValueError("无法确定当前节令")
     return prev_jie.getName(), prev_jie, next_jie
@@ -455,37 +461,54 @@ def detect_patterns(palaces: list[dict[str, Any]], zhifu: dict, xunshou_palace: 
                 "nature": "吉",
             })
 
-        # 2. 伏吟：天盘干 == 地盘干（同干同宫）
-        if sky_stem and earth_stem and sky_stem == earth_stem:
+        # （伏吟/反吟是全盘级格局，移到循环外统一判定；
+        #   旧实现「单宫天干==地干即伏吟 / 单宫互克即反吟」几乎日日检出，
+        #   是回测中奇门 25% 系统性反向的主要来源之一，勿回退）
+
+    # 2. 伏吟（全盘级）：八宫天盘干全部等于地盘干 —— 主静、宜守不宜进
+    live = [p for p in palaces if not p["is_center"]]
+    if live and all(p.get("sky_stem") and p.get("sky_stem") == p.get("earth_stem") for p in live):
+        patterns.append({
+            "name": "伏吟",
+            "palace": 0,
+            "detail": "八宫天地盘干全同（全盘伏吟）",
+            "nature": "凶",
+        })
+
+    # 3. 反吟（全盘级）：每宫天盘干 == 对冲宫地盘干（1↔9 2↔8 3↔7 4↔6）
+    OPPOSITE = {1: 9, 9: 1, 2: 8, 8: 2, 3: 7, 7: 3, 4: 6, 6: 4}
+    earth_by_palace = {p["palace"]: p.get("earth_stem") for p in live}
+    if live and all(
+        p.get("sky_stem") and p.get("sky_stem") == earth_by_palace.get(OPPOSITE.get(p["palace"]))
+        for p in live
+    ):
+        patterns.append({
+            "name": "反吟",
+            "palace": 0,
+            "detail": "八宫天盘干尽落对冲宫（全盘反吟）",
+            "nature": "凶",
+        })
+
+    # 4. 门迫（仅值符宫）：门克宫为迫（旧实现误作宫克门且不限宫位）
+    zhifu_palace_no = zhifu["palace"]
+    zp = next((p for p in live if p["palace"] == zhifu_palace_no), None)
+    if zp and zp.get("door"):
+        door_elem = DOOR_ELEMENT.get(zp["door"])
+        palace_elem = zp["element"]
+        if door_elem and WUXING_KE.get(door_elem) == palace_elem:
             patterns.append({
-                "name": "伏吟",
-                "palace": palace_no,
-                "detail": f"天地盘同为{sky_stem}",
+                "name": "门迫",
+                "palace": zhifu_palace_no,
+                "detail": f"值符宫{zp['door']}({door_elem})克宫({palace_elem})",
                 "nature": "凶",
             })
-
-        # 3. 反吟：天盘干克地盘干 且 两干五行相克（对冲性质）
-        if sky_stem and earth_stem:
-            sky_elem = STEM_ELEMENT.get(sky_stem)
-            earth_elem = STEM_ELEMENT.get(earth_stem)
-            if sky_elem and earth_elem and WUXING_KE.get(sky_elem) == earth_elem and WUXING_KE.get(earth_elem) == sky_elem:
-                patterns.append({
-                    "name": "反吟",
-                    "palace": palace_no,
-                    "detail": f"天{sky_stem}({sky_elem})与地{earth_stem}({earth_elem})互克",
-                    "nature": "凶",
-                })
-
-        # 4. 门迫：门的五行被所在宫的五行所克
-        if door:
-            door_elem = DOOR_ELEMENT.get(door)
-            if door_elem and WUXING_KE.get(palace_elem) == door_elem:
-                patterns.append({
-                    "name": "门迫",
-                    "palace": palace_no,
-                    "detail": f"{door}({door_elem})受{p['name']}({palace_elem})克",
-                    "nature": "凶",
-                })
+        elif door_elem and WUXING_KE.get(palace_elem) == door_elem:
+            patterns.append({
+                "name": "门制",
+                "palace": zhifu_palace_no,
+                "detail": f"值符宫{zp['door']}({door_elem})受宫({palace_elem})克",
+                "nature": "凶",
+            })
 
     # 5. 值符得位：值符星落回其原始归属宫
     zhifu_star = zhifu["star"]
