@@ -1,18 +1,16 @@
-"""公众人物回测 —— 用公开已知的人生事件校验术式信号方向。
+"""公众人物回测 —— 用公开已知的人生事件校验术式信号方向（40 人版）。
 
 目的（对抗性）：
-1. 排盘事实层核对：年柱 vs 独立推算（含立春边界：1 月生人属前一年）；
-2. 信号方向回测：已知已发生的事件（结婚/当选/首富=正向；被逐/破产=反向），
-   六术在事件当天的方向是否与事实同向 —— 逐源统计命中/反向/弃权。
-   某源若系统性反向（远低于 50%），大概率存在实现 bug（梅花卦名错位即前例）。
+1. 排盘事实层核对：年柱 vs 独立干支公式（含立春边界：立春前属前一年）；
+2. 信号方向回测：已知已发生的事件（结婚/当选/首富=正向；被逐/破产/退赛=负向），
+   六术在事件当天的方向是否与事实同向 —— 逐源统计命中/反向/弃权/报错；
+3. 每源做二项检验（vs 0.5），把「命中率是否显著偏离硬币」说清楚。
 
 边界（诚实）：
-- 单向事件为主、样本仅数十，统计功效有限 —— 结果用于找 bug 与校准种子，
-  不构成对术式预测力的证明（C-006）；
-- 出生时辰：有公开出生证明/权威星历的标 time_known=True，否则 False
-  （系统对时辰未知会如实降级，这正是要测的路径）；
-- 数据：出生日期与事件日期均为公开记录；出生时辰取自公开出生证明或
-  广泛引用的星历资料，个别时辰存在资料间差异，已在字段里标注置信。
+- 正向事件仍占多数（约 9 成），命中率必须联合正向倾向解读；小样本统计功效有限，
+  结果用于找系统性 bug 与校准种子，不构成对术式预测力的证明（C-006）；
+- 出生时辰：仅在有公开出生证明/广泛引用的星历时标 time_known=True，否则 False；
+- 数据：出生日期与事件日期均为公开记录；日期精确到日，个别奖项公布日为报道日。
 
 用法：python tools/backtest_figures.py  → 输出报告并写入 docs/回测报告-公众人物.md
 """
@@ -20,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -35,117 +34,123 @@ from app.models.core import BirthProfile
 from app.schemas.signal import Domain, TimeScale, TimeWindow
 
 # ----------------------------------------------------------------------
-# 数据集：12 位公众人物 + 公开记录事件（expected: +1=正向事件, -1=负向事件）
+# 数据集：40 位公众人物 + 公开记录事件（expected: +1=正向事件, -1=负向事件）
 # ----------------------------------------------------------------------
 FIGURES: list[dict] = [
-    {
-        "name": "奥巴马", "birth": (1961, 8, 4), "time": "19:24", "time_known": True,
-        "gender": "male", "year_expect": "辛丑",
-        "events": [
-            ("1992-10-03", Domain.RELATIONSHIP, "结婚", +1),
-            ("2008-11-04", Domain.CAREER, "当选总统", +1),
-            ("2009-10-09", Domain.CAREER, "获诺贝尔和平奖", +1),
-        ],
-    },
-    {
-        "name": "特朗普", "birth": (1946, 6, 14), "time": "10:54", "time_known": True,
-        "gender": "male", "year_expect": "丙戌",
-        "events": [
-            ("2005-01-22", Domain.RELATIONSHIP, "结婚", +1),
-            ("2016-11-09", Domain.CAREER, "当选总统", +1),
-            ("2024-11-06", Domain.CAREER, "再次当选", +1),
-            ("2009-02-17", Domain.MONEY, "赌场集团破产保护", -1),
-        ],
-    },
-    {
-        "name": "马斯克", "birth": (1971, 6, 28), "time": "07:30", "time_known": True,
-        "gender": "male", "year_expect": "辛亥",
-        "events": [
-            ("2002-10-01", Domain.MONEY, "PayPal 被收购套现", +1),
-            ("2008-10-06", Domain.CAREER, "执掌特斯拉", +1),
-            ("2021-01-07", Domain.MONEY, "成为世界首富", +1),
-        ],
-    },
-    {
-        "name": "泰勒·斯威夫特", "birth": (1989, 12, 13), "time": "08:36", "time_known": True,
-        "gender": "female", "year_expect": "己巳",
-        "events": [
-            ("2010-01-31", Domain.CAREER, "格莱美年度专辑", +1),
-            ("2016-02-15", Domain.CAREER, "再获年度专辑", +1),
-            ("2023-10-26", Domain.MONEY, "福布斯认证亿万身家", +1),
-        ],
-    },
-    {
-        "name": "乔布斯", "birth": (1955, 2, 24), "time": "19:15", "time_known": True,
-        "gender": "male", "year_expect": "乙未",
-        "events": [
-            ("1976-04-01", Domain.CAREER, "创立苹果", +1),
-            ("1985-09-17", Domain.CAREER, "被逐出苹果", -1),
-            ("2007-01-09", Domain.CAREER, "发布 iPhone", +1),
-            ("1991-03-18", Domain.RELATIONSHIP, "结婚", +1),
-        ],
-    },
-    {
-        "name": "比尔·盖茨", "birth": (1955, 10, 28), "time": None, "time_known": False,
-        "gender": "male", "year_expect": "乙未",
-        "events": [
-            ("1975-04-04", Domain.CAREER, "创立微软", +1),
-            ("1995-08-24", Domain.CAREER, "发布 Windows 95", +1),
-            ("1994-01-01", Domain.RELATIONSHIP, "结婚", +1),
-        ],
-    },
-    {
-        "name": "奥普拉", "birth": (1954, 1, 29), "time": None, "time_known": False,
-        "gender": "female", "year_expect": "癸巳",
-        "events": [
-            ("1986-09-08", Domain.CAREER, "节目全国联播", +1),
-            ("2003-03-01", Domain.MONEY, "福布斯亿万身家", +1),
-        ],
-    },
-    {
-        "name": "勒布朗·詹姆斯", "birth": (1984, 12, 30), "time": None, "time_known": False,
-        "gender": "male", "year_expect": "甲子",
-        "events": [
-            ("2003-06-26", Domain.CAREER, "状元入选", +1),
-            ("2016-06-19", Domain.CAREER, "夺得总冠军", +1),
-        ],
-    },
-    {
-        "name": "塞雷娜·威廉姆斯", "birth": (1981, 9, 26), "time": None, "time_known": False,
-        "gender": "female", "year_expect": "辛酉",
-        "events": [
-            ("2002-07-06", Domain.CAREER, "首夺温网", +1),
-            ("2017-01-28", Domain.CAREER, "带孕夺澳网", +1),
-        ],
-    },
-    {
-        "name": "刘德华", "birth": (1961, 9, 27), "time": None, "time_known": False,
-        "gender": "male", "year_expect": "辛丑",
-        "events": [
-            ("2000-04-16", Domain.CAREER, "首夺金像奖影帝", +1),
-            ("2008-06-23", Domain.RELATIONSHIP, "注册结婚", +1),
-        ],
-    },
-    {
-        "name": "周杰伦", "birth": (1979, 1, 18), "time": None, "time_known": False,
-        "gender": "male", "year_expect": "戊午",
-        "events": [
-            ("2000-11-07", Domain.CAREER, "首张专辑出道", +1),
-            ("2015-01-17", Domain.RELATIONSHIP, "结婚", +1),
-        ],
-    },
-    {
-        "name": "郎朗", "birth": (1982, 6, 14), "time": None, "time_known": False,
-        "gender": "male", "year_expect": "壬戌",
-        "events": [
-            ("1999-08-14", Domain.CAREER, "拉维尼亚替补成名", +1),
-            ("2019-06-02", Domain.RELATIONSHIP, "结婚", +1),
-        ],
-    },
+    # ---- 原始 12 位 ----
+    {"name": "奥巴马", "birth": (1961, 8, 4), "time": "19:24", "time_known": True, "gender": "male",
+     "events": [("1992-10-03", Domain.RELATIONSHIP, "结婚", +1), ("2008-11-04", Domain.CAREER, "当选总统", +1), ("2009-10-09", Domain.CAREER, "获诺贝尔和平奖", +1)]},
+    {"name": "特朗普", "birth": (1946, 6, 14), "time": "10:54", "time_known": True, "gender": "male",
+     "events": [("2005-01-22", Domain.RELATIONSHIP, "结婚", +1), ("2016-11-09", Domain.CAREER, "当选总统", +1), ("2024-11-06", Domain.CAREER, "再次当选", +1), ("2009-02-17", Domain.MONEY, "赌场集团破产保护", -1)]},
+    {"name": "马斯克", "birth": (1971, 6, 28), "time": "07:30", "time_known": True, "gender": "male",
+     "events": [("2002-10-01", Domain.MONEY, "PayPal 被收购套现", +1), ("2008-10-06", Domain.CAREER, "执掌特斯拉", +1), ("2021-01-07", Domain.MONEY, "成为世界首富", +1)]},
+    {"name": "泰勒·斯威夫特", "birth": (1989, 12, 13), "time": "08:36", "time_known": True, "gender": "female",
+     "events": [("2010-01-31", Domain.CAREER, "格莱美年度专辑", +1), ("2016-02-15", Domain.CAREER, "再获年度专辑", +1), ("2023-10-26", Domain.MONEY, "福布斯认证亿万身家", +1)]},
+    {"name": "乔布斯", "birth": (1955, 2, 24), "time": "19:15", "time_known": True, "gender": "male",
+     "events": [("1976-04-01", Domain.CAREER, "创立苹果", +1), ("1985-09-17", Domain.CAREER, "被逐出苹果", -1), ("2007-01-09", Domain.CAREER, "发布 iPhone", +1), ("1991-03-18", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "比尔·盖茨", "birth": (1955, 10, 28), "time": None, "time_known": False, "gender": "male",
+     "events": [("1975-04-04", Domain.CAREER, "创立微软", +1), ("1995-08-24", Domain.CAREER, "发布 Windows 95", +1), ("1994-01-01", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "奥普拉", "birth": (1954, 1, 29), "time": None, "time_known": False, "gender": "female",
+     "events": [("1986-09-08", Domain.CAREER, "节目全国联播", +1), ("2003-03-01", Domain.MONEY, "福布斯亿万身家", +1)]},
+    {"name": "勒布朗·詹姆斯", "birth": (1984, 12, 30), "time": None, "time_known": False, "gender": "male",
+     "events": [("2003-06-26", Domain.CAREER, "状元入选", +1), ("2016-06-19", Domain.CAREER, "夺得总冠军", +1)]},
+    {"name": "塞雷娜·威廉姆斯", "birth": (1981, 9, 26), "time": None, "time_known": False, "gender": "female",
+     "events": [("2002-07-06", Domain.CAREER, "首夺温网", +1), ("2017-01-28", Domain.CAREER, "带孕夺澳网", +1)]},
+    {"name": "刘德华", "birth": (1961, 9, 27), "time": None, "time_known": False, "gender": "male",
+     "events": [("2000-04-16", Domain.CAREER, "首夺金像奖影帝", +1), ("2008-06-23", Domain.RELATIONSHIP, "注册结婚", +1)]},
+    {"name": "周杰伦", "birth": (1979, 1, 18), "time": None, "time_known": False, "gender": "male",
+     "events": [("2000-11-07", Domain.CAREER, "首张专辑出道", +1), ("2015-01-17", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "郎朗", "birth": (1982, 6, 14), "time": None, "time_known": False, "gender": "male",
+     "events": [("1999-08-14", Domain.CAREER, "拉维尼亚替补成名", +1), ("2019-06-02", Domain.RELATIONSHIP, "结婚", +1)]},
+    # ---- 扩充 28 位 ----
+    {"name": "克里斯蒂亚诺·罗纳尔多", "birth": (1985, 2, 5), "time": None, "time_known": False, "gender": "male",
+     "events": [("2009-06-11", Domain.CAREER, "创纪录转会皇马", +1), ("2016-07-10", Domain.CAREER, "欧洲杯夺冠", +1)]},
+    {"name": "梅西", "birth": (1987, 6, 24), "time": None, "time_known": False, "gender": "male",
+     "events": [("2009-12-06", Domain.CAREER, "首夺金球奖", +1), ("2021-08-10", Domain.CAREER, "美洲杯首冠", +1), ("2022-12-18", Domain.CAREER, "世界杯夺冠", +1)]},
+    {"name": "蕾哈娜", "birth": (1988, 2, 20), "time": None, "time_known": False, "gender": "female",
+     "events": [("2021-08-04", Domain.MONEY, "福布斯亿万身家", +1), ("2023-02-12", Domain.CAREER, "超级碗中场秀", +1)]},
+    {"name": "安吉丽娜·朱莉", "birth": (1975, 6, 4), "time": None, "time_known": False, "gender": "female",
+     "events": [("2000-03-26", Domain.CAREER, "奥斯卡最佳女配", +1), ("2014-08-23", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "布拉德·皮特", "birth": (1963, 12, 18), "time": None, "time_known": False, "gender": "male",
+     "events": [("2020-02-09", Domain.CAREER, "奥斯卡最佳男配", +1), ("2014-08-23", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "坎耶·维斯特", "birth": (1977, 6, 8), "time": None, "time_known": False, "gender": "male",
+     "events": [("2004-02-10", Domain.CAREER, "首张专辑发行", +1), ("2022-10-25", Domain.MONEY, "Adidas 终止合作", -1)]},
+    {"name": "贾斯汀·比伯", "birth": (1994, 3, 1), "time": None, "time_known": False, "gender": "male",
+     "events": [("2010-01-18", Domain.CAREER, "单曲 Baby 发行", +1), ("2018-09-30", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "爱莉安娜·格兰德", "birth": (1993, 6, 26), "time": None, "time_known": False, "gender": "female",
+     "events": [("2018-08-17", Domain.CAREER, "专辑首周登顶", +1), ("2021-05-15", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "金·卡戴珊", "birth": (1980, 10, 21), "time": None, "time_known": False, "gender": "female",
+     "events": [("2007-10-14", Domain.CAREER, "真人秀首播", +1), ("2014-05-24", Domain.RELATIONSHIP, "结婚", +1), ("2021-04-06", Domain.MONEY, "福布斯认证亿万", +1)]},
+    {"name": "维纳斯·威廉姆斯", "birth": (1980, 6, 17), "time": None, "time_known": False, "gender": "female",
+     "events": [("2000-07-08", Domain.CAREER, "温网首冠", +1), ("2000-09-09", Domain.CAREER, "美网首冠", +1)]},
+    {"name": "德约科维奇", "birth": (1987, 5, 22), "time": None, "time_known": False, "gender": "male",
+     "events": [("2008-01-27", Domain.CAREER, "首夺大满贯", +1), ("2011-07-04", Domain.CAREER, "登顶世界第一", +1)]},
+    {"name": "费德勒", "birth": (1981, 8, 8), "time": None, "time_known": False, "gender": "male",
+     "events": [("2003-07-06", Domain.CAREER, "首夺温网", +1), ("2009-06-07", Domain.CAREER, "全满贯达成", +1)]},
+    {"name": "泰格·伍兹", "birth": (1975, 12, 30), "time": None, "time_known": False, "gender": "male",
+     "events": [("1997-04-13", Domain.CAREER, "首夺大师赛", +1), ("2019-04-14", Domain.CAREER, "复出再夺大师赛", +1), ("2009-11-27", Domain.CAREER, "丑闻爆发生涯受挫", -1)]},
+    {"name": "菲尔普斯", "birth": (1985, 6, 30), "time": None, "time_known": False, "gender": "male",
+     "events": [("2004-08-14", Domain.CAREER, "首枚奥运金牌", +1), ("2008-08-17", Domain.CAREER, "单届八金", +1)]},
+    {"name": "博尔特", "birth": (1986, 8, 21), "time": None, "time_known": False, "gender": "male",
+     "events": [("2008-08-16", Domain.CAREER, "百米夺金破世界纪录", +1), ("2009-08-16", Domain.CAREER, "跑出 9 秒 58", +1)]},
+    {"name": "杰夫·贝索斯", "birth": (1964, 1, 12), "time": None, "time_known": False, "gender": "male",
+     "events": [("1994-07-05", Domain.CAREER, "创立亚马逊", +1), ("2017-10-27", Domain.MONEY, "登顶全球首富", +1), ("2019-04-04", Domain.RELATIONSHIP, "离婚（巨额分割）", -1)]},
+    {"name": "马克·扎克伯格", "birth": (1984, 5, 14), "time": None, "time_known": False, "gender": "male",
+     "events": [("2004-02-04", Domain.CAREER, "创立 Facebook", +1), ("2012-05-18", Domain.MONEY, "IPO 上市", +1), ("2012-05-19", Domain.RELATIONSHIP, "结婚", +1)]},
+    {"name": "拉里·佩奇", "birth": (1973, 3, 26), "time": None, "time_known": False, "gender": "male",
+     "events": [("1998-09-04", Domain.CAREER, "创立 Google", +1), ("2004-08-19", Domain.MONEY, "IPO 上市", +1)]},
+    {"name": "沃伦·巴菲特", "birth": (1930, 8, 30), "time": None, "time_known": False, "gender": "male",
+     "events": [("1965-05-10", Domain.CAREER, "执掌伯克希尔", +1), ("2008-03-05", Domain.MONEY, "福布斯全球首富", +1)]},
+    {"name": "马云", "birth": (1964, 9, 10), "time": None, "time_known": False, "gender": "male",
+     "events": [("2014-09-19", Domain.MONEY, "阿里 IPO", +1), ("2020-11-03", Domain.CAREER, "蚂蚁上市暂缓", -1)]},
+    {"name": "成龙", "birth": (1954, 4, 7), "time": None, "time_known": False, "gender": "male",
+     "events": [("1996-02-23", Domain.CAREER, "红番区北美破圈", +1), ("2016-11-12", Domain.CAREER, "奥斯卡终身成就奖", +1)]},
+    {"name": "姚明", "birth": (1980, 9, 12), "time": None, "time_known": False, "gender": "male",
+     "events": [("2002-06-26", Domain.CAREER, "NBA 状元入选", +1), ("2016-09-09", Domain.CAREER, "入选名人堂", +1)]},
+    {"name": "刘翔", "birth": (1983, 7, 13), "time": None, "time_known": False, "gender": "male",
+     "events": [("2004-08-27", Domain.CAREER, "雅典夺金", +1), ("2008-08-18", Domain.CAREER, "因伤退赛", -1)]},
+    {"name": "谷爱凌", "birth": (2003, 9, 3), "time": None, "time_known": False, "gender": "female",
+     "events": [("2022-02-08", Domain.CAREER, "冬奥首金", +1), ("2022-02-18", Domain.CAREER, "冬奥第二金", +1)]},
+    {"name": "李娜", "birth": (1982, 2, 26), "time": None, "time_known": False, "gender": "female",
+     "events": [("2011-06-04", Domain.CAREER, "法网夺冠", +1), ("2014-01-25", Domain.CAREER, "澳网夺冠", +1)]},
+    {"name": "莫言", "birth": (1955, 2, 17), "time": None, "time_known": False, "gender": "male",
+     "events": [("2011-08-20", Domain.CAREER, "茅盾文学奖", +1), ("2012-10-11", Domain.CAREER, "诺贝尔文学奖", +1)]},
+    {"name": "屠呦呦", "birth": (1930, 12, 30), "time": None, "time_known": False, "gender": "female",
+     "events": [("2011-09-12", Domain.CAREER, "拉斯克奖", +1), ("2015-10-05", Domain.CAREER, "诺贝尔生理学或医学奖", +1)]},
+    {"name": "袁隆平", "birth": (1930, 9, 7), "time": None, "time_known": False, "gender": "male",
+     "events": [("2004-10-14", Domain.CAREER, "世界粮食奖", +1), ("2019-09-29", Domain.CAREER, "共和国勋章", +1)]},
+    {"name": "碧昂丝", "birth": (1981, 9, 4), "time": None, "time_known": False, "gender": "female",
+     "events": [("2003-06-23", Domain.CAREER, "首张个人专辑", +1), ("2008-04-04", Domain.RELATIONSHIP, "结婚", +1), ("2010-01-31", Domain.CAREER, "单夜六座格莱美", +1)]},
+    {"name": "阿黛尔", "birth": (1988, 5, 5), "time": None, "time_known": False, "gender": "female",
+     "events": [("2012-02-12", Domain.CAREER, "格莱美年度专辑", +1), ("2017-02-12", Domain.CAREER, "再获年度专辑", +1)]},
+    {"name": "道恩·强森", "birth": (1972, 5, 2), "time": None, "time_known": False, "gender": "male",
+     "events": [("1998-11-15", Domain.CAREER, "首夺 WWF 冠军", +1), ("2016-08-30", Domain.CAREER, "福布斯收入最高演员", +1)]},
+    {"name": "麦当娜", "birth": (1958, 8, 16), "time": None, "time_known": False, "gender": "female",
+     "events": [("1984-09-14", Domain.CAREER, "VMA 表演一鸣惊人", +1), ("2012-02-05", Domain.CAREER, "超级碗中场秀", +1)]},
+    {"name": "汤姆·汉克斯", "birth": (1956, 7, 9), "time": None, "time_known": False, "gender": "male",
+     "events": [("1988-04-30", Domain.RELATIONSHIP, "结婚", +1), ("1994-03-21", Domain.CAREER, "奥斯卡影帝", +1), ("1995-03-27", Domain.CAREER, "奥斯卡连庄", +1)]},
 ]
 
-# 用于核对的独立年柱口径（干支年以立春为界，1 月生人属前一年已含在期望值里）
-GZ = "甲乙丙丁戊己庚辛壬癸"
+_STEM = "甲乙丙丁戊己庚辛壬癸"
+_BRANCH = "子丑寅卯辰巳午未申酉戌亥"
+
+
+def expected_year_pillar(y: int, m: int, d: int) -> str:
+    """独立干支公式推年柱（与系统实现无关）：立春(约2/4)前属前一年。
+
+    数据集中无人出生于 2/2~2/6 边界带，固定 2/4 分界足够安全。
+    """
+    eff = y - 1 if (m, d) < (2, 4) else y
+    return _STEM[(eff - 4) % 10] + _BRANCH[(eff - 4) % 12]
+
+
+def binom_two_sided_p(hits: int, n: int) -> float:
+    """精确二项双侧 p 值（H0: p=0.5）。"""
+    if n == 0:
+        return 1.0
+    k = min(hits, n - hits)
+    tail = sum(math.comb(n, i) for i in range(0, k + 1)) / (2 ** n)
+    return min(1.0, 2 * tail)
 
 
 def _adapter_direction(adapter, query) -> tuple[float, bool]:
@@ -202,7 +207,7 @@ def main() -> dict:
             )
             s.commit()
 
-            # 排盘事实层：年柱 vs 独立期望（含立春边界）
+            # 排盘事实层：年柱 vs 独立干支公式（含立春边界）
             from app.core.calendar.core import CalendarCore
 
             core = CalendarCore()
@@ -213,15 +218,14 @@ def main() -> dict:
                 target_time=fig["time"] or "00:00",
                 gender=fig["gender"],
             )
-            year_gz = str(r.payload.get("year_ganzhi", ""))
+            # 八字年柱取 payload["bazi"]["year"]（EightChar 立春切换口径）；
+            # payload["year_ganzhi"] 是农历年（正月初一切换，供老黄历/起卦），两者口径不同：
+            # 立春与正月初一之间的生日两者差一年（如 C罗 2/5 生：八字乙丑/农历甲子），均属正确。
+            year_gz = str((r.payload.get("bazi") or {}).get("year", ""))
+            expect = expected_year_pillar(y, m, d)
             pillar_rows.append(
-                {
-                    "name": fig["name"],
-                    "year": year_gz,
-                    "expect": fig["year_expect"],
-                    "ok": year_gz == fig["year_expect"],
-                    "pillars": r.payload.get("bazi"),
-                }
+                {"name": fig["name"], "year": year_gz, "expect": expect,
+                 "ok": year_gz == expect, "pillars": r.payload.get("bazi")}
             )
 
             for ds, domain, label, expected in fig["events"]:
@@ -253,9 +257,7 @@ def main() -> dict:
                         bucket["hit"] += 1
                     else:
                         bucket["miss"] += 1
-                directional = [
-                    v for v in dirs.values() if v != 0
-                ]
+                directional = [v for v in dirs.values() if v != 0]
                 if len(directional) >= 2:
                     majority_up = sum(1 for v in directional if v > 0) >= len(directional) / 2
                     ok = (majority_up and expected > 0) or (not majority_up and expected < 0)
@@ -263,13 +265,8 @@ def main() -> dict:
                 else:
                     crossed_stats["abstain"] += 1
                 event_log.append(
-                    {
-                        "figure": fig["name"],
-                        "event": label,
-                        "date": ds,
-                        "expected": expected,
-                        "dirs": dirs,
-                    }
+                    {"figure": fig["name"], "event": label, "date": ds,
+                     "expected": expected, "dirs": dirs}
                 )
 
     return {
@@ -278,26 +275,35 @@ def main() -> dict:
         "pillars": pillar_rows,
         "events": event_log,
         "n_events": len(event_log),
+        "n_positive": sum(1 for e in event_log if e["expected"] > 0),
     }
 
 
 def render(result: dict) -> str:
     lines: list[str] = []
+    n_neg = result["n_events"] - result["n_positive"]
     lines.append("# 公众人物回测报告（自动生成）")
     lines.append("")
     lines.append(
         f"- 样本：{len(result['pillars'])} 位公众人物 × 共 {result['n_events']} 个公开记录事件"
-        "（含 2 个负向事件做双向校验）"
+        f"（正向 {result['n_positive']} / 负向 {n_neg}）"
     )
-    lines.append("- 方法：每个事件当天跑全部六术 adapter，信号方向与已知事实对比")
+    lines.append("- 方法：每个事件当天跑全部六术 adapter，信号方向与已知事实对比；每源做 vs 0.5 的精确二项检验")
     lines.append(
-        "- 边界：样本量小、单向事件为主，结果用于找系统性 bug 与校准种子，"
+        "- 边界：正向事件仍占多数，命中率须联合正向倾向解读；结果用于找系统性 bug 与校准种子，"
         "不构成对术式预测力的证明（C-006）"
     )
     lines.append("")
-    lines.append("## 一、排盘事实层（年柱 vs 独立推算，含立春边界）")
+    lines.append("## 一、排盘事实层（八字年柱 vs 独立干支公式，含立春边界）")
     lines.append("")
-    lines.append("| 人物 | 年柱（系统） | 年柱（独立） | 一致 |")
+    lines.append(
+        "> 口径注记：系统同时维护两套年柱——`year_ganzhi` 为农历年（正月初一切换，"
+        "供老黄历与时间起卦），`bazi.year` 为八字年柱（立春切换，供四柱）。"
+        "两者在立春与正月初一之间的生日相差一年，均为各自口径下的正确值。"
+        "本表核对的是八字年柱。"
+    )
+    lines.append("")
+    lines.append("| 人物 | 年柱（系统） | 年柱（独立公式） | 一致 |")
     lines.append("|---|---|---|---|")
     bad = 0
     for row in result["pillars"]:
@@ -309,13 +315,26 @@ def render(result: dict) -> str:
     lines.append("")
     lines.append("## 二、信号方向回测（已知事实 vs 六术方向）")
     lines.append("")
-    lines.append("| 术式 | 方向性判定 | 命中 | 反向 | 弃权 | 报错 | 命中率（方向性判定内） |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| 术式 | 方向性判定 | 命中 | 反向 | 弃权 | 报错 | 命中率 | p 值（vs 0.5） | 判读 |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    pos_rate = result["n_positive"] / result["n_events"]
     for src, b in sorted(result["per_source"].items()):
         n = b["hit"] + b["miss"]
         acc = f"{b['hit'] / n:.0%}" if n else "—"
+        p = binom_two_sided_p(b["hit"], n) if n else 1.0
+        if n and p < 0.05:
+            if b["hit"] / n > pos_rate:
+                verdict = "显著偏正（近灌水，方向信息量低）"
+            elif b["hit"] / n > 0.5:
+                verdict = "显著偏正（低于事件正向占比，仍有正向偏置）"
+            else:
+                verdict = "显著反向（查实现）"
+        elif n and 0.05 <= p < 0.15:
+            verdict = "观察名单（弱显著）"
+        else:
+            verdict = "与硬币无异"
         lines.append(
-            f"| {src} | {n} | {b['hit']} | {b['miss']} | {b['abstain']} | {b.get('error', 0)} | {acc} |"
+            f"| {src} | {n} | {b['hit']} | {b['miss']} | {b['abstain']} | {b.get('error', 0)} | {acc} | {p:.3f} | {verdict} |"
         )
     cx = result["crossed"]
     cn = cx["hit"] + cx["miss"]
@@ -328,20 +347,20 @@ def render(result: dict) -> str:
     lines.append("## 二·五、解读须知（对抗性声明）")
     lines.append("")
     lines.append(
-        "- 本回测集 94% 为正向事件：任何「略偏正向」的信号器命中率都会虚高。"
-        "读各源命中率时必须联合其正向倾向（例：zhouyi 92% 的隐含正向倾向约 91%，"
-        "即它几乎只说好话；qimen 59% 隐含正向倾向约 57%）。"
+        f"- 本回测集正向事件占 {pos_rate:.0%}：任何「略偏正向」的信号器命中率都会虚高。"
+        "读各源命中率时须联合其正向倾向（如 zhouyi 命中率接近正向占比即意味着几乎只说好话）。"
     )
     lines.append(
-        "- zhouyi 的方向判定基于吉凶断辞词频，弱吉套话（亨/利/无咎）已降权为中性；"
+        "- zhouyi 方向判定基于吉凶断辞词频，弱吉套话（亨/利/无咎）已降权为中性；"
         "「元亨利贞」类卦辞不再产生方向。"
     )
     lines.append(
-        "- qimen 断法以「日干落宫（人）×时干落宫（事）」生克为主信号，"
-        "值符门与格局为修正；门与格局相左时不强猜。"
+        "- qimen 主断为「日干落宫(人)×时干落宫(事)」生克，值符门与格局为修正，相左弃权；"
+        "定局已修 getPrevJieQi（中气曾致全年约一半日子局数错档）。"
     )
     lines.append(
-        "- 小样本（每源 13~32 次方向判定）统计功效有限，单轮回测不构成预测力证明（C-006）。"
+        "- 单轮回测不构成预测力证明（C-006）；显著结果应作为校准种子进入可靠度矩阵，"
+        "由验证闭环持续实证。"
     )
     lines.append("")
     lines.append("## 三、事件明细（方向：+ 同向 / - 反向 / 0 弃权）")

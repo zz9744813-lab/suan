@@ -1,45 +1,45 @@
 {
  "per_source": {
   "bazi": {
-   "hit": 8,
-   "miss": 5,
-   "abstain": 19,
+   "hit": 25,
+   "miss": 21,
+   "abstain": 59,
    "error": 0
   },
   "zhouyi": {
-   "hit": 24,
-   "miss": 2,
-   "abstain": 6,
+   "hit": 81,
+   "miss": 6,
+   "abstain": 18,
    "error": 0
   },
   "liuyao": {
-   "hit": 15,
-   "miss": 17,
+   "hit": 43,
+   "miss": 62,
    "abstain": 0,
    "error": 0
   },
   "meihua": {
-   "hit": 7,
-   "miss": 10,
-   "abstain": 15,
+   "hit": 27,
+   "miss": 36,
+   "abstain": 42,
    "error": 0
   },
   "qimen": {
-   "hit": 19,
-   "miss": 13,
-   "abstain": 0,
+   "hit": 60,
+   "miss": 44,
+   "abstain": 1,
    "error": 0
   },
   "ziwei": {
-   "hit": 22,
-   "miss": 4,
-   "abstain": 6,
+   "hit": 80,
+   "miss": 17,
+   "abstain": 8,
    "error": 0
   }
  },
  "crossed": {
-  "hit": 28,
-  "miss": 4,
+  "hit": 86,
+  "miss": 19,
   "abstain": 0
  },
  "pillars": [
@@ -197,6 +197,435 @@
     "day": "戊辰",
     "time": "壬子",
     "day_master": "戊"
+   }
+  },
+  {
+   "name": "克里斯蒂亚诺·罗纳尔多",
+   "year": "乙丑",
+   "expect": "乙丑",
+   "ok": true,
+   "pillars": {
+    "year": "乙丑",
+    "month": "戊寅",
+    "day": "乙亥",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "梅西",
+   "year": "丁卯",
+   "expect": "丁卯",
+   "ok": true,
+   "pillars": {
+    "year": "丁卯",
+    "month": "丙午",
+    "day": "甲辰",
+    "time": "甲子",
+    "day_master": "甲"
+   }
+  },
+  {
+   "name": "蕾哈娜",
+   "year": "戊辰",
+   "expect": "戊辰",
+   "ok": true,
+   "pillars": {
+    "year": "戊辰",
+    "month": "甲寅",
+    "day": "乙巳",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "安吉丽娜·朱莉",
+   "year": "乙卯",
+   "expect": "乙卯",
+   "ok": true,
+   "pillars": {
+    "year": "乙卯",
+    "month": "辛巳",
+    "day": "辛巳",
+    "time": "戊子",
+    "day_master": "辛"
+   }
+  },
+  {
+   "name": "布拉德·皮特",
+   "year": "癸卯",
+   "expect": "癸卯",
+   "ok": true,
+   "pillars": {
+    "year": "癸卯",
+    "month": "甲子",
+    "day": "乙未",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "坎耶·维斯特",
+   "year": "丁巳",
+   "expect": "丁巳",
+   "ok": true,
+   "pillars": {
+    "year": "丁巳",
+    "month": "丙午",
+    "day": "丙申",
+    "time": "戊子",
+    "day_master": "丙"
+   }
+  },
+  {
+   "name": "贾斯汀·比伯",
+   "year": "甲戌",
+   "expect": "甲戌",
+   "ok": true,
+   "pillars": {
+    "year": "甲戌",
+    "month": "丙寅",
+    "day": "丙戌",
+    "time": "戊子",
+    "day_master": "丙"
+   }
+  },
+  {
+   "name": "爱莉安娜·格兰德",
+   "year": "癸酉",
+   "expect": "癸酉",
+   "ok": true,
+   "pillars": {
+    "year": "癸酉",
+    "month": "戊午",
+    "day": "戊寅",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  },
+  {
+   "name": "金·卡戴珊",
+   "year": "庚申",
+   "expect": "庚申",
+   "ok": true,
+   "pillars": {
+    "year": "庚申",
+    "month": "丙戌",
+    "day": "丁卯",
+    "time": "庚子",
+    "day_master": "丁"
+   }
+  },
+  {
+   "name": "维纳斯·威廉姆斯",
+   "year": "庚申",
+   "expect": "庚申",
+   "ok": true,
+   "pillars": {
+    "year": "庚申",
+    "month": "壬午",
+    "day": "辛酉",
+    "time": "戊子",
+    "day_master": "辛"
+   }
+  },
+  {
+   "name": "德约科维奇",
+   "year": "丁卯",
+   "expect": "丁卯",
+   "ok": true,
+   "pillars": {
+    "year": "丁卯",
+    "month": "乙巳",
+    "day": "辛未",
+    "time": "戊子",
+    "day_master": "辛"
+   }
+  },
+  {
+   "name": "费德勒",
+   "year": "辛酉",
+   "expect": "辛酉",
+   "ok": true,
+   "pillars": {
+    "year": "辛酉",
+    "month": "丙申",
+    "day": "戊午",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  },
+  {
+   "name": "泰格·伍兹",
+   "year": "乙卯",
+   "expect": "乙卯",
+   "ok": true,
+   "pillars": {
+    "year": "乙卯",
+    "month": "戊子",
+    "day": "庚戌",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "菲尔普斯",
+   "year": "乙丑",
+   "expect": "乙丑",
+   "ok": true,
+   "pillars": {
+    "year": "乙丑",
+    "month": "壬午",
+    "day": "庚子",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "博尔特",
+   "year": "丙寅",
+   "expect": "丙寅",
+   "ok": true,
+   "pillars": {
+    "year": "丙寅",
+    "month": "丙申",
+    "day": "丁酉",
+    "time": "庚子",
+    "day_master": "丁"
+   }
+  },
+  {
+   "name": "杰夫·贝索斯",
+   "year": "癸卯",
+   "expect": "癸卯",
+   "ok": true,
+   "pillars": {
+    "year": "癸卯",
+    "month": "乙丑",
+    "day": "庚申",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "马克·扎克伯格",
+   "year": "甲子",
+   "expect": "甲子",
+   "ok": true,
+   "pillars": {
+    "year": "甲子",
+    "month": "己巳",
+    "day": "戊申",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  },
+  {
+   "name": "拉里·佩奇",
+   "year": "癸丑",
+   "expect": "癸丑",
+   "ok": true,
+   "pillars": {
+    "year": "癸丑",
+    "month": "乙卯",
+    "day": "辛酉",
+    "time": "戊子",
+    "day_master": "辛"
+   }
+  },
+  {
+   "name": "沃伦·巴菲特",
+   "year": "庚午",
+   "expect": "庚午",
+   "ok": true,
+   "pillars": {
+    "year": "庚午",
+    "month": "甲申",
+    "day": "壬子",
+    "time": "庚子",
+    "day_master": "壬"
+   }
+  },
+  {
+   "name": "马云",
+   "year": "甲辰",
+   "expect": "甲辰",
+   "ok": true,
+   "pillars": {
+    "year": "甲辰",
+    "month": "癸酉",
+    "day": "壬戌",
+    "time": "庚子",
+    "day_master": "壬"
+   }
+  },
+  {
+   "name": "成龙",
+   "year": "甲午",
+   "expect": "甲午",
+   "ok": true,
+   "pillars": {
+    "year": "甲午",
+    "month": "戊辰",
+    "day": "癸巳",
+    "time": "壬子",
+    "day_master": "癸"
+   }
+  },
+  {
+   "name": "姚明",
+   "year": "庚申",
+   "expect": "庚申",
+   "ok": true,
+   "pillars": {
+    "year": "庚申",
+    "month": "乙酉",
+    "day": "戊子",
+    "time": "壬子",
+    "day_master": "戊"
+   }
+  },
+  {
+   "name": "刘翔",
+   "year": "癸亥",
+   "expect": "癸亥",
+   "ok": true,
+   "pillars": {
+    "year": "癸亥",
+    "month": "己未",
+    "day": "壬寅",
+    "time": "庚子",
+    "day_master": "壬"
+   }
+  },
+  {
+   "name": "谷爱凌",
+   "year": "癸未",
+   "expect": "癸未",
+   "ok": true,
+   "pillars": {
+    "year": "癸未",
+    "month": "庚申",
+    "day": "己卯",
+    "time": "甲子",
+    "day_master": "己"
+   }
+  },
+  {
+   "name": "李娜",
+   "year": "壬戌",
+   "expect": "壬戌",
+   "ok": true,
+   "pillars": {
+    "year": "壬戌",
+    "month": "壬寅",
+    "day": "庚辰",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "莫言",
+   "year": "乙未",
+   "expect": "乙未",
+   "ok": true,
+   "pillars": {
+    "year": "乙未",
+    "month": "戊寅",
+    "day": "己酉",
+    "time": "甲子",
+    "day_master": "己"
+   }
+  },
+  {
+   "name": "屠呦呦",
+   "year": "庚午",
+   "expect": "庚午",
+   "ok": true,
+   "pillars": {
+    "year": "庚午",
+    "month": "戊子",
+    "day": "甲寅",
+    "time": "甲子",
+    "day_master": "甲"
+   }
+  },
+  {
+   "name": "袁隆平",
+   "year": "庚午",
+   "expect": "庚午",
+   "ok": true,
+   "pillars": {
+    "year": "庚午",
+    "month": "甲申",
+    "day": "庚申",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "碧昂丝",
+   "year": "辛酉",
+   "expect": "辛酉",
+   "ok": true,
+   "pillars": {
+    "year": "辛酉",
+    "month": "丙申",
+    "day": "乙酉",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "阿黛尔",
+   "year": "戊辰",
+   "expect": "戊辰",
+   "ok": true,
+   "pillars": {
+    "year": "戊辰",
+    "month": "丙辰",
+    "day": "庚申",
+    "time": "丙子",
+    "day_master": "庚"
+   }
+  },
+  {
+   "name": "道恩·强森",
+   "year": "壬子",
+   "expect": "壬子",
+   "ok": true,
+   "pillars": {
+    "year": "壬子",
+    "month": "甲辰",
+    "day": "癸巳",
+    "time": "壬子",
+    "day_master": "癸"
+   }
+  },
+  {
+   "name": "麦当娜",
+   "year": "戊戌",
+   "expect": "戊戌",
+   "ok": true,
+   "pillars": {
+    "year": "戊戌",
+    "month": "庚申",
+    "day": "乙丑",
+    "time": "丙子",
+    "day_master": "乙"
+   }
+  },
+  {
+   "name": "汤姆·汉克斯",
+   "year": "丙申",
+   "expect": "丙申",
+   "ok": true,
+   "pillars": {
+    "year": "丙申",
+    "month": "乙未",
+    "day": "丁丑",
+    "time": "庚子",
+    "day_master": "丁"
    }
   }
  ],
@@ -648,7 +1077,1030 @@
     "qimen": -1.0,
     "ziwei": 1.0
    }
+  },
+  {
+   "figure": "克里斯蒂亚诺·罗纳尔多",
+   "event": "创纪录转会皇马",
+   "date": "2009-06-11",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "克里斯蒂亚诺·罗纳尔多",
+   "event": "欧洲杯夺冠",
+   "date": "2016-07-10",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "梅西",
+   "event": "首夺金球奖",
+   "date": "2009-12-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "梅西",
+   "event": "美洲杯首冠",
+   "date": "2021-08-10",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "梅西",
+   "event": "世界杯夺冠",
+   "date": "2022-12-18",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "蕾哈娜",
+   "event": "福布斯亿万身家",
+   "date": "2021-08-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "蕾哈娜",
+   "event": "超级碗中场秀",
+   "date": "2023-02-12",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "安吉丽娜·朱莉",
+   "event": "奥斯卡最佳女配",
+   "date": "2000-03-26",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "安吉丽娜·朱莉",
+   "event": "结婚",
+   "date": "2014-08-23",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "布拉德·皮特",
+   "event": "奥斯卡最佳男配",
+   "date": "2020-02-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "布拉德·皮特",
+   "event": "结婚",
+   "date": "2014-08-23",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "坎耶·维斯特",
+   "event": "首张专辑发行",
+   "date": "2004-02-10",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "坎耶·维斯特",
+   "event": "Adidas 终止合作",
+   "date": "2022-10-25",
+   "expected": -1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "贾斯汀·比伯",
+   "event": "单曲 Baby 发行",
+   "date": "2010-01-18",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "贾斯汀·比伯",
+   "event": "结婚",
+   "date": "2018-09-30",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "爱莉安娜·格兰德",
+   "event": "专辑首周登顶",
+   "date": "2018-08-17",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "爱莉安娜·格兰德",
+   "event": "结婚",
+   "date": "2021-05-15",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "金·卡戴珊",
+   "event": "真人秀首播",
+   "date": "2007-10-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "金·卡戴珊",
+   "event": "结婚",
+   "date": "2014-05-24",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "金·卡戴珊",
+   "event": "福布斯认证亿万",
+   "date": "2021-04-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "维纳斯·威廉姆斯",
+   "event": "温网首冠",
+   "date": "2000-07-08",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "维纳斯·威廉姆斯",
+   "event": "美网首冠",
+   "date": "2000-09-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "德约科维奇",
+   "event": "首夺大满贯",
+   "date": "2008-01-27",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "德约科维奇",
+   "event": "登顶世界第一",
+   "date": "2011-07-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "费德勒",
+   "event": "首夺温网",
+   "date": "2003-07-06",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "费德勒",
+   "event": "全满贯达成",
+   "date": "2009-06-07",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "泰格·伍兹",
+   "event": "首夺大师赛",
+   "date": "1997-04-13",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "泰格·伍兹",
+   "event": "复出再夺大师赛",
+   "date": "2019-04-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "泰格·伍兹",
+   "event": "丑闻爆发生涯受挫",
+   "date": "2009-11-27",
+   "expected": -1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "菲尔普斯",
+   "event": "首枚奥运金牌",
+   "date": "2004-08-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "菲尔普斯",
+   "event": "单届八金",
+   "date": "2008-08-17",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "博尔特",
+   "event": "百米夺金破世界纪录",
+   "date": "2008-08-16",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "博尔特",
+   "event": "跑出 9 秒 58",
+   "date": "2009-08-16",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "杰夫·贝索斯",
+   "event": "创立亚马逊",
+   "date": "1994-07-05",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 0.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "杰夫·贝索斯",
+   "event": "登顶全球首富",
+   "date": "2017-10-27",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "杰夫·贝索斯",
+   "event": "离婚（巨额分割）",
+   "date": "2019-04-04",
+   "expected": -1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马克·扎克伯格",
+   "event": "创立 Facebook",
+   "date": "2004-02-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马克·扎克伯格",
+   "event": "IPO 上市",
+   "date": "2012-05-18",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "马克·扎克伯格",
+   "event": "结婚",
+   "date": "2012-05-19",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "拉里·佩奇",
+   "event": "创立 Google",
+   "date": "1998-09-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "拉里·佩奇",
+   "event": "IPO 上市",
+   "date": "2004-08-19",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "沃伦·巴菲特",
+   "event": "执掌伯克希尔",
+   "date": "1965-05-10",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "沃伦·巴菲特",
+   "event": "福布斯全球首富",
+   "date": "2008-03-05",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马云",
+   "event": "阿里 IPO",
+   "date": "2014-09-19",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "马云",
+   "event": "蚂蚁上市暂缓",
+   "date": "2020-11-03",
+   "expected": -1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "成龙",
+   "event": "红番区北美破圈",
+   "date": "1996-02-23",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "成龙",
+   "event": "奥斯卡终身成就奖",
+   "date": "2016-11-12",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "姚明",
+   "event": "NBA 状元入选",
+   "date": "2002-06-26",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": -1.0
+   }
+  },
+  {
+   "figure": "姚明",
+   "event": "入选名人堂",
+   "date": "2016-09-09",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "刘翔",
+   "event": "雅典夺金",
+   "date": "2004-08-27",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "刘翔",
+   "event": "因伤退赛",
+   "date": "2008-08-18",
+   "expected": -1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "谷爱凌",
+   "event": "冬奥首金",
+   "date": "2022-02-08",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "谷爱凌",
+   "event": "冬奥第二金",
+   "date": "2022-02-18",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "李娜",
+   "event": "法网夺冠",
+   "date": "2011-06-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "李娜",
+   "event": "澳网夺冠",
+   "date": "2014-01-25",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "莫言",
+   "event": "茅盾文学奖",
+   "date": "2011-08-20",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "莫言",
+   "event": "诺贝尔文学奖",
+   "date": "2012-10-11",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 0.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "屠呦呦",
+   "event": "拉斯克奖",
+   "date": "2011-09-12",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "屠呦呦",
+   "event": "诺贝尔生理学或医学奖",
+   "date": "2015-10-05",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "袁隆平",
+   "event": "世界粮食奖",
+   "date": "2004-10-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "袁隆平",
+   "event": "共和国勋章",
+   "date": "2019-09-29",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 0.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "碧昂丝",
+   "event": "首张个人专辑",
+   "date": "2003-06-23",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "碧昂丝",
+   "event": "结婚",
+   "date": "2008-04-04",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "碧昂丝",
+   "event": "单夜六座格莱美",
+   "date": "2010-01-31",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "阿黛尔",
+   "event": "格莱美年度专辑",
+   "date": "2012-02-12",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "阿黛尔",
+   "event": "再获年度专辑",
+   "date": "2017-02-12",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "道恩·强森",
+   "event": "首夺 WWF 冠军",
+   "date": "1998-11-15",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": 0.0,
+    "qimen": -1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "道恩·强森",
+   "event": "福布斯收入最高演员",
+   "date": "2016-08-30",
+   "expected": 1,
+   "dirs": {
+    "bazi": 1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": -1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "麦当娜",
+   "event": "VMA 表演一鸣惊人",
+   "date": "1984-09-14",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "麦当娜",
+   "event": "超级碗中场秀",
+   "date": "2012-02-05",
+   "expected": 1,
+   "dirs": {
+    "bazi": -1.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "汤姆·汉克斯",
+   "event": "结婚",
+   "date": "1988-04-30",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 1.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
+  },
+  {
+   "figure": "汤姆·汉克斯",
+   "event": "奥斯卡影帝",
+   "date": "1994-03-21",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": 1.0,
+    "meihua": -1.0,
+    "qimen": -1.0,
+    "ziwei": 0.0
+   }
+  },
+  {
+   "figure": "汤姆·汉克斯",
+   "event": "奥斯卡连庄",
+   "date": "1995-03-27",
+   "expected": 1,
+   "dirs": {
+    "bazi": 0.0,
+    "zhouyi": 1.0,
+    "liuyao": -1.0,
+    "meihua": 0.0,
+    "qimen": 1.0,
+    "ziwei": 1.0
+   }
   }
  ],
- "n_events": 32
+ "n_events": 105,
+ "n_positive": 98
 }
