@@ -24,7 +24,7 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 项 | 值 |
 |---|---|
 | 完成度 | **方案 v1.0 十项验收标准（PRED-01…EXP-01）全部达成** |
-| 测试 | `96 passed, 2 skipped`（全绿；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
+| 测试 | `110 passed, 2 skipped`（全绿；含 round 10 新增 14 项经文对抗测试；弃用警告已清零，仅余 1 条 FastAPI 自身提示） |
 | 数据库 | SQLite，**38 张表**（+`system_fortune_readings` 紫微批示缓存） |
 | 术式引擎 | 7 个全部真实可跑（八字/紫微/六爻/梅花/奇门/掌纹/面相） |
 | Agent | 21 个业务 Agent + 3 个基类（Blind Multi-Agent 架构） |
@@ -34,6 +34,7 @@ Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn �
 | 命理批示 | 八字 `GET /api/fortune/reading`；紫微 `GET /api/fortune/reading/{system}`（ziwei，2026-09-02 新增）。reasoning 层失败自动回退 cheap 层（见坑 15） |
 | 今日锦囊 | `GET /api/fortune/daily`（2026-09-03）：lunar-python 当日宜忌/值神/冲煞/三神方位/吉时/彭祖百忌 + 河图数幸运数字（五行取数：水1/6、火2/7、木3/8、金4/9、土5/0）+ 五行幸运色 + 个人层（日主×日支十神关系、红鸾/天喜/咸池动情、犯冲提示）。全部确定性计算，零 LLM |
 | 多法交叉选题 | 研究期/正式期都先跑 6 术式信号，按「同向术式数」排序选题（2026-09-03）。≥2 法同向 → 卡片带「◆ N 法交叉印证」徽标 + ✓/✗ 术式徽标。**交叉只决定选题与详批，概率仍归 Null/融合（C-005 不动）** |
+| 周易经文层 | `app/core/zhouyi`（2026-09-05，round 10）：通行本 64 卦卦辞+大象传+386 爻辞数字化抄本，查询 API（`cite/by_pattern/by_lines/gua_ci/yao_ci`），卦名↔阴阳串映射**复用六爻 HEXAGRAMS 单一事实源**。六爻/梅花 adapter 信号证据挂「经文参读」（静卦读卦辞、动爻加读爻辞）；锦囊增「日卦·周易经文」确定性卡（日粒度起卦）；详批叙事增「全法盘点」（五术+掌面 ✓/✗/分歧/○ 全量，含未表态者）与「经文献录」。**经文是文献参读非效力宣称（C-006），只进读侧叙事，绝不进冻结描述**——测试反向证明经文原文含「小人」等词，泄漏必被 DefinitionAttack 拦截（`tests/test_zhouyi_canon.py` 14 项） |
 | 详批叙事层 | `app/services/cross_engine.py` + `app/prediction/narratives.py`（2026-09-03）：常见情景/多法印证明细（每条带真实证据串）/建议/注意/幸运参考。**概率口径行明示「信号概率 vs 日常基线」**（持平/抬高/压低三态）；**注意（示警）常显**，有示警术式必点名（「八字、奇门 示警」）。关键架构：**叙事是读侧确定性重建（list/detail 接口现场拼），冻结仓里只存「何时+何事」短声明**——否则长文案必被 Gate 的模糊词攻击拦截（见坑 16） |
 | 研究期去重 | 冻结前按 (event_type, time_scale, 窗口日) 去重，与在库样本重复的选题跳过并在 notes 注明（2026-09-03，见坑 19） |
 | 影像相法 | `POST /api/imaging/analyze`（2026-09-03）：面相/掌纹照片上传分析。隐私边界（第 64 节）：原图写临时文件→OpenCV 提取特征→`finally` 立即删除、结果**不入库**；云端详批=服务器 `ENABLE_CLOUD_VISION` + 前端逐项勾选**双闸门**，把原图（base64 data-URI）发给 agnes-2.5-flash 出「传统相学口径」短文（系统提示禁健康/寿命/人格推断，第 9 节）。未检出时诚实返回重拍建议 |
@@ -284,6 +285,8 @@ RealityState 扫描 → 候选事件(candidates)
 18. **exe 数据目录在 `dist/data/`（spec datas 里 `("data", "data")`）**，所以清库/补数据要同时处理 repo 的 `data/xuanmirror.db` 和 `dist/data/xuanmirror.db` 两个副本。打包后浏览器若显示旧页面，多半是旧 exe 进程没杀或标签页缓存——换端口验证或给 URL 加 `?fresh=1` 强刷。
 19. **研究期连点两次「生成预测」会重复冻结同一批选题**（2026-09-03 修）：`pipeline._run_research()` 冻结前按 `(event_type, time_scale, window_start.date())` 对在库（FROZEN/RESEARCH/VERIFY_REQUIRED）样本去重，跳过并在 notes 注明「去重：跳过 N 条」。**time_scale 必须在键里**——同一事件在日/周/月是三条独立可证伪声明，缺了它月度样本会被周样本误杀（教训来自一次测试失败）。
 20. **pip 版 opencv 不带 haarcascade xml**（2026-09-03）：`cv2.data.haarcascades` 目录只有 `__init__.py`，`CascadeClassifier` 静默为空 → 面相检测假阴性。修复：`app/core/face/assets/` 内置一份 `haarcascade_frontalface_default.xml`（官方 master 副本，spec datas 已收），加载后查 `cascade.empty()`，空则诚实降级 detected=False。
+21. **手写 64 卦名表必有键序错位**（2026-09-05，round 10 对抗性审计战果）：梅花引擎 `GUA_NAMES` 手写表有 **9 条上下卦颠倒**（如 `(离,乾)` 误作「火天大有」，实为「天火同人」；`(坎,乾)` 误作「水天需」，实为「天水讼」）且仅覆盖 60 卦——等于梅花信号里 9/64 的卦名是错的，叙述层却无从察觉。治本：`GUA_NAMES` 改由六爻 `HEXAGRAMS`（pattern→name 权威表）程序化生成，单一事实源。**教训：凡是「手抄 N 项全量表」都要配一张程序化对照测试，或直接程序化生成**；`bian_gua.upper/lower` 误用本卦字段的同源 bug 一并修复，engine 版本升至 `meihua-0.2.0`。回归固化在 `tests/test_zhouyi_canon.py::test_meihua_gua_names_match_canonical_table`。
+22. **爻题推导规则**（2026-09-05）：初爻/上爻用「初九/上九」式，**二至五位用「九二/九三」式**（九/六在前）——第一版写成「二九」被测试当场拦下。固化在 `test_yao_positions_rules`。
 
 ---
 
