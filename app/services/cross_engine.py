@@ -262,70 +262,13 @@ def daily_almanac(
         }
     )
 
-    # ---------- 日卦 × 命数：上下卦五行与日主的扶抑喜忌（确定性参读） ----------
-    # 卦不改变概率，只陈述「今日卦气相对你的日主是生扶还是克泄耗」（C-006）。
+    # ---------- 日卦 × 命数：有机批示（卦气喜忌 + 动爻爻位爻辞） ----------
     gua = out.get("daily_gua")
     if gua and day_master_wx:
         try:
-            from app.core.bazi.adapter import (
-                WUXING_KE as _BZ_KE,
-                WUXING_SHENG as _BZ_SHENG,
-                day_master_strength as _dm_strength,
-            )
-
-            # 本命四柱（供强弱判定）；出生时辰未知时以四柱缺时照样简评，弱化结论口径
-            ec = birth_lunar.getEightChar()
-            bazi4 = {
-                "year": ec.getYear(),
-                "month": ec.getMonth(),
-                "day": ec.getDay(),
-                "time": ec.getTime(),
-                "day_master": day_master,
-            }
-            _, verdict, _ = _dm_strength(bazi4)
-
-            def _rel_cat(wx: str) -> str:
-                """卦五行 → 相对日主的十神类（同我/生我/我生/我克/克我）。"""
-                if wx == day_master_wx:
-                    return "比劫"
-                if _BZ_SHENG.get(wx) == day_master_wx:
-                    return "印"
-                if _BZ_SHENG.get(day_master_wx) == wx:
-                    return "食伤"
-                if _BZ_KE.get(day_master_wx) == wx:
-                    return "财"
-                if _BZ_KE.get(wx) == day_master_wx:
-                    return "官"
-                return ""
-
-            if verdict == "身强":
-                fav = {"官", "财", "食伤"}
-            elif verdict == "身弱":
-                fav = {"印", "比劫"}
-            else:
-                fav = set()
-
-            verb = {"比劫": "比扶", "印": "生扶", "食伤": "泄", "财": "耗", "官": "克"}
-            notes: list[str] = []
-            for pos, tg, twx in (
-                ("上卦", gua.get("upper_gua", ""), gua.get("upper_wuxing", "")),
-                ("下卦", gua.get("lower_gua", ""), gua.get("lower_wuxing", "")),
-            ):
-                if not tg or not twx:
-                    continue
-                cat = _rel_cat(twx)
-                if not cat:
-                    continue
-                tail = f"{verdict}之{'喜（生扶得力）' if cat in fav else '忌（加重耗泄）'}"
-                if verdict == "中和":
-                    tail = "你的日主中和，卦气不判喜忌"
-                notes.append(
-                    f"{pos}{tg}（{twx}）{verb.get(cat, cat)}日主{day_master}"
-                    f"（{day_master_wx}，{cat}）—— {tail}"
-                )
-            if notes:
-                gua["natal_verdict"] = verdict
-                gua["natal_notes"] = notes
+            reading = _gua_natal_reading(gua, day_master, day_master_wx, birth_lunar)
+            if reading:
+                gua.update(reading)
         except Exception as exc:
             import logging
 
@@ -349,6 +292,121 @@ class CrossSummary:
     def crossed(self) -> bool:
         """「多方法交叉」达成标准：≥2 个术式源同向支持。"""
         return self.metaphysical_support >= 2
+
+
+# ----------------------------------------------------------------------
+# 日卦 × 命数批示（有机断语，非模板句）
+# ----------------------------------------------------------------------
+# 爻位语义（系辞传传统：初难知、二多誉、三多凶、四多惧、五多功、上易知）
+_YAO_POSITION_SEMANTICS = {
+    1: "事之始，萌而未显，先定方向再动",
+    2: "处内卦之中，多誉，行事得中道",
+    3: "内卦之极，多凶多惧，宜谨慎守正",
+    4: "近君之位，多惧，进退须择时",
+    5: "得尊位，多功，事可成而在其位",
+    6: "事之终，穷极将变，宜收不宜放",
+}
+
+# 扶抑喜忌 → 落地建议（按十神类 × 日主强弱）
+_NATAL_ADVICE = {
+    ("印", "身弱"): "生扶正合身弱之需——宜学习请教、休整蓄力",
+    ("印", "身强"): "身强再逢生扶反成滞——忌因循守旧、固执己见",
+    ("比劫", "身弱"): "帮身有力——宜借力同伴、合作推进",
+    ("比劫", "身强"): "比劫帮身过旺——防同伴分利、意气用事",
+    ("食伤", "身强"): "宣泄有出口——宜表达输出、着手创作",
+    ("食伤", "身弱"): "泄气之地——忌空耗口舌、过度承诺",
+    ("财", "身强"): "身旺能任财——宜推进实事、打理钱财",
+    ("财", "身弱"): "耗身之象——忌大额支出与冒险投入",
+    ("官", "身强"): "克身有制，压力即打磨——宜主动担责扛事",
+    ("官", "身弱"): "官杀克身加重负担——宜避硬碰硬、先固本",
+}
+
+
+def _gua_natal_reading(
+    gua: dict[str, Any],
+    day_master: str,
+    day_master_wx: str,
+    birth_lunar: Any,
+) -> dict[str, Any] | None:
+    """把日卦与命盘结合成批示：卦气喜忌 + 动爻爻位爻辞，两句有机断语。"""
+    from app.core.bazi.adapter import (
+        WUXING_KE as _KE,
+        WUXING_SHENG as _SHENG,
+        day_master_strength as _dm_strength,
+    )
+
+    upper, upper_wx = gua.get("upper_gua", ""), gua.get("upper_wuxing", "")
+    lower, lower_wx = gua.get("lower_gua", ""), gua.get("lower_wuxing", "")
+    if not (upper and upper_wx and lower and lower_wx and day_master_wx):
+        return None
+
+    ec = birth_lunar.getEightChar()
+    bazi4 = {
+        "year": ec.getYear(),
+        "month": ec.getMonth(),
+        "day": ec.getDay(),
+        "time": ec.getTime(),
+        "day_master": day_master,
+    }
+    _, verdict, _ = _dm_strength(bazi4)
+
+    # ---- 句一：卦气 × 命数 ----
+    def _cat(wx: str) -> str:
+        if wx == day_master_wx:
+            return "比劫"
+        if _SHENG.get(wx) == day_master_wx:
+            return "印"
+        if _SHENG.get(day_master_wx) == wx:
+            return "食伤"
+        if _KE.get(day_master_wx) == wx:
+            return "财"
+        if _KE.get(wx) == day_master_wx:
+            return "官"
+        return ""
+
+    if upper_wx == lower_wx:
+        qi_clause = f"上下卦皆属{upper_wx}（{upper}{lower}）"
+    else:
+        qi_clause = f"上{upper}（{upper_wx}）下{lower}（{lower_wx}）"
+    main_cat = _cat(upper_wx)
+    if verdict == "中和":
+        s1 = (
+            f"今日卦气{qi_clause}，{main_cat}于日主{day_master}{day_master_wx}"
+            "——你日主中和，卦气不扶不抑，按常例安排即可，不必刻意趋避"
+        )
+    else:
+        advice = _NATAL_ADVICE.get((main_cat, verdict), "")
+        s1 = f"今日卦气{qi_clause}，{main_cat}于日主{day_master}{day_master_wx}——{advice}"
+
+    # ---- 句二：动爻 × 爻位 × 爻辞断辞 ----
+    s2 = ""
+    mv = gua.get("moving_yao")
+    if isinstance(mv, int) and 1 <= mv <= 6:
+        sem = _YAO_POSITION_SEMANTICS[mv]
+        yao_ci = (gua.get("yao_ci") or "").strip()
+        bare = yao_ci.split("：", 1)[1] if "：" in yao_ci else yao_ci
+        try:
+            from app.core.zhouyi.adapter import gloss_score
+
+            gscore, hits = gloss_score(bare)
+        except Exception:
+            gscore, hits = 0.0, []
+        if gscore >= 0.25:
+            omens = "辞意偏吉，所谋可循序推进"
+        elif gscore <= -0.25:
+            omens = "辞意示警，宜守不宜进"
+        else:
+            omens = "辞意平缓，无吉凶偏向"
+        s2 = (
+            f"动在第{mv}爻（{sem}）"
+            + (f"，爻辞「{bare.rstrip('。')}」——{omens}" if bare else f"——{omens}")
+            + (f"（断辞：{'、'.join(hits)}）" if hits else "")
+        )
+
+    notes = [n for n in (s1, s2) if n]
+    if not notes:
+        return None
+    return {"natal_verdict": verdict, "natal_notes": notes}
 
 
 SOURCE_LABEL = {

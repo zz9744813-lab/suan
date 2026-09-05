@@ -182,12 +182,17 @@ def prediction_history(
         .limit(limit)
     ).all()
 
+    from app.prediction.ontology import ONTOLOGY
+
     items = []
     for pred, out in rows:
+        _spec = ONTOLOGY.get(pred.event_type)
         items.append(
             {
                 "prediction_id": pred.prediction_id,
                 "event_type": pred.event_type,
+                "label": _spec.label if _spec else pred.event_type,
+                "description": pred.description,
                 "probability": pred.probability,
                 "outcome": out.outcome,
                 "null_probability": pred.null_probability,

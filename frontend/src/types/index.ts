@@ -151,6 +151,10 @@ export interface PredictionDetail extends PredictionBrief {
 export interface HistoryItem {
   prediction_id: string;
   event_type: string;
+  /** 本体中文名（如「临时工作安排」） */
+  label?: string;
+  /** 冻结断言原文（含日期，如「9月4日（周五）临时工作安排。」） */
+  description?: string;
   probability: number;
   outcome: number;
   null_probability: number | null;

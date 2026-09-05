@@ -167,7 +167,8 @@ def test_daily_gua_natal_notes_with_profile(sesh):
     assert g.get("natal_verdict") in ("身强", "身弱", "中和")
     notes = g.get("natal_notes") or []
     assert notes, "个人版应有命数结合句"
-    assert all("日主" in n for n in notes)
+    assert "日主" in notes[0], "卦气句应结合日主"
+    assert any("动在第" in n for n in notes), "应有动爻爻位句"
 
 
 def test_daily_related_predictions_join(sesh):
@@ -222,3 +223,20 @@ def test_daily_related_predictions_join(sesh):
     ids = {x["prediction_id"] for x in rp}
     assert "P-rp1" in ids
     assert "P-rp2" not in ids, "窗口不覆盖当日的事件不得入选"
+
+
+def test_natal_reading_differs_by_verdict(sesh):
+    """车轱辘话回归：不同命数的人，同一卦的批示必须不同。"""
+    from app.services.cross_engine import daily_almanac
+
+    sesh.add(
+        BirthProfile(user_id=101, solar_birth_date=date(1975, 11, 3), solar_birth_time="11:00", birth_time_known=True, gender="male")
+    )
+    sesh.add(
+        BirthProfile(user_id=102, solar_birth_date=date(1986, 8, 12), solar_birth_time="10:30", birth_time_known=True, gender="male")
+    )
+    sesh.commit()
+    n1 = daily_almanac(sesh, 101, date(2026, 9, 5))["daily_gua"].get("natal_notes") or []
+    n2 = daily_almanac(sesh, 102, date(2026, 9, 5))["daily_gua"].get("natal_notes") or []
+    assert n1 and n2
+    assert n1 != n2, "不同命盘的日卦批示不得是同一句模板"

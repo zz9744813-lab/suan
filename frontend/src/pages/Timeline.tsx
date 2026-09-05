@@ -37,7 +37,7 @@ export default function Timeline() {
         <Stat label="部分命中" value={partial} tone="warn" />
         <Stat label="未命中" value={none} tone="bad" />
         <Stat
-          label="平均 Brier"
+          label="平均误差"
           value={meanBrier != null ? meanBrier.toFixed(3) : '—'}
           hint="概率质量，越低越好"
         />
@@ -64,7 +64,12 @@ export default function Timeline() {
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-t1">{it.event_type}</div>
+                <div className="truncate text-sm text-t1">
+                  {it.description ?? it.label ?? it.event_type}
+                </div>
+                <div className="truncate text-[10px] text-t5">
+                  {it.label ?? it.event_type}
+                </div>
                 <div className="mt-1 flex items-center gap-2">
                   <ProbBar p={it.probability} className="w-28" />
                   <span className="text-xs tabular text-t2">
@@ -72,7 +77,7 @@ export default function Timeline() {
                   </span>
                   {it.null_probability != null && (
                     <span className="text-[11px] text-t4">
-                      Null {pct(it.null_probability)}
+                      基线 {pct(it.null_probability)}
                     </span>
                   )}
                 </div>
@@ -93,7 +98,7 @@ export default function Timeline() {
               </div>
 
               <div className="w-20 shrink-0 text-right text-xs tabular text-t3">
-                BS {it.brier.toFixed(3)}
+                误差 {it.brier.toFixed(3)}
               </div>
             </li>
           ))}

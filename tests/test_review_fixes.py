@@ -330,3 +330,20 @@ def test_definition_attack_scans_grading_rule():
     outcome = DefinitionAttack().run(ctx)
     assert outcome.verdict is Verdict.FAIL
     assert "小人" in outcome.reason
+
+
+def test_history_items_carry_label_and_description(env):
+    """时间线中文化：history 必须带中文 label 与冻结断言原文。"""
+    client, engine = env
+    _seed_user(engine)
+    client.post("/api/predictions/generate?user_id=1&scale=day&limit=15")
+    items = client.get("/api/predictions?user_id=1").json()["items"]
+    if not items:
+        pytest.skip("无预测")
+    pid = items[0]["prediction_id"]
+    client.post(f"/api/predictions/{pid}/verify", params={"quick_answer": "A"})
+    hist = client.get("/api/predictions/history?user_id=1").json()["items"]
+    assert hist
+    top = hist[0]
+    assert top.get("label") and top["label"] != top["event_type"], "label 应为本体中文名"
+    assert top.get("description"), "应带冻结断言原文"
