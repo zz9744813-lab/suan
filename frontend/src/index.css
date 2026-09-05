@@ -763,6 +763,24 @@ body {
   transform: translateY(0) scale(0.96);
 }
 
+/* 日卦/经文古籍块：文献蓝基调，悬停微亮（与 reading-tile 同一交互语言） */
+.canon-tile {
+  --tone: #4a7ebb;
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+@media (hover: hover) {
+  .canon-tile:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent),
+      0 10px 24px -12px var(--tone);
+  }
+}
+
 /* 页面大标题：鎏金流光掠过 */
 @keyframes text-flow {
   0%,
@@ -821,7 +839,8 @@ body {
   .card-lift,
   .row-hover,
   .reading-tile,
-  .liunian-chip {
+  .liunian-chip,
+  .canon-tile {
     transition: none;
   }
 }

@@ -26,6 +26,7 @@ from app.schemas.signal import (
 )
 
 from .engine import ENGINE_VERSION, cast_hexagram
+from app.core.zhouyi import cite as zhouyi_cite
 
 # 体用关系 → 传统吉凶（direction）
 RELATION_DIRECTION = {
@@ -102,6 +103,30 @@ class MeihuaAdapter(MetaphysicalAdapter):
 
         rule_id = f"MEIHUA-R-{relation}-{query.domain.value}"
 
+        # 周易经文参读（C-006：文献出处，非效力宣称；本卦卦辞 + 动爻爻辞）
+        canon_evidence: list[Evidence] = []
+        ben_name = chart.get("ben_gua", {}).get("name")
+        if ben_name:
+            canon_gua = zhouyi_cite(ben_name)
+            if canon_gua:
+                canon_evidence.append(
+                    Evidence(
+                        source=EvidenceSource.TRADITIONAL_RULE,
+                        rule_id=f"{rule_id}-CANON",
+                        description=f"经文参读：{canon_gua}",
+                    )
+                )
+            moving = chart.get("moving_yao")
+            canon_yao = zhouyi_cite(ben_name, moving) if isinstance(moving, int) else None
+            if canon_yao:
+                canon_evidence.append(
+                    Evidence(
+                        source=EvidenceSource.TRADITIONAL_RULE,
+                        rule_id=f"{rule_id}-CANON",
+                        description=f"经文参读（动爻）：{canon_yao}",
+                    )
+                )
+
         return [
             Signal(
                 **self._base_signal_kwargs(query),
@@ -126,6 +151,7 @@ class MeihuaAdapter(MetaphysicalAdapter):
                             f"对用卦{chart['yong_gua']}（{chart['yong_wuxing']}）：{relation}"
                         ),
                     ),
+                    *canon_evidence,
                 ],
                 counter_evidence=(
                     [

@@ -32,6 +32,7 @@ from app.schemas.signal import (
 )
 
 from .engine import ENGINE_VERSION, cast_chart
+from app.core.zhouyi import cite as zhouyi_cite
 
 # 用神映射：domain → 六亲（传统用神取用）
 DOMAIN_YONGSHEN: dict[Domain, str] = {
@@ -47,6 +48,11 @@ DOMAIN_YONGSHEN: dict[Domain, str] = {
     Domain.PURCHASE: "妻财",
     Domain.SCHEDULE: "官鬼",
     Domain.UNEXPECTED_EVENT: "官鬼",
+}
+
+# 爻位名 → 1-6 爻序（初爻=1 … 上爻=6），供经文爻辞取位
+_POSITION_INDEX: dict[str, int] = {
+    "初爻": 1, "二爻": 2, "三爻": 3, "四爻": 4, "五爻": 5, "上爻": 6,
 }
 
 
@@ -117,6 +123,18 @@ class LiuyaoAdapter(MetaphysicalAdapter):
                 ),
             )
         ]
+        # 周易经文参读（C-006：文献出处，非效力宣称；静卦读卦辞，动爻加读爻辞）
+        ben_name = chart.get("ben_gua", {}).get("name")
+        if ben_name:
+            canon_gua = zhouyi_cite(ben_name)
+            if canon_gua:
+                evidence.append(
+                    Evidence(
+                        source=EvidenceSource.TRADITIONAL_RULE,
+                        rule_id=f"{rule_id}-CANON",
+                        description=f"经文参读：{canon_gua}",
+                    )
+                )
         if moving:
             evidence.append(
                 Evidence(
@@ -125,6 +143,16 @@ class LiuyaoAdapter(MetaphysicalAdapter):
                     description=f"{yao['position']}动，变爻 {yao['changed_branch']}（动则事态有变）",
                 )
             )
+            yao_index = _POSITION_INDEX.get(yao["position"])
+            canon_yao = zhouyi_cite(ben_name, yao_index) if (ben_name and yao_index) else None
+            if canon_yao:
+                evidence.append(
+                    Evidence(
+                        source=EvidenceSource.TRADITIONAL_RULE,
+                        rule_id=f"{rule_id}-CANON",
+                        description=f"经文参读（用神动爻）：{canon_yao}",
+                    )
+                )
 
         return [
             Signal(

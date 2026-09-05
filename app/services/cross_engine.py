@@ -132,6 +132,37 @@ def daily_almanac(
         "day_zhi": day_zhi,
     }
 
+    # ---------- 日卦（周易经文参读，通用版/个人版均带） ----------
+    # 确定性日粒度时间起卦：上卦=(年支序+月+日)%8，下卦再加日支序，
+    # 动爻同源取模（复用梅花引擎，与预测盘同一套已验证卦名表）。
+    # 经文是文献参读，非效力宣称（C-006）。
+    try:
+        from datetime import datetime as _dt, time as _time
+
+        from app.core.meihua.engine import cast_hexagram as _cast_hexagram
+        from app.core.zhouyi import by_name as _gua_by_name, cite as _gua_cite
+
+        gua = _cast_hexagram(
+            _dt.combine(target_date, _time(12, 0)),
+            year_branch=lunar.getYearInGanZhi()[1],
+            hour_branch=day_zhi,
+        )
+        ben_name = gua["ben_gua"]["name"]
+        canon = _gua_by_name(ben_name) or {}
+        out["daily_gua"] = {
+            "name": ben_name,
+            "short": canon.get("short", ""),
+            "lines": list(gua["ben_gua"]["lines"]),  # 初→上，1 阳 0 阴（供前端画卦象）
+            "moving_yao": gua["moving_yao"],
+            "gua_ci": _gua_cite(ben_name),
+            "yao_ci": _gua_cite(ben_name, gua["moving_yao"]),
+            "xiang": canon.get("xiang", ""),
+        }
+    except Exception as exc:  # 经文缺失不阻断锦囊
+        import logging
+
+        logging.getLogger(__name__).warning("日卦生成失败：%s", exc)
+
     # ---------- 个人化层（需出生档案）----------
     profile = session.exec(
         select(BirthProfile).where(BirthProfile.user_id == user_id)
@@ -281,6 +312,41 @@ def rich_description(
     if scenarios:
         lines.append("常见情景：" + "；".join(scenarios) + "。")
 
+    # 全法盘点：同一时间点五术同参，✓/✗/○ 全量呈现（含未表态者）——
+    # 交叉印证不只看「支持了什么」，也要看「谁没说话/谁反对」（对抗性要求）。
+    # 掌纹/面相属影像术式（需拍照），有信号时一并入盘点，无则注明未参校。
+    label_of = SOURCE_LABEL
+    _engine_labels = ["八字", "紫微", "六爻", "梅花", "奇门"]
+    _image_labels = ["掌纹", "面相"]
+
+    def _mark(sigs: list[Signal]) -> str:
+        live = [s for s in sigs if not s.degraded]
+        up = any(s.direction > 0 for s in live)
+        down = any(s.direction < 0 for s in live)
+        if up and down:
+            return "✓/✗ 分歧"
+        if up:
+            return "✓ 同向"
+        if down:
+            return "✗ 反向"
+        return "○ 未表态"
+
+    tally: list[str] = []
+    for lbl in _engine_labels:
+        tally.append(f"{lbl}{_mark([s for s in signals if label_of.get(s.source) == lbl])}")
+    has_image_signal = False
+    for lbl in _image_labels:
+        img_sigs = [s for s in signals if label_of.get(s.source) == lbl]
+        if img_sigs:
+            has_image_signal = True
+            tally.append(f"{lbl}{_mark(img_sigs)}")
+    lines.append(
+        "全法盘点（同一时间点·五术同参）："
+        + " ".join(tally)
+        + ("" if has_image_signal else "（掌纹/面相需拍照参校，未计入）")
+        + "。"
+    )
+
     # 多法印证（真实证据来源分层展示）
     basis: list[str] = []
     for src, evs in cross.supporting.items():
@@ -300,6 +366,21 @@ def rich_description(
         lines.append(head + " / ".join(basis))
     else:
         lines.append("多法印证：本轮各术式无明显同向信号，按基线概率留样验证。")
+
+    # 经文献录：本轮信号附带的周易经文出处（文献参读，非效力宣称，C-006）
+    canon_seen: list[str] = []
+    for sig in signals:
+        for ev in sig.evidence or []:
+            d = getattr(ev, "description", "") or ""
+            if "《周易·" in d:
+                frag = d.split("：", 1)[1].strip() if "：" in d else d.strip()
+                if frag and frag not in canon_seen:
+                    canon_seen.append(frag)
+    if canon_seen:
+        show = canon_seen[:2]
+        tail = f"（共 {len(canon_seen)} 条，其余见信号证据）" if len(canon_seen) > 2 else ""
+        body = ("；".join(show) + tail).rstrip("。")
+        lines.append("经文献录（文献参读，非效力宣称）：" + body + "。")
 
     # 姻缘事件且当日情缘星引动 → 显式点出（用户高频关心的「缘分何时」）
     if almanac and event_type.startswith("relationship."):

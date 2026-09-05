@@ -53,10 +53,48 @@ const SOURCE_ZH: Record<string, string> = {
   null: '基线',
 };
 
+/* ---------- 经文小标签（卦辞/动爻/大象） ---------- */
+function CanonTag({ label }: { label: string }) {
+  return (
+    <span className="mr-2 inline-block rounded border border-gilt-500/30 bg-gilt-500/10 px-1.5 py-px align-middle text-[10px] font-sans text-gt">
+      {label}
+    </span>
+  );
+}
+
 function localDayKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate(),
   ).padStart(2, '0')}`;
+}
+
+/* ---------- 日卦卦象：六爻自上而下（上爻最上）；阳爻整条，阴爻两段，动爻鎏金 ---------- */
+function HexGlyph({ lines, moving }: { lines: number[]; moving?: number }) {
+  const rows = lines.map((v, i) => ({ v, pos: i + 1 })).reverse();
+  const bar = (isMoving: boolean) => ({
+    background: isMoving ? '#d9b96a' : 'var(--t2)',
+    boxShadow: isMoving ? '0 0 8px rgba(201,162,39,0.55)' : 'none',
+  });
+  return (
+    <div className="flex w-24 shrink-0 flex-col gap-[7px]" aria-label="本日卦象">
+      {rows.map(({ v, pos }) => (
+        <div
+          key={pos}
+          className="relative flex h-2.5 items-center"
+          title={`第${pos}爻${pos === moving ? '（动爻）' : ''}`}
+        >
+          {v === 1 ? (
+            <div className="h-[3px] w-full rounded-full" style={bar(pos === moving)} />
+          ) : (
+            <div className="flex w-full justify-between">
+              <div className="h-[3px] w-[44%] rounded-full" style={bar(pos === moving)} />
+              <div className="h-[3px] w-[44%] rounded-full" style={bar(pos === moving)} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function groupByDueDay<
@@ -551,6 +589,48 @@ export default function Future() {
                 cai={daily.data.cai_dir}
                 fu={daily.data.fu_dir}
               />
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* 日卦 · 周易经文参读：与今日锦囊同源确定性派生，秒出 */}
+      {daily.data?.daily_gua && (
+        <Card
+          className="frame-flow canon-tile"
+          title={`日卦 · ${daily.data.daily_gua.name}`}
+          subtitle="周易经文参读 · 日粒度确定性起卦 · 文献参考，非效力宣称"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div className="flex items-center gap-3 sm:flex-col sm:gap-2">
+              <HexGlyph
+                lines={daily.data.daily_gua.lines}
+                moving={daily.data.daily_gua.moving_yao}
+              />
+              <span className="font-serif text-2xl font-semibold text-gt">
+                {daily.data.daily_gua.short}
+              </span>
+              <Badge tone="gilt">动爻·第{daily.data.daily_gua.moving_yao}爻</Badge>
+            </div>
+            <div className="min-w-0 flex-1 space-y-2 text-sm leading-relaxed text-t2">
+              {daily.data.daily_gua.gua_ci && (
+                <p className="font-serif">
+                  <CanonTag label="卦辞" />
+                  {daily.data.daily_gua.gua_ci}
+                </p>
+              )}
+              {daily.data.daily_gua.yao_ci && (
+                <p className="font-serif">
+                  <CanonTag label="动爻" />
+                  {daily.data.daily_gua.yao_ci}
+                </p>
+              )}
+              {daily.data.daily_gua.xiang && (
+                <p className="font-serif text-t3">
+                  <CanonTag label="大象" />
+                  {daily.data.daily_gua.xiang}
+                </p>
+              )}
             </div>
           </div>
         </Card>

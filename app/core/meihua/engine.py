@@ -25,7 +25,7 @@ from typing import Any
 
 from app.core.calendar.core import CalendarCore
 
-ENGINE_VERSION = "meihua-0.1.0"
+ENGINE_VERSION = "meihua-0.2.0"
 
 TIANGAN = list("甲乙丙丁戊己庚辛壬癸")
 ZHI_ORDER = list("子丑寅卯辰巳午未申酉戌亥")
@@ -46,36 +46,22 @@ GUA_WUXING = {"乾": "金", "兑": "金", "离": "火", "震": "木", "巽": "�
 WUXING_SHENG = {"木": "火", "火": "土", "土": "金", "金": "水", "水": "木"}
 WUXING_KE = {"木": "土", "土": "水", "水": "火", "火": "金", "金": "木"}
 
-# 64 卦名（上下卦组合 → 卦名）
-GUA_NAMES: dict[tuple[str, str], str] = {
-    ("乾", "乾"): "乾为天", ("坤", "坤"): "坤为地", ("震", "震"): "震为雷",
-    ("巽", "巽"): "巽为风", ("坎", "坎"): "坎为水", ("离", "离"): "离为火",
-    ("艮", "艮"): "艮为山", ("兑", "兑"): "兑为泽",
-    # 下卦, 上卦
-    ("震", "坤"): "地雷复", ("兑", "坤"): "地泽临", ("乾", "坤"): "地天泰",
-    ("乾", "震"): "雷天大壮", ("乾", "兑"): "泽天夬", ("坎", "乾"): "水天需",
-    ("坤", "坎"): "水地比", ("巽", "乾"): "天风姤", ("艮", "乾"): "天山遁",
-    ("坤", "乾"): "天地否", ("坤", "巽"): "风地观", ("艮", "坤"): "山地剥",
-    ("离", "坤"): "火地晋", ("离", "乾"): "火天大有", ("震", "坤"): "地雷复",
-    ("兑", "震"): "雷泽归妹", ("艮", "兑"): "泽山咸", ("坎", "兑"): "泽水困",
-    ("坤", "兑"): "泽地萃", ("艮", "坎"): "水山蹇", ("艮", "坤"): "山地剥",
-    ("艮", "震"): "雷山小过", ("巽", "艮"): "风山渐", ("兑", "艮"): "山泽损",
-    ("巽", "坎"): "水风井", ("离", "震"): "雷火丰", ("离", "坎"): "水火既济",
-    ("坎", "离"): "火水未济", ("巽", "离"): "火风鼎", ("艮", "离"): "火山旅",
-    ("兑", "离"): "火泽睽", ("兑", "巽"): "泽风大过", ("坎", "震"): "雷水解",
-    ("坎", "巽"): "风水涣", ("离", "巽"): "风火家人", ("离", "艮"): "山火贲",
-    ("兑", "坎"): "水泽节", ("震", "坎"): "水雷屯", ("震", "离"): "火雷噬嗑",
-    ("巽", "震"): "雷风恒", ("坤", "震"): "雷地豫", ("坎", "坤"): "地水师",
-    ("艮", "巽"): "山风蛊", ("乾", "巽"): "风天小畜", ("乾", "离"): "天火同人",
-    ("乾", "艮"): "山天大畜", ("乾", "兑"): "泽天夬", ("兑", "乾"): "天泽履",
-    ("离", "兑"): "泽火革", ("震", "兑"): "泽雷随", ("坤", "巽"): "风地观",
-    ("巽", "坤"): "地风升", ("震", "艮"): "山雷颐", ("艮", "巽"): "山风蛊",
-    ("坎", "艮"): "山水蒙", ("兑", "艮"): "山泽损", ("巽", "兑"): "泽风大过",
-    ("离", "坤"): "火地晋", ("艮", "震"): "雷山小过", ("坎", "震"): "雷水解",
-    ("震", "巽"): "雷风恒", ("巽", "坎"): "水风井", ("震", "坎"): "水雷屯",
-    ("兑", "巽"): "泽风大过", ("艮", "巽"): "山风蛊", ("坎", "巽"): "风水涣",
-    ("离", "巽"): "风火家人", ("坤", "兑"): "泽地萃", ("艮", "兑"): "泽山咸",
-}
+# 64 卦名表：(下卦, 上卦) → 卦名。
+# 不再手写 —— 由六爻 HEXAGRAMS（pattern→name 权威表，经逐卦对抗校验）
+# 程序化生成。手写表曾被对抗性审计出 9 条上下卦颠倒（如 (离,乾)
+# 误作「火天大有」，实为「天火同人」）且仅覆盖 60 卦，故单一事实源化。
+def _build_gua_names() -> dict[tuple[str, str], str]:
+    from app.core.liuyao.engine import HEXAGRAMS
+
+    _bits2gua = {tuple(v): k for k, v in GUA_BITS.items()}
+    table: dict[tuple[str, str], str] = {}
+    for pat, e in HEXAGRAMS.items():
+        bits = [int(x) for x in pat.split(",")]
+        table[(_bits2gua[tuple(bits[:3])], _bits2gua[tuple(bits[3:])])] = e["name"]
+    return table
+
+
+GUA_NAMES: dict[tuple[str, str], str] = _build_gua_names()
 
 
 def cast_hexagram(
@@ -139,6 +125,10 @@ def cast_hexagram(
 
     ben_name = GUA_NAMES.get((lower, upper), f"{lower}{upper}")
 
+    # 变卦的上下卦按变卦爻位重新取（曾误用本卦的 upper/lower）
+    bian_lower = _bits_to_gua(bian_lines[:3])
+    bian_upper = _bits_to_gua(bian_lines[3:])
+
     return {
         "engine": ENGINE_VERSION,
         "cast_time": dt.isoformat(),
@@ -146,9 +136,9 @@ def cast_hexagram(
         "hu_gua": {"upper": hu_upper, "lower": hu_lower,
                    "name": GUA_NAMES.get((hu_lower, hu_upper), f"{hu_lower}{hu_upper}"),
                    "lines": hu_lines},
-        "bian_gua": {"upper": upper, "lower": lower,
-                     "name": GUA_NAMES.get((_bits_to_gua(bian_lines[:3]), _bits_to_gua(bian_lines[3:])),
-                                           f"{_bits_to_gua(bian_lines[:3])}{_bits_to_gua(bian_lines[3:])}"),
+        "bian_gua": {"upper": bian_upper, "lower": bian_lower,
+                     "name": GUA_NAMES.get((bian_lower, bian_upper),
+                                           f"{bian_lower}{bian_upper}"),
                      "lines": bian_lines},
         "moving_yao": moving,
         "ti_gua": ti_gua, "yong_gua": yong_gua,

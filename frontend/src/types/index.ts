@@ -86,6 +86,17 @@ export interface DailyAlmanac {
   };
   peach_activated?: string[];
   clash_birth_day?: boolean;
+  /** 日卦·周易经文参读（确定性日粒度起卦；文献参考，非效力宣称） */
+  daily_gua?: {
+    name: string;
+    short: string;
+    /** 六爻阴阳（初→上，1 阳 0 阴），供绘制卦象 */
+    lines: number[];
+    moving_yao: number;
+    gua_ci: string | null;
+    yao_ci: string | null;
+    xiang: string;
+  };
 }
 
 /** 方案第 49 节：预测详情必须完全可解释 */
