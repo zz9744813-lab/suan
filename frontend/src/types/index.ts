@@ -145,6 +145,8 @@ export interface PredictionDetail extends PredictionBrief {
     confidence: number;
     needs_confirmation: boolean;
     disagreement: number;
+    /** 判定依据原文（机械判定带实测值；补确认带轨迹留痕，round 28 起返回） */
+    evidence?: string;
   } | null;
 }
 

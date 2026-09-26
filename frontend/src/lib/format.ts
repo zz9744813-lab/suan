@@ -106,6 +106,7 @@ export const DOMAIN_LABEL: Record<string, string> = {
   communication: '沟通',
   schedule: '日程',
   unexpected_event: '意外',
+  weather: '天气',
 };
 
 export const SCALE_LABEL: Record<string, string> = {

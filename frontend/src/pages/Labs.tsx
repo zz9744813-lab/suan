@@ -74,8 +74,10 @@ function CalibrationChart({
       },
       {
         type: 'scatter',
-        data: bins.map((b) => [b.predicted, b.actual]),
-        symbolSize: (d: number[]) => 10 + Math.sqrt(d[2] ?? 1) * 2,
+        // 气泡大小带样本数 n（round 28 修复：此前取 d[2] 但数据只有二维，恒 undefined）
+        data: bins.map((b) => ({ value: [b.predicted, b.actual], n: b.n })),
+        symbolSize: (d: { value: number[]; n: number }) =>
+          8 + Math.sqrt(d.n ?? 1) * 2.2,
         itemStyle: { color: '#22c55e' },
       },
     ],
@@ -88,10 +90,12 @@ function GateTester() {
   const [desc, setDesc] = useState('最近可能有些变化，需要注意人际关系。');
   const [criteria, setCriteria] = useState('可能发生变化');
   const [res, setRes] = useState<import('../types').GateTestResponse | null>(null);
+  const [runErr, setRunErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const run = async () => {
     setBusy(true);
+    setRunErr(null);
     try {
       const r = await api.gateTest({
         description: desc,
@@ -102,6 +106,10 @@ function GateTester() {
         failure_criteria: [],
       });
       setRes(r);
+    } catch (e) {
+      // round 28：此前失败是 unhandled rejection，界面毫无反馈
+      setRes(null);
+      setRunErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -133,6 +141,12 @@ function GateTester() {
           {busy ? '检测中…' : '跑一遍 Gate'}
         </button>
       </div>
+
+      {runErr && (
+        <div className="mt-3 rounded-xl border border-cinnabar-500/40 bg-cinnabar-500/[0.07] px-3.5 py-2.5 text-xs text-cinnabar-400">
+          Gate 测试请求失败：{runErr}
+        </div>
+      )}
 
       {res && (
         <div className="mt-3">

@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     SCHEDULER_AGENT_REVIEW: str = "23:50"
     SCHEDULER_FREEZE: str = "23:55"
 
+    # ---------- 天气校准健身房（round 28）----------
+    # Open-Meteo 阴性对照域：默认南宁。API 免费、无 key（github.com/open-meteo）
+    XUANMIRROR_WEATHER_LAT: float = 22.82
+    XUANMIRROR_WEATHER_LON: float = 108.32
+    XUANMIRROR_WEATHER_CITY: str = "南宁"
+
     # ---------- Prediction Budget（第 4 节）----------
     # 强制下注制度：禁止撒网式算准。
     BUDGET_TOMORROW_STRONG: int = 5

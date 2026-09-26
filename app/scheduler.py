@@ -95,6 +95,32 @@ def job_verify_reminder(engine: object) -> None:
         logger.info("验证提醒：%d 条今天到期的预测进入 VERIFY_REQUIRED", len(rows))
 
 
+def job_weather_seed(engine: object) -> None:
+    """round 28：冻结明日天气候选（校准健身房，零 LLM、零人工裁量）。"""
+    from datetime import date as _date
+
+    from app.services.weather_gym import seed_weather
+
+    target = _date.today() + timedelta(days=1)
+    with Session(engine) as session:  # type: ignore[arg-type]
+        for uid in _user_ids(session):
+            result = seed_weather(session, uid, target)
+            logger.info("天气种子：user=%s target=%s -> %s", uid, target, result.get("status"))
+
+
+def job_weather_verify(engine: object) -> None:
+    """round 28：到期天气预测机械验证（实测值对阈值，无人工裁量）。"""
+    from app.services.weather_gym import verify_due_weather
+
+    with Session(engine) as session:  # type: ignore[arg-type]
+        for uid in _user_ids(session):
+            result = verify_due_weather(session, uid)
+            logger.info(
+                "天气机械验证：user=%s scored=%d skipped=%d",
+                uid, len(result.get("scored", [])), len(result.get("skipped", [])),
+            )
+
+
 # ======================================================================
 # Scheduler 构建
 # ======================================================================
@@ -116,8 +142,16 @@ def build_scheduler(engine: object, settings: Settings | None = None) -> Backgro
     scheduler = BackgroundScheduler(timezone=settings.XUANMIRROR_TIMEZONE)
 
     scheduler.add_job(
+        job_weather_verify, "cron", args=[engine],
+        **{"hour": 8, "minute": 5}, id="weather_verify",
+    )
+    scheduler.add_job(
         job_update_reality, "cron", args=[engine],
         **{"hour": 23, "minute": 30}, id="reality_update",
+    )
+    scheduler.add_job(
+        job_weather_seed, "cron", args=[engine],
+        **{"hour": 23, "minute": 35}, id="weather_seed",
     )
     scheduler.add_job(
         job_daily_pipeline, "cron", args=[engine],

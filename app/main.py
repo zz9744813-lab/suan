@@ -85,7 +85,7 @@ def _meta_payload() -> dict:
         "name": "玄鉴 XuanMirror",
         "version": "0.1.0",
         "principle": "Prediction → Freeze → Reality → Verify → Score → Diagnose → Learn",
-        "status": "skeleton",
+        "status": "v1.0",
         "notice": (
             "这是一个传统术数与个人预测实验平台，不是经科学验证的预知系统。"
             "不得以术数替代医疗、法律、财务专业判断（第 65 节）。"
@@ -152,12 +152,14 @@ from app.api.routes import (  # noqa: E402
     imaging,
     predictions,
     system,
+    weather,
 )
 
 app.include_router(predictions.router, prefix="/api", tags=["predictions"])
 app.include_router(analytics.router, prefix="/api", tags=["analytics"])
 app.include_router(system.router, prefix="/api", tags=["system"])
 app.include_router(imaging.router, prefix="/api", tags=["imaging"])
+app.include_router(weather.router, prefix="/api", tags=["weather"])
 
 
 # ----------------------------------------------------------------------

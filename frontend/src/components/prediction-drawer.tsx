@@ -98,12 +98,22 @@ export function PredictionDrawer({ pid, onClose }: { pid: string | null; onClose
 
   useEffect(() => {
     if (!pid) return;
+    // round 28：alive 守卫——快速连点两条预测时，旧响应不得覆盖新详情
+    // （与 lib/useAsync 的竞态纪律一致；此前裸 .then(setDetail) 有错序窗口）
+    let alive = true;
     setDetail(null);
     setErr(null);
     api
       .prediction(pid)
-      .then(setDetail)
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+      .then((d) => {
+        if (alive) setDetail(d);
+      })
+      .catch((e) => {
+        if (alive) setErr(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
   }, [pid]);
 
   useEffect(() => {

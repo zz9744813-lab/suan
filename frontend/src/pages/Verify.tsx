@@ -42,6 +42,8 @@ type DueItem = {
 };
 
 type Verdict = {
+  /** 预测 ID（round 28：直接随裁定携带，替代按毫秒时间戳反查 key 的碰撞隐患） */
+  pid: string;
   quick: string;
   label: string;
   /** D=无法判定时不落结果，为 null */
@@ -52,6 +54,8 @@ type Verdict = {
   needsConfirmation: boolean;
   at: number;
   reply?: string;
+  /** 批复时的描述快照：reload 后原项已移出待批列表，靠它兜底展示（round 28 修复） */
+  desc: string;
 };
 
 const VERDICTS = [
@@ -115,6 +119,7 @@ export default function Verify() {
       setDone((s) => ({
         ...s,
         [pid]: {
+          pid,
           quick,
           label,
           outcome: r.outcome,
@@ -124,7 +129,7 @@ export default function Verify() {
           at: Date.now(),
           reply: reply.trim() || undefined,
           desc: pending.find((p) => p.prediction_id === pid)?.description ?? '',
-        } as Verdict,
+        },
       }));
       setReply('');
       due.reload();
@@ -276,7 +281,7 @@ export default function Verify() {
         <Card title="本轮已批复" subtitle="最新在前" className="opacity-90">
           <ul className="space-y-2">
             {doneList.map((d, i) => {
-              const pid = Object.keys(done).find((k) => done[k].at === d.at);
+              const pid = d.pid;
               const orig = items.find((it) => it.prediction_id === pid);
               const v = VERDICTS.find((v) => v.key === d.quick);
               return (
@@ -294,7 +299,10 @@ export default function Verify() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm text-t1">
-                      {orig ? cleanDescription(orig.description, orig.event_type) : ''}
+                      {/* reload 后原项不在待批列表：回落到批复时的描述快照（round 28） */}
+                      {orig
+                        ? cleanDescription(orig.description, orig.event_type)
+                        : cleanDescription(d.desc)}
                     </div>
                     <div className="mt-0.5 text-[11px] text-t4">
                       {d.label} ·{' '}

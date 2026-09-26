@@ -193,7 +193,7 @@ function BackendStatus() {
   const engineOk = health.data
     ? Object.values(health.data.engines).filter((e) => e.available).length
     : 0;
-  const engineTotal = health.data ? Object.keys(health.data.engines).length : 7;
+  const engineTotal = health.data ? Object.keys(health.data.engines).length : 8;
 
   return (
     <div className="border-t border-line px-2 py-3 md:px-4">

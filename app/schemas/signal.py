@@ -58,6 +58,9 @@ class Domain(str, Enum):
     COMMUNICATION = "communication"
     SCHEDULE = "schedule"
     UNEXPECTED_EVENT = "unexpected_event"
+    # 校准健身房（round 28）：真值由 Open-Meteo 给出的阴性对照域，
+    # 与个人域分车道统计，见 app/services/weather_gym.py
+    WEATHER = "weather"
 
 
 # --------------------------------------------------------------------------

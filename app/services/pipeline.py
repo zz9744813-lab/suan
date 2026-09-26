@@ -849,11 +849,13 @@ class DailyPipeline:
         cand: PredictionCandidate,
         fusion: Any = None,
         status: str | None = None,
+        provenance: str = "live",
     ) -> Prediction | None:
         """第 16 节：预注册 + 冻结 + 落库。
 
         status=None → 正常冻结（FROZEN）；status="RESEARCH" → 冷启动研究样本。
         研究样本保持 VISIBLE（用户需看到并验证），仅用 status 标记，不计入正式预测。
+        provenance：样本溯源标（live/backfill，round 28），不参与冻结哈希。
         """
         visibility = "HIDDEN" if self.settings.EXPERIMENT_MODE == "hidden" else "VISIBLE"
 
@@ -928,6 +930,7 @@ class DailyPipeline:
             engine_version=pred.engine_version,
             candidate_id=pred.candidate_id,
             version=pred.version,
+            provenance=provenance,
         )
         self.session.add(record)
 

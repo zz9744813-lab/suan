@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.api.deps import enforce_same_origin
+
 logger = logging.getLogger("xuanmirror.api.predictions")
 
 from app.agents.verification_agents import OutcomeCollectorAgent, OutcomeJudgeAgent
@@ -28,7 +30,7 @@ from app.database import get_session
 from app.models.prediction import PredictionFreeze, PredictionRecord, SignalRecord
 from app.models.scoring import OutcomeRecord, OutcomeRequestRecord, PredictionScore
 from app.schemas.prediction import Prediction, PredictionStatus
-from app.schemas.signal import Evidence, TimeScale
+from app.schemas.signal import Domain, Evidence, TimeScale
 from app.services.pipeline import DailyPipeline
 
 router = APIRouter()
@@ -44,6 +46,7 @@ def generate_predictions(
     limit: int = Query(20, ge=1, le=100),
     target_date: date | None = None,
     session: Session = Depends(get_session),
+    _: None = Depends(enforce_same_origin),
 ):
     """跑一次完整预测闭环：扫描 → 盲审 → 融合 → Gate → 预算 → 冻结。"""
     pipeline = DailyPipeline(session, user_id=user_id)
@@ -144,6 +147,9 @@ def due_predictions(
             PredictionStatus.VERIFY_REQUIRED.value,
             PredictionStatus.WAITING_USER.value,
         ]))
+        # 天气域（round 28）不走人工收件箱：次日 08:05 机械验证。
+        # 人工先判会以主观记忆覆盖客观实测，污染阴性对照车道。
+        .where(PredictionRecord.domain != Domain.WEATHER.value)
         .where(PredictionRecord.verification_due_at <= now)  # type: ignore[union-attr]
     ).all()
     return {
@@ -327,6 +333,7 @@ def get_prediction(
                 "confidence": outcome.confidence,
                 "needs_confirmation": outcome.needs_confirmation,
                 "disagreement": outcome.disagreement,
+                "evidence": outcome.evidence,
             }
             if outcome
             else None
@@ -408,6 +415,7 @@ def verify_prediction(
     user_reply: str | None = None,
     quick_answer: str | None = Query(None, pattern="^[ABCD]$"),
     session: Session = Depends(get_session),
+    _: None = Depends(enforce_same_origin),
 ):
     """用户自然语言回复 → OutcomeCollector → 三方 Judge → 结构化结果。
 
@@ -424,11 +432,14 @@ def verify_prediction(
     if row is None:
         raise HTTPException(404, f"未找到预测：{prediction_id}")
 
-    # ---------- 0. C-003：已批复的预测不可事后改口 ----------
+    # ---------- 0. C-003：已批复归档（已计分）的预测不可事后改口 ----------
+    # needs_confirmation=True = 此前三方 Judge 分歧转人工待确认：允许补确认。
+    # 旧行原地更新但原判定永不抹掉（轨迹进 evidence + request 留痕，round 28
+    # 死锁修复：此前该状态撞 409，预测永久卡在 WAITING_USER 无法评分）。
     existing_outcome = session.exec(
         select(OutcomeRecord).where(OutcomeRecord.prediction_id == prediction_id)
     ).first()
-    if existing_outcome is not None:
+    if existing_outcome is not None and not existing_outcome.needs_confirmation:
         raise HTTPException(409, "该预测已批复归档，不可改口（C-003）。")
 
     from app.agents.base import AgentContext
@@ -534,6 +545,14 @@ def verify_prediction(
 
     # ---------- 3. 落库 ----------
     # 注：歧义已在上方提前 return（当前 collector 单候选恒不歧义），此处不再传 ambiguous 死值。
+    # 补确认留痕：待确认记录被新裁定替换时，原判定进 evidence 轨迹（不抹掉，round 28）
+    if existing_outcome is not None:
+        trail = (
+            f"[补确认留痕] 此前三方 Judge 判定需人工确认"
+            f"（分歧 {existing_outcome.disagreement:.2f}，原判定 {existing_outcome.outcome}）；"
+        )
+        outcome = outcome.model_copy(update={"evidence": trail + (outcome.evidence or "")})
+
     req = _record_request(
         session,
         prediction_id,
@@ -542,17 +561,27 @@ def verify_prediction(
         answered=True,
     )
 
-    rec = OutcomeRecord(
-        outcome_id=outcome.outcome_id,
-        prediction_id=prediction_id,
-        request_id=req.request_id,
-        outcome=outcome.outcome,
-        confidence=outcome.confidence,
-        evidence=outcome.evidence,
-        needs_confirmation=outcome.needs_confirmation,
-        disagreement=outcome.disagreement,
-        judged_at=outcome.judged_at,
-    )
+    if existing_outcome is not None:
+        # 原行原地替换（outcome_id 不变），避免同预测出现双 Outcome 行
+        existing_outcome.outcome = outcome.outcome
+        existing_outcome.confidence = outcome.confidence
+        existing_outcome.evidence = outcome.evidence
+        existing_outcome.needs_confirmation = outcome.needs_confirmation
+        existing_outcome.disagreement = outcome.disagreement
+        existing_outcome.judged_at = outcome.judged_at
+        rec = existing_outcome
+    else:
+        rec = OutcomeRecord(
+            outcome_id=outcome.outcome_id,
+            prediction_id=prediction_id,
+            request_id=req.request_id,
+            outcome=outcome.outcome,
+            confidence=outcome.confidence,
+            evidence=outcome.evidence,
+            needs_confirmation=outcome.needs_confirmation,
+            disagreement=outcome.disagreement,
+            judged_at=outcome.judged_at,
+        )
     session.add(rec)
 
     row.status = (

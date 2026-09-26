@@ -87,7 +87,7 @@ const DOMAIN_LABEL: Record<string, string> = {
   career: '职业', money: '财务', study: '学习', social: '社交',
   relationship: '关系', travel: '出行', project: '项目', habit: '习惯',
   purchase: '消费', communication: '沟通', schedule: '日程',
-  unexpected_event: '意外',
+  unexpected_event: '意外', weather: '天气',
 };
 
 const SCALE_LABEL: Record<string, string> = {

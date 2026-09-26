@@ -42,7 +42,24 @@ def create_db_and_tables(engine_obj=None) -> None:
     """建表。导入 models 包以确保所有表都注册到元数据。"""
     import app.models  # noqa: F401  触发全部表注册
 
-    (engine_obj or engine) and SQLModel.metadata.create_all(engine_obj or engine)
+    target = engine_obj or engine
+    SQLModel.metadata.create_all(target)
+    _migrate_sqlite(target)
+
+
+def _migrate_sqlite(engine_obj) -> None:
+    """create_all 不做列级迁移；轻量幂等补列（round 28 provenance 起）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine_obj)
+    if "predictions" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("predictions")}
+    with engine_obj.begin() as conn:
+        if "provenance" not in cols:
+            conn.execute(
+                text("ALTER TABLE predictions ADD COLUMN provenance VARCHAR NOT NULL DEFAULT 'live'")
+            )
 
 
 def get_session() -> Generator[Session, None, None]:

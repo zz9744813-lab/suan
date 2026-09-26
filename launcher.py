@@ -44,6 +44,10 @@ def main() -> None:
     os.chdir(base)
     os.makedirs(os.path.join(base, "data"), exist_ok=True)
 
+    # round 28：打包版默认开调度器（每日天气种子/机械验证/个人预测闭环），
+    # 开发机仍由 .env 的 SCHEDULER_ENABLED 控制
+    os.environ.setdefault("XUANMIRROR_SCHEDULER_ENABLED", "true")
+
     # 若同目录没有 .env，则用一个最小示例（提示用户填 API key）
     env_path = os.path.join(base, ".env")
     if not os.path.exists(env_path):

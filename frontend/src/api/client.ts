@@ -191,7 +191,8 @@ export const api = {
     const qs = params.toString();
     return post<{
       prediction_id: string;
-      outcome: number;
+      /** D=无法判定时后端返回 null（round 28 类型契约修复） */
+      outcome: number | null;
       confidence: number;
       needs_confirmation: boolean;
       disagreement: number;

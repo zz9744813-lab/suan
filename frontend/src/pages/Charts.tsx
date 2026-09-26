@@ -78,12 +78,24 @@ const READING_META: { key: string; label: string; icon: string; tone: string }[]
   { key: '未来10年', label: '未来 10 年', icon: '10', tone: TONE.celadon },
 ];
 
-/** 命理批示区块（大运时间轴 + 流年 + 批示卡片） */
-function FortuneSection({ data }: { data: FortuneReading }) {  const chart = data.chart;
-  if (!chart) {
+/** 命理批示区块（大运时间轴 + 流年 + 批示卡片）。
+ * round 28：早退守卫上移到此，主体组件的 hooks 无条件执行——
+ * 此前 useState 在 `if (!chart) return` 之后违反 Rules of Hooks，
+ * 靠父组件强制重挂载侥幸不炸，一次 props 原位变化就会白屏。 */
+function FortuneSection({ data }: { data: FortuneReading }) {
+  if (!data.chart) {
     return <ErrorBox message={data.error ?? '命盘排盘失败'} />;
   }
+  return <FortuneSectionBody data={data} chart={data.chart} />;
+}
 
+function FortuneSectionBody({
+  data,
+  chart,
+}: {
+  data: FortuneReading;
+  chart: NonNullable<FortuneReading['chart']>;
+}) {
   const bazi = chart.bazi ?? {};
   const PILLAR_KEYS = ['year', 'month', 'day', 'time'] as const;
   const pillarLabel: Record<(typeof PILLAR_KEYS)[number], string> = {
@@ -105,10 +117,15 @@ function FortuneSection({ data }: { data: FortuneReading }) {  const chart = dat
   const elementTotal = Object.values(elementCount).reduce((a, b) => a + b, 0);
 
   const dayun = chart.dayun ?? [];
-  // 当前精确周岁（后端已算好，前端直接用）；为 null 时回退到年份差近似
+  // 当前精确周岁（后端已算好，前端直接用）；缺失时用流年首条反推出生年再算年龄。
+  // round 28 修复：旧式 `nowYear - age` 得到的是出生年却被当岁数用，回退高亮全错
   const currentAgeExact = chart.current_age_exact;
   const nowYear = new Date().getFullYear();
-  const fallbackAge = nowYear - (chart.liunian?.[0]?.age ?? 0);
+  const firstLiunian = chart.liunian?.[0];
+  const fallbackAge =
+    firstLiunian && firstLiunian.age != null
+      ? nowYear - (firstLiunian.year - firstLiunian.age)
+      : undefined;
   const effectiveAge = currentAgeExact ?? fallbackAge;
   const dayMaster: string = chart.day_master ?? '';
   // 选中的大运（点击运柱联动流年高亮）

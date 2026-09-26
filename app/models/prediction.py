@@ -129,6 +129,10 @@ class PredictionRecord(SQLModel, table=True):
     status: str = Field(default="FROZEN", index=True)
     visibility_mode: str = Field(default="VISIBLE", description="第 35 节 Hidden Prediction Mode")
 
+    # round 28：样本溯源标。live=实时冻结 | backfill=历史回填（只作校准种子，
+    # 不得混入 live 技能统计）。既有库由 database.py 轻量迁移补列
+    provenance: str = Field(default="live")
+
     created_at: datetime = Field(default_factory=utcnow)
     frozen_at: Optional[datetime] = None
     verification_due_at: Optional[datetime] = Field(default=None, index=True)

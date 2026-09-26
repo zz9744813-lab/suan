@@ -17,9 +17,11 @@ from datetime import date, datetime, timedelta
 from app.utils import utcnow
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+
+from app.api.deps import enforce_same_origin
 
 from app.calibration.scoring import (
     Aggregate,
@@ -275,11 +277,21 @@ def export_obsidian(
     user_id: int = Query(...),
     base_dir: str = Query("./data/obsidian", description="导出目录"),
     session: Session = Depends(get_session),
+    _: None = Depends(enforce_same_origin),
 ):
     """数据库 → Obsidian 目录结构（数据库是权威源，Obsidian 是展示层）。"""
+    from pathlib import Path
+
     from app.services.exports import export_obsidian_vault
 
-    return export_obsidian_vault(session, user_id=user_id, base_dir=base_dir)
+    # round 28 安全修复：base_dir 曾为任意路径写（无鉴权服务 + 恶意网页
+    # drive-by 可在磁盘任意位置落文件），现强制锁定在 data/ 之下
+    resolved = Path(base_dir).expanduser().resolve()
+    allowed_root = (Path.cwd() / "data").resolve()
+    if resolved != allowed_root and allowed_root not in resolved.parents:
+        raise HTTPException(403, "导出目录必须位于 data/ 之下（任意路径写入防护）。")
+
+    return export_obsidian_vault(session, user_id=user_id, base_dir=str(resolved))
 
 
 @router.get("/export/daily")
